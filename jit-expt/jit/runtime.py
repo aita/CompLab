@@ -48,6 +48,8 @@ class Runtime:
         self._libc = ctypes.CDLL(None, use_errno=True)
         self._symbols: dict[str, int] = {}  # name -> address
         self._veneers: dict[int, int] = {}  # far target -> veneer address
+        # Items reserved by stage() but not yet relocated/written by link().
+        self._pending: list[tuple[ObjectCode, _Page, int, int]] = []
 
     def define(self, name: str, addr: int) -> None:
         """Register an external address (e.g. a C function) under `name` so
@@ -71,6 +73,27 @@ class Runtime:
         self._relocate(blob, addr, obj.relocs, table)
         self._write_slot(page, offset, blob)
         return addr
+
+    def stage(self, obj: ObjectCode, name: str | None = None) -> int:
+        """Reserve a slot for `obj` and register `name -> addr` now, but defer
+        relocation and the byte-write until link(). Staging several functions
+        before linking lets them reference each other's names (mutual
+        recursion), since every name is registered up front. Returns the
+        reserved address."""
+        page, offset, addr = self._alloc_slot(len(obj.code))
+        if name is not None:
+            self._symbols[name] = addr
+        self._pending.append((obj, page, offset, addr))
+        return addr
+
+    def link(self) -> None:
+        """Relocate and write every staged function now that all names are
+        registered. A no-op when nothing is staged."""
+        pending, self._pending = self._pending, []
+        for obj, page, offset, addr in pending:
+            blob = bytearray(obj.code)
+            self._relocate(blob, addr, obj.relocs, self._symbols)
+            self._write_slot(page, offset, blob)
 
     def _relocate(self, blob: bytearray, base: int, relocs, table: dict[str, int]):
         for r in relocs:

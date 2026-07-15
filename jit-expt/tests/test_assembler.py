@@ -576,6 +576,83 @@ def test_run_recursion_by_symbol():
     assert fn(10) == 3628800
 
 
+def test_run_mutual_recursion_by_symbol():
+    # is_even/is_odd call each other by symbol. Neither address is known before
+    # the other is placed, so both are staged (registering both names) and then
+    # linked together to resolve the cross-references.
+    rt = Runtime()
+
+    def build_even(a):
+        done = Label("done")
+        a.push(RBP)
+        a.mov(RBP, RSP)
+        a.cmp(RDI, 0)
+        a.je(done)
+        a.sub(RDI, 1)
+        a.call(Symbol("is_odd"))
+        a.leave()
+        a.ret()
+        a.bind(done)
+        a.mov(RAX, 1)
+        a.leave()
+        a.ret()
+
+    def build_odd(a):
+        done = Label("done")
+        a.push(RBP)
+        a.mov(RBP, RSP)
+        a.cmp(RDI, 0)
+        a.je(done)
+        a.sub(RDI, 1)
+        a.call(Symbol("is_even"))
+        a.leave()
+        a.ret()
+        a.bind(done)
+        a.mov(RAX, 0)
+        a.leave()
+        a.ret()
+
+    even = Assembler()
+    build_even(even)
+    odd = Assembler()
+    build_odd(odd)
+
+    even_addr = rt.stage(even.finalize(), name="is_even")
+    odd_addr = rt.stage(odd.finalize(), name="is_odd")
+    rt.link()
+
+    is_even = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(even_addr)
+    is_odd = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(odd_addr)
+
+    for n in range(12):
+        assert is_even(n) == (1 if n % 2 == 0 else 0)
+        assert is_odd(n) == (1 if n % 2 == 1 else 0)
+    assert is_even(10) == 1
+    assert is_even(7) == 0
+    assert is_odd(7) == 1
+    assert is_odd(4) == 0
+
+
+def test_link_unresolved_symbol_raises():
+    # Staging a function that calls a never-registered symbol must fail at
+    # link() with KeyError, just like the eager add() path.
+    rt = Runtime()
+    a = Assembler()
+    a.sub(RSP, 8)
+    a.call(Symbol("nonexistent"))
+    a.add(RSP, 8)
+    a.ret()
+    rt.stage(a.finalize(), name="caller")
+    with pytest.raises(KeyError, match="nonexistent"):
+        rt.link()
+
+
+def test_link_no_pending_is_noop():
+    rt = Runtime()
+    rt.link()  # nothing staged
+    rt.link()
+
+
 def test_run_far_call_uses_veneer():
     # A rel32 call reaches only +-2GB. Map a target far below the JIT pages so
     # call(Symbol) must route through a movabs+jmp veneer.
