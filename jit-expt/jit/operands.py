@@ -95,6 +95,37 @@ class Mem:
         return s + "]"
 
 
+class _RipRel(Mem):
+    """A RIP-relative reference to a Label, encoded as `[rip + disp32]`
+    (ModR/M mod=00, rm=101, no SIB, no base). The disp32 is resolved to the
+    label's final offset by the assembler's fixup machinery at finalize(),
+    making the reference fully position-independent.
+
+    It subclasses Mem so the instruction encoders' `case Mem()` branches accept
+    it; `base`/`index` are None so no base/index register is emitted."""
+
+    def __init__(self, label, bitsize: int | None = None):
+        self.label = label
+        self.base = None
+        self.disp = 0
+        self.index = None
+        self.scale = 1
+        self.bitsize = bitsize
+
+    def sized(self, bitsize: int) -> "_RipRel":
+        return _RipRel(self.label, bitsize)
+
+    def __repr__(self):
+        return f"[rip {self.label!r}]"
+
+
+def rip(label) -> _RipRel:
+    """Reference `label` RIP-relatively as a memory operand, e.g.
+    `mov(RAX, rip(L))` / `lea(RAX, rip(L))`. Combine with byte/word/dword/qword
+    when a store or immediate makes the access width ambiguous."""
+    return _RipRel(label)
+
+
 def byte(mem: Mem) -> Mem:
     """Annotate a memory operand as an 8-bit access."""
     return mem.sized(8)
@@ -149,5 +180,5 @@ AL, CL, DL, BL, SPL, BPL, SIL, DIL, \
 AH, CH, DH, BH = (Reg(code, name, 8, high=True) for code, name in _R8H.items())
 
 
-__all__ = ["Reg", "Mem", "byte", "word", "dword", "qword",
+__all__ = ["Reg", "Mem", "rip", "byte", "word", "dword", "qword",
            *_R64, *_R32, *_R16, *_R8, "AH", "CH", "DH", "BH"]

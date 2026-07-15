@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from .operands import Mem, Reg
+from .operands import Mem, Reg, _RipRel
 
 
 @dataclass(frozen=True)
@@ -83,6 +83,9 @@ class Assembler:
         self.code = CodeBuffer()
         self._fixups: list[tuple[int, Label]] = []  # (rel32 offset, target)
         self._relocs: list[Reloc] = []  # absolute symbol relocations
+        # Read-only data blobs appended after the code at finalize() time:
+        # (label, bytes, alignment). Each label is bound to its final offset.
+        self._data: list[tuple[Label, bytes, int]] = []
 
     def _emit_prefixes(self, bitsize: int, reg: Reg | None, rm: Reg | None,
                        index: Reg | None = None):
@@ -156,6 +159,15 @@ class Assembler:
         #   mod=01  disp8   (1-byte signed)
         #   mod=10  disp32  (4-byte signed)
         reg_field = int(reg) & 7
+        if isinstance(mem, _RipRel):
+            # RIP-relative: ModR/M mod=00, reg=<reg>, rm=101, then a disp32 and
+            # NO SIB/base. The disp32 = label.offset - end_of_instruction, and
+            # since it is the final field, end = disp32_offset + 4 -- exactly a
+            # rel32 fixup, so reuse the _fixups/_link path.
+            self.code.emit(0x00 | (reg_field << 3) | 0x05)
+            self._fixups.append((len(self.code), mem.label))
+            self.code.emit_int(0, 4)  # disp32 placeholder, patched by _link
+            return
         base = int(mem.base) & 7
         disp = mem.disp
         need_sib = mem.index is not None or base == 4  # index, or RSP/R12 base
@@ -537,6 +549,15 @@ class Assembler:
         label.offset = len(self.code)
         return label
 
+    def data(self, blob: bytes, align: int = 1) -> Label:
+        """Reserve read-only data and return a Label referring to it. The bytes
+        are appended after the code at finalize() time (respecting `align` with
+        zero padding), which is when the label's offset becomes known. Reference
+        the data position-independently with `rip(label)`."""
+        label = Label()
+        self._data.append((label, bytes(blob), align))
+        return label
+
     def jmp(self, target: Label | Symbol):
         """Unconditional near jump (E9 rel32). A Label targets code within this
         object; a Symbol targets another object, resolved at load time."""
@@ -806,6 +827,15 @@ class Assembler:
         explicitly, after all labels are bound, before running. Does not
         mutate the assembler, so it is safe to call more than once."""
         out = CodeBuffer(self.code.code)  # copy, so finalize stays non-destructive
+        # Append each pending read-only data blob after the code, padding to its
+        # alignment, and bind its label to the final offset -- THEN link, so
+        # both jump fixups and RIP-relative disp32 fixups resolve. The result is
+        # fully position-independent; no load-time relocation is needed.
+        for label, blob, align in self._data:
+            if align > 1:
+                out.code.extend(b"\x00" * (-len(out) % align))
+            label.offset = len(out)
+            out.code.extend(blob)
         self._link(out)
         return ObjectCode(bytes(out.code), tuple(self._relocs))
 

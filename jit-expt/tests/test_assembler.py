@@ -34,6 +34,7 @@ from jit import (
     byte,
     dword,
     qword,
+    rip,
     word,
 )
 
@@ -879,6 +880,77 @@ def test_run_movsx_sign_extends_byte():
     result = run(build, ctypes.c_int64, ctypes.c_void_p,
                  args=(ctypes.cast(buf, ctypes.c_void_p),))
     assert result == -2
+
+
+# --- Read-only data section + RIP-relative addressing. ---
+
+def test_rip_lea_encoding():
+    # lea rax, [rip+disp32] = 48 8d 05 <disp32>. The data is appended right
+    # after the 7-byte instruction, so disp32 = data_off - end = 7 - 7 = 0.
+    def build(a):
+        L = a.data(b"\x88\x77\x66\x55\x44\x33\x22\x11")
+        a.lea(RAX, rip(L))
+
+    assert encode(build).hex() == "488d0500000000" "8877665544332211"
+
+
+def test_rip_mov_encoding():
+    # mov rax, [rip+disp32] = 48 8b 05 <disp32>, disp32 = 0 (data right after).
+    def build(a):
+        L = a.data((0x1122334455667788).to_bytes(8, "little"))
+        a.mov(RAX, rip(L))
+
+    assert encode(build).hex() == "488b0500000000" "8877665544332211"
+
+
+def test_rip_disp_points_at_data():
+    # With preceding code the disp32 must equal data_off - end_of_instruction.
+    def build(a):
+        L = a.data(b"ABCD")
+        a.mov(RAX, 0)          # 10 bytes (movabs)
+        a.mov(RAX, rip(L))     # 7 bytes: 48 8b 05 <disp32> at offsets 10..16
+
+    code = encode(build)
+    # data begins at offset 17 (10 + 7); disp32 field ends at offset 17.
+    assert code[10:13].hex() == "488b05"
+    disp = int.from_bytes(code[13:17], "little", signed=True)
+    assert disp == 0
+    assert code[17:].decode() == "ABCD"
+
+
+def test_run_returns_constant_from_data():
+    # A function that loads a 64-bit constant embedded in the data section.
+    def build(a):
+        L = a.data((12345).to_bytes(8, "little"))
+        a.mov(RAX, rip(L))
+        a.ret()
+
+    assert run(build, ctypes.c_int64) == 12345
+
+
+def test_run_rip_lookup_table():
+    # lea the table's address RIP-relatively, then index it: proves RIP-relative
+    # addressing composes with an indexed [base + index*8] load.
+    table = [10, 20, 30, 40]
+
+    def build(a):
+        L = a.data(b"".join(v.to_bytes(8, "little") for v in table))
+        a.lea(RAX, rip(L))
+        a.mov(RAX, RAX + RDI * 8)
+        a.ret()
+
+    for i in range(4):
+        assert run(build, ctypes.c_int64, ctypes.c_int64, args=(i,)) == table[i]
+
+
+def test_run_rip_data_alignment():
+    # Alignment pads the data to the requested boundary; the load still resolves.
+    def build(a):
+        L = a.data((777).to_bytes(8, "little"), align=16)
+        a.mov(RAX, rip(L))
+        a.ret()
+
+    assert run(build, ctypes.c_int64) == 777
 
 
 def test_entries_are_aligned():
