@@ -3,7 +3,7 @@ from __future__ import annotations
 import ctypes
 import mmap
 
-from .buffer import CodeBuffer
+from .assembler import ObjectCode
 
 
 class _Page:
@@ -43,8 +43,8 @@ class Runtime:
         self._align = align
         self._libc = ctypes.CDLL(None, use_errno=True)
 
-    def add(self, code: CodeBuffer) -> int:
-        blob = bytes(code.code)
+    def add(self, obj: ObjectCode) -> int:
+        blob = obj.code
         n = len(blob)
 
         page = self._page_with_room(n)
@@ -55,6 +55,8 @@ class Runtime:
         page.buf.seek(offset)
         page.buf.write(blob)
         self._protect(page, write=False)
+        # obj.relocs would be applied here once we support absolute
+        # references that need the now-known base address (none yet).
 
         # Advance the cursor, keeping the next function entry aligned.
         end = offset + n

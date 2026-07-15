@@ -1,14 +1,61 @@
 from __future__ import annotations
 
-from .buffer import CodeBuffer
+from dataclasses import dataclass
+
 from .operands import Mem, Reg
+
+
+@dataclass(frozen=True)
+class ObjectCode:
+    """Assembled machine code produced by Assembler.finalize(): the resolved
+    bytes, plus any relocations still needing the final load address (none
+    yet — reserved for future absolute references)."""
+
+    code: bytes
+    relocs: tuple = ()
+
+
+class CodeBuffer:
+    """A growable buffer of emitted machine-code bytes."""
+
+    def __init__(self, data: bytes | bytearray = b""):
+        self.code = bytearray(data)
+
+    def emit(self, byte: int):
+        self.code.append(byte)
+
+    def emit_int(self, value: int, size: int):
+        self.code.extend(value.to_bytes(size, byteorder="little"))
+
+    def patch_int(self, offset: int, value: int, size: int, *, signed: bool = False):
+        """Overwrite `size` bytes at `offset` (little-endian). The counterpart
+        to emit_int, used to backpatch a jump displacement once it is known."""
+        self.code[offset:offset + size] = value.to_bytes(
+            size, byteorder="little", signed=signed)
+
+    def __len__(self) -> int:
+        return len(self.code)
+
+
+class Label:
+    """A jump target. `offset` is the byte position of the label in the code,
+    or None until it is bound with Assembler.bind()."""
+
+    def __init__(self, name: str | None = None):
+        self.name = name
+        self.offset: int | None = None
+
+    def __repr__(self):
+        where = "unbound" if self.offset is None else f"@{self.offset}"
+        return f"Label({self.name or ''} {where})"
 
 
 class Assembler:
     """Encodes a small subset of x86-64 instructions into a CodeBuffer."""
 
-    def __init__(self, code: CodeBuffer):
-        self.code = code
+    def __init__(self):
+        self.code = CodeBuffer()
+        self._fixups: list[tuple[int, Label]] = []  # (rel32 offset, target)
 
     def _emit_prefixes(self, bitsize: int, reg: Reg | None, rm: Reg | None,
                        index: Reg | None = None):
@@ -147,7 +194,7 @@ class Assembler:
         return imm & hi
 
     def mov(self, dst: Reg | Mem, src: Reg | Mem | int):
-        """Emit a MOV, dispatching on the operand types (and sizes)."""
+        """Move src into dst."""
         match dst, src:
             case Reg(), Reg():
                 self._mov_reg_reg(dst, src)
@@ -184,15 +231,15 @@ class Assembler:
         self._emit_modrm_mem(reg_src, mem_dst)
 
     def add(self, dst: Reg | Mem, src: Reg | Mem | int):
-        """Emit an ADD, dispatching on the operand types (and sizes)."""
+        """Add src into dst (dst += src)."""
         self._alu(0x00, 0, dst, src)
 
     def sub(self, dst: Reg | Mem, src: Reg | Mem | int):
-        """Emit a SUB, dispatching on the operand types (and sizes)."""
+        """Subtract src from dst (dst -= src)."""
         self._alu(0x28, 5, dst, src)
 
     def cmp(self, dst: Reg | Mem, src: Reg | Mem | int):
-        """Emit a CMP, dispatching on the operand types (and sizes)."""
+        """Compare dst with src (dst - src), setting flags only."""
         self._alu(0x38, 7, dst, src)
 
     def _alu(self, base: int, ext: int, dst: Reg | Mem, src: Reg | Mem | int):
@@ -243,3 +290,89 @@ class Assembler:
 
     def ret(self):
         self.code.emit(0xC3)  # RET opcode
+
+    # --- Labels and jumps ---------------------------------------------------
+    #
+    # Jumps use RIP-relative rel32 displacements: the value stored is the
+    # signed distance from the END of the jump instruction to the target.
+    # Forward jumps reference labels that are not bound yet, so a placeholder
+    # is emitted and recorded as a fixup; finalize() backpatches them all once
+    # the labels are known.
+
+    def bind(self, label: Label) -> Label:
+        """Bind `label` to the current position in the code."""
+        label.offset = len(self.code)
+        return label
+
+    def jmp(self, target: Label):
+        """Unconditional near jump (E9 rel32)."""
+        self.code.emit(0xE9)
+        self._emit_rel32_fixup(target)
+
+    # Conditional near jumps. The signed variants (jl/jle/jg/jge) read as
+    # "dst <cond> src" after `cmp dst, src`.
+
+    def je(self, target: Label):
+        """Jump if equal (ZF=1)."""
+        self._jcc("e", target)
+
+    def jz(self, target: Label):
+        """Jump if zero (ZF=1); same condition as je."""
+        self._jcc("z", target)
+
+    def jne(self, target: Label):
+        """Jump if not equal (ZF=0)."""
+        self._jcc("ne", target)
+
+    def jnz(self, target: Label):
+        """Jump if not zero (ZF=0); same condition as jne."""
+        self._jcc("nz", target)
+
+    def jl(self, target: Label):
+        """Jump if less, signed (SF≠OF)."""
+        self._jcc("l", target)
+
+    def jle(self, target: Label):
+        """Jump if less or equal, signed (ZF=1 or SF≠OF)."""
+        self._jcc("le", target)
+
+    def jg(self, target: Label):
+        """Jump if greater, signed (ZF=0 and SF=OF)."""
+        self._jcc("g", target)
+
+    def jge(self, target: Label):
+        """Jump if greater or equal, signed (SF=OF)."""
+        self._jcc("ge", target)
+
+    # Condition codes: the low nibble of the 0F 8x conditional-jump opcodes.
+    _CC = {"e": 0x4, "z": 0x4, "ne": 0x5, "nz": 0x5,
+           "l": 0xC, "ge": 0xD, "le": 0xE, "g": 0xF}
+
+    def _jcc(self, cond: str, target: Label):
+        # Conditional near jump: 0F 8x rel32, x = condition code.
+        self.code.emit(0x0F)
+        self.code.emit(0x80 | self._CC[cond])
+        self._emit_rel32_fixup(target)
+
+    def _emit_rel32_fixup(self, target: Label):
+        # Record where the rel32 field starts, then emit a 4-byte placeholder.
+        self._fixups.append((len(self.code), target))
+        self.code.emit_int(0, 4)
+
+    def finalize(self) -> ObjectCode:
+        """Assemble the emitted instructions into machine code. Must be called
+        explicitly, after all labels are bound, before running. Does not
+        mutate the assembler, so it is safe to call more than once."""
+        out = CodeBuffer(self.code.code)  # copy, so finalize stays non-destructive
+        self._link(out)
+        return ObjectCode(bytes(out.code))
+
+    def _link(self, buf: CodeBuffer) -> None:
+        """Backpatch each recorded jump fixup's rel32 field in `buf`."""
+        for at, target in self._fixups:
+            if target.offset is None:
+                raise ValueError(f"jump to unbound label {target!r}")
+            rel = target.offset - (at + 4)  # relative to end of the rel32 field
+            if not (-(1 << 31) <= rel < (1 << 31)):
+                raise ValueError(f"jump displacement {rel} does not fit in rel32")
+            buf.patch_int(at, rel, 4, signed=True)

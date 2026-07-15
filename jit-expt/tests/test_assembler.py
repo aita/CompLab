@@ -19,17 +19,17 @@ from jit import (
     RBP,
     SPL,
     Assembler,
-    CodeBuffer,
+    Label,
     Mem,
     Runtime,
 )
 
 
 def encode(build) -> bytes:
-    """Run `build(asm)` on a fresh assembler and return the emitted bytes."""
-    code = CodeBuffer()
-    build(Assembler(code))
-    return bytes(code.code)
+    """Run `build(asm)` on a fresh assembler and return the assembled bytes."""
+    asm = Assembler()
+    build(asm)
+    return asm.finalize().code
 
 
 # Expected encodings independently verified with `nasm` + `objdump`.
@@ -111,6 +111,74 @@ def test_unsupported_operands_raise(build):
         encode(build)
 
 
+def _jump_sequence(a):
+    # back: jmp back; jmp fwd; fwd: je/jne/jl/jge/jle/jg t2; t2:
+    back = a.bind(Label("back"))
+    a.jmp(back)
+    fwd = Label("fwd")
+    a.jmp(fwd)
+    a.bind(fwd)
+    t2 = Label("t2")
+    for j in (a.je, a.jne, a.jl, a.jge, a.jle, a.jg):
+        j(t2)
+    a.bind(t2)
+
+
+def test_jump_encodings():
+    # rel32 displacements verified against nasm.
+    expected = (
+        "e9fbffffff" "e900000000"           # jmp back (-5), jmp fwd (0)
+        "0f841e000000" "0f8518000000"        # je, jne
+        "0f8c12000000" "0f8d0c000000"        # jl, jge
+        "0f8e06000000" "0f8f00000000"        # jle, jg
+    )
+    assert encode(_jump_sequence).hex() == expected
+
+
+def test_finalize_unbound_label_raises():
+    a = Assembler()
+    a.jmp(Label("nowhere"))  # target never bound
+    with pytest.raises(ValueError, match="unbound label"):
+        a.finalize()
+
+
+def test_run_countdown_loop():
+    # sum = 0; while (rdi != 0) { sum += rdi; rdi -= 1; } return sum
+    def build(a):
+        top = Label("top")
+        end = Label("end")
+        a.mov(RAX, 0)
+        a.bind(top)
+        a.cmp(RDI, 0)
+        a.je(end)
+        a.add(RAX, RDI)
+        a.sub(RDI, 1)
+        a.jmp(top)
+        a.bind(end)
+        a.ret()
+
+    for n in (0, 1, 5, 10):
+        result = run(build, ctypes.c_int64, ctypes.c_int64, args=(n,))
+        assert result == n * (n + 1) // 2
+
+
+def test_run_max_conditional():
+    # return (rdi >= rsi) ? rdi : rsi
+    def build(a):
+        done = Label("done")
+        a.mov(RAX, RDI)
+        a.cmp(RDI, RSI)
+        a.jge(done)
+        a.mov(RAX, RSI)
+        a.bind(done)
+        a.ret()
+
+    for x, y in [(3, 7), (7, 3), (5, 5), (-2, -9)]:
+        result = run(build, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+                     args=(x, y))
+        assert result == max(x, y)
+
+
 def test_rsp_index_rejected():
     with pytest.raises(ValueError, match="index register"):
         Mem(RAX, index=RSP)
@@ -124,10 +192,10 @@ def test_invalid_scale_rejected():
 # --- Functional tests: assemble, map executable, and actually run it. ---
 
 def run(build, restype, *argtypes, args=()):
-    code = CodeBuffer()
-    build(Assembler(code))
+    asm = Assembler()
+    build(asm)
     rt = Runtime()  # keep alive: it owns the executable mmap until fn() returns
-    addr = rt.add(code)
+    addr = rt.add(asm.finalize())  # explicit finalize resolves jump fixups
     fn = ctypes.CFUNCTYPE(restype, *argtypes)(addr)
     return fn(*args)
 
@@ -218,9 +286,9 @@ def test_runtime_pools_functions_into_one_page():
     fns = []
     pages = set()
     for value in range(50):
-        code = CodeBuffer()
-        _const_fn(value)(Assembler(code))
-        addr = rt.add(code)
+        asm = Assembler()
+        _const_fn(value)(asm)
+        addr = rt.add(asm.finalize())
         fns.append((sig(addr), value))
         pages.add(addr & ~(mmap.PAGESIZE - 1))
 
@@ -233,13 +301,13 @@ def test_runtime_pools_functions_into_one_page():
 
 def test_entries_are_aligned():
     rt = Runtime(align=16)
-    code = CodeBuffer()
-    _const_fn(1)(Assembler(code))  # 10 bytes (movabs) + 1 (ret) = 11
-    first = rt.add(code)
+    asm = Assembler()
+    _const_fn(1)(asm)  # 10 bytes (movabs) + 1 (ret) = 11
+    first = rt.add(asm.finalize())
 
-    code = CodeBuffer()
-    _const_fn(2)(Assembler(code))
-    second = rt.add(code)
+    asm = Assembler()
+    _const_fn(2)(asm)
+    second = rt.add(asm.finalize())
 
     assert first % 16 == 0
     assert second % 16 == 0
