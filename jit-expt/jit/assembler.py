@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .buffer import CodeBuffer
-from .registers import Mem, Reg
+from .operands import Mem, Reg
 
 
 class Assembler:
