@@ -6,7 +6,12 @@ import pytest
 from jit import (
     AL,
     AX,
+    BL,
+    CL,
+    DL,
     EAX,
+    EBX,
+    ECX,
     R8,
     R10,
     R12,
@@ -128,6 +133,57 @@ ENCODINGS = [
      lambda a: a.and_(dword(RDI + 0), 0xFF),            "8127ff000000"),
     ("add qword [rdi+rsi*4+16], 7",
      lambda a: a.add(qword(RDI + RSI * 4 + 16), 7),     "488344b71007"),
+    # Shifts by immediate and by CL.
+    ("shl rax, 3",       lambda a: a.shl(RAX, 3),       "48c1e003"),
+    ("shl eax, 3",       lambda a: a.shl(EAX, 3),       "c1e003"),
+    ("shl r8, 5",        lambda a: a.shl(R8, 5),        "49c1e005"),
+    ("shl al, 3",        lambda a: a.shl(AL, 3),        "c0e003"),
+    ("shl byte [rdi], 3",
+     lambda a: a.shl(byte(RDI + 0), 3),                 "c02703"),
+    ("shl rax, cl",      lambda a: a.shl(RAX, CL),      "48d3e0"),
+    ("shl eax, cl",      lambda a: a.shl(EAX, CL),      "d3e0"),
+    ("shr rax, 3",       lambda a: a.shr(RAX, 3),       "48c1e803"),
+    ("shr eax, cl",      lambda a: a.shr(EAX, CL),      "d3e8"),
+    ("sar r8, 5",        lambda a: a.sar(R8, 5),        "49c1f805"),
+    ("sar rax, cl",      lambda a: a.sar(RAX, CL),      "48d3f8"),
+    # Increment / decrement.
+    ("inc rax",          lambda a: a.inc(RAX),          "48ffc0"),
+    ("inc eax",          lambda a: a.inc(EAX),          "ffc0"),
+    ("inc r8",           lambda a: a.inc(R8),           "49ffc0"),
+    ("inc al",           lambda a: a.inc(AL),           "fec0"),
+    ("inc dword [rdi]",  lambda a: a.inc(dword(RDI + 0)), "ff07"),
+    ("dec rax",          lambda a: a.dec(RAX),          "48ffc8"),
+    ("dec dword [rdi]",  lambda a: a.dec(dword(RDI + 0)), "ff0f"),
+    ("dec al",           lambda a: a.dec(AL),           "fec8"),
+    # Zero/sign extension.
+    ("movzx rax, byte [rdi]",
+     lambda a: a.movzx(RAX, byte(RDI + 0)),             "480fb607"),
+    ("movzx rax, bl",    lambda a: a.movzx(RAX, BL),    "480fb6c3"),
+    ("movzx eax, bl",    lambda a: a.movzx(EAX, BL),    "0fb6c3"),
+    ("movzx rax, word [rdi]",
+     lambda a: a.movzx(RAX, word(RDI + 0)),             "480fb707"),
+    ("movzx rax, ax",    lambda a: a.movzx(RAX, AX),    "480fb7c0"),
+    ("movsx rax, byte [rdi]",
+     lambda a: a.movsx(RAX, byte(RDI + 0)),             "480fbe07"),
+    ("movsx rax, bl",    lambda a: a.movsx(RAX, BL),    "480fbec3"),
+    ("movsx rax, ax",    lambda a: a.movsx(RAX, AX),    "480fbfc0"),
+    ("movsx eax, al",    lambda a: a.movsx(EAX, AL),    "0fbec0"),
+    ("movsxd rax, ecx",  lambda a: a.movsx(RAX, ECX),   "4863c1"),
+    # setcc (byte set on condition).
+    ("setne al",         lambda a: a.setne(AL),         "0f95c0"),
+    ("sete cl",          lambda a: a.sete(CL),          "0f94c1"),
+    ("setl dl",          lambda a: a.setl(DL),          "0f9cc2"),
+    ("setg bl",          lambda a: a.setg(BL),          "0f9fc3"),
+    ("seta al",          lambda a: a.seta(AL),          "0f97c0"),
+    ("setb al",          lambda a: a.setb(AL),          "0f92c0"),
+    ("setne byte [rdi]", lambda a: a.setne(byte(RDI + 0)), "0f9507"),
+    # cmovcc (conditional move).
+    ("cmovne rax, rbx",  lambda a: a.cmovne(RAX, RBX),  "480f45c3"),
+    ("cmove rax, rbx",   lambda a: a.cmove(RAX, RBX),   "480f44c3"),
+    ("cmovl rax, rbx",   lambda a: a.cmovl(RAX, RBX),   "480f4cc3"),
+    ("cmovg eax, ebx",   lambda a: a.cmovg(EAX, EBX),   "0f4fc3"),
+    ("cmovne rax, [rdi]",
+     lambda a: a.cmovne(RAX, RDI + 0),                  "480f4507"),
 ]
 
 
@@ -654,6 +710,98 @@ def test_runtime_pools_functions_into_one_page():
     # Call them in reverse so the earliest-added (most re-protected) run last.
     for fn, value in reversed(fns):
         assert fn() == value
+
+
+def test_run_shift_multiply_divide():
+    # return (rdi << 3) then (>> 1): multiply by 8, then halve -> rdi * 4
+    def build(a):
+        a.mov(RAX, RDI)
+        a.shl(RAX, 3)      # * 8
+        a.shr(RAX, 1)      # unsigned / 2
+        a.ret()
+
+    for x in (1, 5, 100, 0):
+        result = run(build, ctypes.c_uint64, ctypes.c_uint64, args=(x,))
+        assert result == (x << 3) >> 1
+
+
+def test_run_sar_signed():
+    # arithmetic shift right by rsi (in CL) preserves sign: floor(rdi / 2^n)
+    def build(a):
+        a.mov(RAX, RDI)
+        a.mov(RCX, RSI)    # CL = shift amount
+        a.sar(RAX, CL)
+        a.ret()
+
+    for x, n in [(-16, 2), (16, 2), (-1, 1), (255, 3)]:
+        result = run(build, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+                     args=(x, n))
+        assert result == (x >> n)
+
+
+def test_run_inc_dec():
+    # return rdi + 1 - 1 - 1 == rdi - 1
+    def build(a):
+        a.mov(RAX, RDI)
+        a.inc(RAX)
+        a.dec(RAX)
+        a.dec(RAX)
+        a.ret()
+
+    for x in (0, 41, -5):
+        assert run(build, ctypes.c_int64, ctypes.c_int64, args=(x,)) == x - 1
+
+
+def test_run_setcc_returns_bool():
+    # return (rdi == rsi) ? 1 : 0, via cmp + sete
+    def build(a):
+        a.xor(EAX, EAX)     # clear the upper bits; sete only writes AL
+        a.cmp(RDI, RSI)
+        a.sete(AL)
+        a.ret()
+
+    for x, y in [(3, 3), (3, 4), (0, 0), (-1, -1), (-1, 1)]:
+        result = run(build, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+                     args=(x, y))
+        assert result == (1 if x == y else 0)
+
+
+def test_run_cmov_selects_max():
+    # return max(rdi, rsi) with cmp + cmovl (no branch)
+    def build(a):
+        a.mov(RAX, RDI)
+        a.cmp(RAX, RSI)
+        a.cmovl(RAX, RSI)   # if rax < rsi, take rsi
+        a.ret()
+
+    for x, y in [(3, 7), (7, 3), (5, 5), (-2, -9)]:
+        result = run(build, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+                     args=(x, y))
+        assert result == max(x, y)
+
+
+def test_run_movzx_loads_byte():
+    # zero-extend the byte at [rdi] into a 64-bit result
+    def build(a):
+        a.movzx(RAX, byte(RDI + 0))
+        a.ret()
+
+    buf = (ctypes.c_uint8 * 1)(0xFE)
+    result = run(build, ctypes.c_uint64, ctypes.c_void_p,
+                 args=(ctypes.cast(buf, ctypes.c_void_p),))
+    assert result == 0xFE
+
+
+def test_run_movsx_sign_extends_byte():
+    # sign-extend the byte at [rdi]: 0xFE -> -2
+    def build(a):
+        a.movsx(RAX, byte(RDI + 0))
+        a.ret()
+
+    buf = (ctypes.c_uint8 * 1)(0xFE)
+    result = run(build, ctypes.c_int64, ctypes.c_void_p,
+                 args=(ctypes.cast(buf, ctypes.c_void_p),))
+    assert result == -2
 
 
 def test_entries_are_aligned():

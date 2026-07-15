@@ -376,6 +376,112 @@ class Assembler:
         self.code.emit(0xF6 if dst.bitsize == 8 else 0xF7)
         self._emit_modrm(dst, ext)  # reg=ext, rm=dst
 
+    def shl(self, dst: Reg | Mem, count: int | Reg):
+        """Shift dst left by count, filling with zeros (dst <<= count)."""
+        self._shift(4, dst, count)
+
+    def shr(self, dst: Reg | Mem, count: int | Reg):
+        """Logical shift dst right by count, filling with zeros
+        (unsigned dst >>= count)."""
+        self._shift(5, dst, count)
+
+    def sar(self, dst: Reg | Mem, count: int | Reg):
+        """Arithmetic shift dst right by count, preserving the sign bit
+        (signed dst >>= count)."""
+        self._shift(7, dst, count)
+
+    def _shift(self, ext: int, dst: Reg | Mem, count: int | Reg):
+        # Group 2 shifts: C1/C0 /ext with an imm8 count, or D3/D2 /ext to
+        # shift by the count in CL. ext selects shl(/4), shr(/5), sar(/7);
+        # the C0/D2 opcodes are the 8-bit forms.
+        if isinstance(count, Reg):
+            if int(count) != 1 or count.bitsize != 8:  # CL is code 1, 8-bit
+                raise TypeError(f"shift count register must be CL, not {count!r}")
+            by_cl = True
+        elif isinstance(count, int):
+            by_cl = False
+        else:
+            raise TypeError(f"unsupported shift count: {count!r}")
+        match dst:
+            case Reg():
+                bits = dst.bitsize
+                self._emit_prefixes(bits, None, dst)
+            case Mem():
+                bits = self._mem_bitsize(dst)
+                self._emit_prefixes(bits, None, dst.base, dst.index)
+            case _:
+                raise TypeError(f"unsupported shift destination: {dst!r}")
+        self.code.emit((0xD2 if by_cl else 0xC0) + (0 if bits == 8 else 1))
+        if isinstance(dst, Reg):
+            self._emit_modrm(dst, ext)  # reg=ext (extension), rm=dst
+        else:
+            self._emit_modrm_mem(ext, dst)
+        if not by_cl:
+            self.code.emit_int(self._encode_imm(count, 1), 1)  # imm8 count
+
+    def inc(self, dst: Reg | Mem):
+        """Increment dst in place (dst += 1)."""
+        self._incdec(0, dst)
+
+    def dec(self, dst: Reg | Mem):
+        """Decrement dst in place (dst -= 1)."""
+        self._incdec(1, dst)
+
+    def _incdec(self, ext: int, dst: Reg | Mem):
+        # FF /0 = inc, FF /1 = dec (FE for 8-bit); the ModR/M.reg field is the
+        # extension digit.
+        match dst:
+            case Reg():
+                self._emit_prefixes(dst.bitsize, None, dst)
+                self.code.emit(0xFE if dst.bitsize == 8 else 0xFF)
+                self._emit_modrm(dst, ext)
+            case Mem():
+                bits = self._mem_bitsize(dst)
+                self._emit_prefixes(bits, None, dst.base, dst.index)
+                self.code.emit(0xFE if bits == 8 else 0xFF)
+                self._emit_modrm_mem(ext, dst)
+            case _:
+                raise TypeError(f"unsupported INC/DEC operand: {dst!r}")
+
+    def movzx(self, dst: Reg, src: Reg | Mem):
+        """Zero-extend a narrower src (reg/mem) into the wider register dst."""
+        self._movx(dst, src, signed=False)
+
+    def movsx(self, dst: Reg, src: Reg | Mem):
+        """Sign-extend a narrower src (reg/mem) into the wider register dst.
+        A 32-bit src uses the MOVSXD (63 /r) encoding."""
+        self._movx(dst, src, signed=True)
+
+    def _movx(self, dst: Reg, src: Reg | Mem, signed: bool):
+        # movzx: 0F B6 (r/m8), 0F B7 (r/m16); movsx: 0F BE (r/m8), 0F BF
+        # (r/m16); movsxd: 63 /r (r/m32 -> r64). The operand-size prefix / REX
+        # follow the *destination* width; the opcode follows the source width.
+        if not isinstance(dst, Reg):
+            raise TypeError(f"movzx/movsx destination must be a register: {dst!r}")
+        match src:
+            case Reg():
+                src_bits, base, index = src.bitsize, src, None
+            case Mem():
+                src_bits, base, index = self._mem_bitsize(src), src.base, src.index
+            case _:
+                raise TypeError(f"unsupported movzx/movsx source: {src!r}")
+        if src_bits >= dst.bitsize:
+            raise ValueError(f"source ({src_bits}-bit) is not narrower than "
+                             f"destination ({dst.bitsize}-bit)")
+        self._emit_prefixes(dst.bitsize, dst, base, index)
+        if src_bits == 32:
+            if not signed:
+                raise ValueError("movzx from 32 bits is not encodable; a "
+                                 "32-bit mov already zero-extends")
+            self.code.emit(0x63)  # MOVSXD r64, r/m32
+        else:
+            self.code.emit(0x0F)
+            self.code.emit((0xBE if signed else 0xB6) + (0 if src_bits == 8 else 1))
+        if isinstance(src, Reg):
+            self._emit_modrm(src, dst)  # reg=dst, rm=src
+        else:
+            self._emit_modrm_mem(dst, src)
+
     def test(self, a: Reg, b: Reg | int):
         """Set flags from a AND b, discarding the result."""
         match a, b:
@@ -526,6 +632,164 @@ class Assembler:
         self.code.emit(0x0F)
         self.code.emit(0x80 | self._CC[cond])
         self._emit_rel32_target(target)
+
+    # Conditional byte-set (0F 90+cc). Each writes 1 into an 8-bit r/m operand
+    # when its condition holds, else 0. The condition set mirrors the jumps.
+
+    def sete(self, dst: Reg | Mem):
+        """Set dst (r/m8) to 1 if equal (ZF=1), else 0."""
+        self._setcc("e", dst)
+
+    def setz(self, dst: Reg | Mem):
+        """Set dst to 1 if zero (ZF=1); same condition as sete."""
+        self._setcc("z", dst)
+
+    def setne(self, dst: Reg | Mem):
+        """Set dst to 1 if not equal (ZF=0), else 0."""
+        self._setcc("ne", dst)
+
+    def setnz(self, dst: Reg | Mem):
+        """Set dst to 1 if not zero (ZF=0); same condition as setne."""
+        self._setcc("nz", dst)
+
+    def setl(self, dst: Reg | Mem):
+        """Set dst to 1 if less, signed (SF≠OF), else 0."""
+        self._setcc("l", dst)
+
+    def setle(self, dst: Reg | Mem):
+        """Set dst to 1 if less or equal, signed (ZF=1 or SF≠OF), else 0."""
+        self._setcc("le", dst)
+
+    def setg(self, dst: Reg | Mem):
+        """Set dst to 1 if greater, signed (ZF=0 and SF=OF), else 0."""
+        self._setcc("g", dst)
+
+    def setge(self, dst: Reg | Mem):
+        """Set dst to 1 if greater or equal, signed (SF=OF), else 0."""
+        self._setcc("ge", dst)
+
+    def seta(self, dst: Reg | Mem):
+        """Set dst to 1 if above, unsigned (CF=0 and ZF=0), else 0."""
+        self._setcc("a", dst)
+
+    def setae(self, dst: Reg | Mem):
+        """Set dst to 1 if above or equal, unsigned (CF=0), else 0."""
+        self._setcc("ae", dst)
+
+    def setb(self, dst: Reg | Mem):
+        """Set dst to 1 if below, unsigned (CF=1), else 0."""
+        self._setcc("b", dst)
+
+    def setbe(self, dst: Reg | Mem):
+        """Set dst to 1 if below or equal, unsigned (CF=1 or ZF=1), else 0."""
+        self._setcc("be", dst)
+
+    def sets(self, dst: Reg | Mem):
+        """Set dst to 1 if sign (SF=1), i.e. the result was negative."""
+        self._setcc("s", dst)
+
+    def setns(self, dst: Reg | Mem):
+        """Set dst to 1 if not sign (SF=0), i.e. non-negative."""
+        self._setcc("ns", dst)
+
+    def _setcc(self, cond: str, dst: Reg | Mem):
+        # 0F 90+cc /0: the ModR/M.reg field is unused (0); the r/m is an 8-bit
+        # destination.
+        match dst:
+            case Reg():
+                if dst.bitsize != 8:
+                    raise ValueError("setcc needs an 8-bit register")
+                self._emit_prefixes(8, None, dst)
+                self.code.emit(0x0F)
+                self.code.emit(0x90 | self._CC[cond])
+                self._emit_modrm(dst, 0)
+            case Mem():
+                if self._mem_bitsize(dst) != 8:
+                    raise ValueError("setcc writes a single byte; use byte()")
+                self._emit_prefixes(8, None, dst.base, dst.index)
+                self.code.emit(0x0F)
+                self.code.emit(0x90 | self._CC[cond])
+                self._emit_modrm_mem(0, dst)
+            case _:
+                raise TypeError(f"unsupported setcc operand: {dst!r}")
+
+    # Conditional move (0F 40+cc): dst <- src when the condition holds. The
+    # condition set mirrors the jumps.
+
+    def cmove(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if equal (ZF=1)."""
+        self._cmovcc("e", dst, src)
+
+    def cmovz(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if zero (ZF=1); same condition as cmove."""
+        self._cmovcc("z", dst, src)
+
+    def cmovne(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if not equal (ZF=0)."""
+        self._cmovcc("ne", dst, src)
+
+    def cmovnz(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if not zero (ZF=0); same condition as cmovne."""
+        self._cmovcc("nz", dst, src)
+
+    def cmovl(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if less, signed (SF≠OF)."""
+        self._cmovcc("l", dst, src)
+
+    def cmovle(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if less or equal, signed (ZF=1 or SF≠OF)."""
+        self._cmovcc("le", dst, src)
+
+    def cmovg(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if greater, signed (ZF=0 and SF=OF)."""
+        self._cmovcc("g", dst, src)
+
+    def cmovge(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if greater or equal, signed (SF=OF)."""
+        self._cmovcc("ge", dst, src)
+
+    def cmova(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if above, unsigned (CF=0 and ZF=0)."""
+        self._cmovcc("a", dst, src)
+
+    def cmovae(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if above or equal, unsigned (CF=0)."""
+        self._cmovcc("ae", dst, src)
+
+    def cmovb(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if below, unsigned (CF=1)."""
+        self._cmovcc("b", dst, src)
+
+    def cmovbe(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if below or equal, unsigned (CF=1 or ZF=1)."""
+        self._cmovcc("be", dst, src)
+
+    def cmovs(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if sign (SF=1), i.e. the flag result was negative."""
+        self._cmovcc("s", dst, src)
+
+    def cmovns(self, dst: Reg, src: Reg | Mem):
+        """Move src into dst if not sign (SF=0), i.e. non-negative."""
+        self._cmovcc("ns", dst, src)
+
+    def _cmovcc(self, cond: str, dst: Reg, src: Reg | Mem):
+        # 0F 40+cc /r: dst is the ModR/M.reg operand, src the r/m operand. The
+        # operand-size prefix / REX follow the destination width.
+        if not isinstance(dst, Reg):
+            raise TypeError(f"cmovcc destination must be a register: {dst!r}")
+        match src:
+            case Reg():
+                self._emit_prefixes(dst.bitsize, dst, src)
+                self.code.emit(0x0F)
+                self.code.emit(0x40 | self._CC[cond])
+                self._emit_modrm(src, dst)  # reg=dst, rm=src
+            case Mem():
+                self._emit_prefixes(dst.bitsize, dst, src.base, src.index)
+                self.code.emit(0x0F)
+                self.code.emit(0x40 | self._CC[cond])
+                self._emit_modrm_mem(dst, src)
+            case _:
+                raise TypeError(f"unsupported cmovcc source: {src!r}")
 
     def _emit_rel32_target(self, target: Label | Symbol):
         # Emit a 4-byte rel32 placeholder for a Label (resolved internally by
