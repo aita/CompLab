@@ -291,7 +291,23 @@ class Assembler:
     def ret(self):
         self.code.emit(0xC3)  # RET opcode
 
-    # --- Labels and jumps ---------------------------------------------------
+    def push(self, reg: Reg):
+        """Push a 64-bit register onto the stack (50+r)."""
+        if int(reg) >= 8:
+            self.code.emit(0x41)  # REX.B for r8..r15
+        self.code.emit(0x50 + (int(reg) & 7))
+
+    def pop(self, reg: Reg):
+        """Pop the top of the stack into a 64-bit register (58+r)."""
+        if int(reg) >= 8:
+            self.code.emit(0x41)  # REX.B for r8..r15
+        self.code.emit(0x58 + (int(reg) & 7))
+
+    def leave(self):
+        """Tear down a stack frame: mov rsp, rbp; pop rbp (C9)."""
+        self.code.emit(0xC9)
+
+    # --- Labels, jumps, and calls -------------------------------------------
     #
     # Jumps use RIP-relative rel32 displacements: the value stored is the
     # signed distance from the END of the jump instruction to the target.
@@ -308,6 +324,22 @@ class Assembler:
         """Unconditional near jump (E9 rel32)."""
         self.code.emit(0xE9)
         self._emit_rel32_fixup(target)
+
+    def call(self, target: Reg | Label):
+        """Call a function. A Reg is an indirect call through that register
+        (FF /2), used to reach an absolute address loaded with `mov reg, addr`.
+        A Label is a direct RIP-relative call (E8 rel32) within this code."""
+        match target:
+            case Reg():
+                if int(target) >= 8:
+                    self.code.emit(0x41)  # REX.B for r8..r15
+                self.code.emit(0xFF)
+                self.code.emit(0xD0 | (int(target) & 7))  # /2, mod=11, rm=reg
+            case Label():
+                self.code.emit(0xE8)
+                self._emit_rel32_fixup(target)
+            case _:
+                raise TypeError(f"unsupported CALL operand: {target!r}")
 
     # Conditional near jumps. The signed variants (jl/jle/jg/jge) read as
     # "dst <cond> src" after `cmp dst, src`.

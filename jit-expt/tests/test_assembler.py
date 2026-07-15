@@ -8,6 +8,7 @@ from jit import (
     AX,
     EAX,
     R8,
+    R10,
     R12,
     RAX,
     RBX,
@@ -77,7 +78,24 @@ ENCODINGS = [
     ("mov [rcx+rdx*8], rax",
      lambda a: a.mov(RCX + RDX * 8, RAX),               "488904d1"),
     ("ret",              lambda a: a.ret(),             "c3"),
+    # Calls, stack, and frame teardown.
+    ("call rax",         lambda a: a.call(RAX),         "ffd0"),
+    ("call r10",         lambda a: a.call(R10),         "41ffd2"),
+    ("push rax",         lambda a: a.push(RAX),         "50"),
+    ("push r12",         lambda a: a.push(R12),         "4154"),
+    ("pop rax",          lambda a: a.pop(RAX),          "58"),
+    ("pop r12",          lambda a: a.pop(R12),          "415c"),
+    ("leave",            lambda a: a.leave(),           "c9"),
 ]
+
+
+def test_call_label_encoding():
+    # call to a label placed right after: E8 rel32 = 0.
+    def build(a):
+        target = Label("target")
+        a.call(target)
+        a.bind(target)
+    assert encode(build).hex() == "e800000000"
 
 
 @pytest.mark.parametrize("name, build, expected",
@@ -267,6 +285,50 @@ def test_run_scaled_index_store():
     run(build, None, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64,
         args=(base, 2, 777))
     assert list(arr) == [0, 0, 777]
+
+
+def test_run_calls_c_function():
+    # Call a C function (a ctypes callback) from JIT'd code and return its
+    # result. The push rbp / mov rbp, rsp frame realigns rsp to 16 bytes,
+    # which the SysV ABI requires at the call.
+    sig = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)
+    callback = sig(lambda x: x * 3)
+    cb_addr = ctypes.cast(callback, ctypes.c_void_p).value
+
+    def build(a):
+        a.push(RBP)
+        a.mov(RBP, RSP)     # frame; now rsp is 16-byte aligned
+        a.mov(RAX, cb_addr)
+        a.call(RAX)         # rax = callback(rdi)
+        a.leave()
+        a.ret()
+
+    assert run(build, ctypes.c_int64, ctypes.c_int64, args=(7,)) == 21
+    assert callback  # keep the callback alive until after the call
+
+
+def test_run_calls_another_jit_function():
+    rt = Runtime()  # keep alive: owns the executable pages for both functions
+
+    # callee(x) = x + 1
+    callee = Assembler()
+    callee.mov(RAX, RDI)
+    callee.add(RAX, 1)
+    callee.ret()
+    callee_addr = rt.add(callee.finalize())
+
+    # caller(x) = callee(x)
+    caller = Assembler()
+    caller.push(RBP)
+    caller.mov(RBP, RSP)
+    caller.mov(RAX, callee_addr)
+    caller.call(RAX)
+    caller.leave()
+    caller.ret()
+    caller_addr = rt.add(caller.finalize())
+
+    fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(caller_addr)
+    assert fn(41) == 42
 
 
 def _const_fn(value):
