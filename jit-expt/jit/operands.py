@@ -37,6 +37,23 @@ class Reg(int):
         return Mem(self, disp=-disp)
 
 
+class Xmm(int):
+    """An XMM register (XMM0..XMM15) holding SSE scalar/packed data. A DISTINCT
+    type from Reg (not a subclass) so instruction dispatch can require an XMM
+    where the SSE encodings do and reject a general-purpose register. Subclasses
+    int so its 0..15 encoding number is usable directly in REX/ModR/M bit math;
+    XMM8..15 set REX.R/REX.B just like R8..15."""
+
+    def __new__(cls, value: int, name: str):
+        obj = super().__new__(cls, value)
+        obj.name = name
+        obj.bitsize = 128
+        return obj
+
+    def __repr__(self):
+        return self.name
+
+
 class _Index:
     """An `index * scale` term, produced by `reg * scale` and folded into a
     Mem's SIB byte."""
@@ -179,6 +196,12 @@ AL, CL, DL, BL, SPL, BPL, SIL, DIL, \
 # Legacy high-byte registers.
 AH, CH, DH, BH = (Reg(code, name, 8, high=True) for code, name in _R8H.items())
 
+# XMM registers, indexed by encoding number 0..15.
+_XMM = [f"XMM{i}" for i in range(16)]
+XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7, \
+    XMM8, XMM9, XMM10, XMM11, XMM12, XMM13, XMM14, XMM15 = \
+    (Xmm(code, name) for code, name in enumerate(_XMM))
 
-__all__ = ["Reg", "Mem", "rip", "byte", "word", "dword", "qword",
-           *_R64, *_R32, *_R16, *_R8, "AH", "CH", "DH", "BH"]
+
+__all__ = ["Reg", "Xmm", "Mem", "rip", "byte", "word", "dword", "qword",
+           *_R64, *_R32, *_R16, *_R8, "AH", "CH", "DH", "BH", *_XMM]

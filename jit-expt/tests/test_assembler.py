@@ -24,6 +24,13 @@ from jit import (
     RSP,
     RBP,
     SPL,
+    XMM0,
+    XMM1,
+    XMM2,
+    XMM3,
+    XMM8,
+    XMM9,
+    XMM11,
     Assembler,
     Label,
     Mem,
@@ -185,6 +192,27 @@ ENCODINGS = [
     ("cmovg eax, ebx",   lambda a: a.cmovg(EAX, EBX),   "0f4fc3"),
     ("cmovne rax, [rdi]",
      lambda a: a.cmovne(RAX, RDI + 0),                  "480f4507"),
+    # Scalar-double (SSE2) floats. F2 mandatory prefix, then REX, then 0F.
+    ("movsd xmm0, xmm1",  lambda a: a.movsd(XMM0, XMM1), "f20f10c1"),
+    ("movsd xmm0, [rdi]",
+     lambda a: a.movsd(XMM0, RDI + 0),                  "f20f1007"),
+    ("movsd [rdi], xmm0",
+     lambda a: a.movsd(RDI + 0, XMM0),                  "f20f1107"),
+    ("addsd xmm0, xmm1",  lambda a: a.addsd(XMM0, XMM1), "f20f58c1"),
+    ("subsd xmm2, xmm3",  lambda a: a.subsd(XMM2, XMM3), "f20f5cd3"),
+    ("mulsd xmm0, xmm1",  lambda a: a.mulsd(XMM0, XMM1), "f20f59c1"),
+    ("divsd xmm0, xmm1",  lambda a: a.divsd(XMM0, XMM1), "f20f5ec1"),
+    # XMM8+ needs REX.R/REX.B, placed after the F2 prefix.
+    ("addsd xmm8, xmm9",  lambda a: a.addsd(XMM8, XMM9), "f2450f58c1"),
+    ("movsd xmm8, [rdi]",
+     lambda a: a.movsd(XMM8, RDI + 0),                  "f2440f1007"),
+    # Integer <-> double conversions (REX.W for the 64-bit GP operand).
+    ("cvtsi2sd xmm0, rdi",
+     lambda a: a.cvtsi2sd(XMM0, RDI),                   "f2480f2ac7"),
+    ("cvttsd2si rax, xmm0",
+     lambda a: a.cvttsd2si(RAX, XMM0),                  "f2480f2cc0"),
+    ("cvttsd2si r10, xmm11",
+     lambda a: a.cvttsd2si(R10, XMM11),                 "f24d0f2cd3"),
 ]
 
 
@@ -951,6 +979,74 @@ def test_run_rip_data_alignment():
         a.ret()
 
     assert run(build, ctypes.c_int64) == 777
+
+
+# --- Scalar-double (SSE2) functional tests. ---
+
+def test_run_addsd():
+    # SysV passes the first two doubles in XMM0/XMM1 and returns in XMM0.
+    def build(a):
+        a.addsd(XMM0, XMM1)
+        a.ret()
+
+    assert run(build, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+               args=(1.5, 2.25)) == 3.75
+
+
+def test_run_subsd():
+    def build(a):
+        a.subsd(XMM0, XMM1)
+        a.ret()
+
+    assert run(build, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+               args=(5.0, 1.25)) == 3.75
+
+
+def test_run_mulsd():
+    def build(a):
+        a.mulsd(XMM0, XMM1)
+        a.ret()
+
+    assert run(build, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+               args=(1.5, 3.0)) == 4.5
+
+
+def test_run_divsd():
+    def build(a):
+        a.divsd(XMM0, XMM1)
+        a.ret()
+
+    assert run(build, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+               args=(9.0, 4.0)) == 2.25
+
+
+def test_run_int_to_double():
+    def build(a):
+        a.cvtsi2sd(XMM0, RDI)  # convert the int arg (RDI) into the XMM0 return
+        a.ret()
+
+    assert run(build, ctypes.c_double, ctypes.c_int64, args=(7,)) == 7.0
+
+
+def test_run_double_to_int():
+    def build(a):
+        a.cvttsd2si(RAX, XMM0)  # truncate the double arg (XMM0) into RAX
+        a.ret()
+
+    assert run(build, ctypes.c_int64, ctypes.c_double, args=(3.9,)) == 3
+
+
+def test_run_scalar_double_across_registers():
+    # (a * b) + a, exercising mul/add and movsd across several XMM registers.
+    def build(a):
+        a.movsd(XMM2, XMM0)   # keep a
+        a.mulsd(XMM0, XMM1)   # a*b
+        a.addsd(XMM0, XMM2)   # + a
+        a.ret()
+
+    result = run(build, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+                 args=(2.5, 4.0))
+    assert result == (2.5 * 4.0) + 2.5
 
 
 def test_entries_are_aligned():

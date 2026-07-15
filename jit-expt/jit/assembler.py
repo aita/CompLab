@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from .operands import Mem, Reg, _RipRel
+from .operands import Mem, Reg, Xmm, _RipRel
 
 
 @dataclass(frozen=True)
@@ -134,6 +134,21 @@ class Assembler:
         # Reg-to-reg (mod=11): reg = source, rm = destination.
         modrm = 0xC0 | ((int(reg_src) & 7) << 3) | (int(reg_dst) & 7)
         self.code.emit(modrm)
+
+    def _emit_sse_prefix(self, reg: int | None, rm: int | None,
+                         index: int | None = None, *, w: bool = False):
+        # Scalar-SSE prefix path. The mandatory prefix (F2 for the scalar-double
+        # ops) comes BEFORE the REX byte, which comes before the 0F escape and
+        # opcode. This is deliberately separate from _emit_prefixes, which emits
+        # the 0x66 operand-size prefix for 16-bit and derives REX.W from the
+        # operand size; here REX.W is set only for the 64-bit convert ops (`w`).
+        self.code.emit(0xF2)  # mandatory prefix
+        r = (int(reg) >> 3) if reg is not None else 0
+        x = (int(index) >> 3) if index is not None else 0
+        b = (int(rm) >> 3) if rm is not None else 0
+        if w or r or x or b:
+            self.code.emit(0x40 | ((1 if w else 0) << 3) | (r << 2) | (x << 1) | b)
+        self.code.emit(0x0F)  # two-byte opcode escape
 
     _SCALE_BITS = {1: 0, 2: 1, 4: 2, 8: 3}
 
@@ -516,6 +531,99 @@ class Assembler:
         self._emit_prefixes(dst.bitsize, dst, src.base, src.index)
         self.code.emit(0x8D)  # LEA r, m
         self._emit_modrm_mem(dst, src)
+
+    # --- Scalar-double (SSE2) floating point ---------------------------------
+    #
+    # Each of these operates on the low 64 bits of an XMM register as an IEEE
+    # double. They share the mandatory F2 prefix, an optional REX (emitted after
+    # F2, before the 0F escape) and the two-byte 0F opcode map; see
+    # _emit_sse_prefix. In the reg-reg / reg-mem forms the XMM destination is the
+    # ModR/M.reg operand and the source is the r/m operand.
+
+    def movsd(self, dst: Xmm | Mem, src: Xmm | Mem):
+        """Move a scalar double (low 64 bits of an XMM). Load xmm<-xmm/m64 is
+        F2 0F 10 /r; store m64<-xmm is F2 0F 11 /r."""
+        match dst, src:
+            case Xmm(), Xmm():
+                self._emit_sse_prefix(dst, src)
+                self.code.emit(0x10)
+                self._emit_modrm(src, dst)  # reg=dst, rm=src
+            case Xmm(), Mem():
+                self._emit_sse_prefix(dst, src.base, src.index)
+                self.code.emit(0x10)  # load
+                self._emit_modrm_mem(dst, src)
+            case Mem(), Xmm():
+                self._emit_sse_prefix(src, dst.base, dst.index)
+                self.code.emit(0x11)  # store
+                self._emit_modrm_mem(src, dst)
+            case _:
+                raise TypeError(f"unsupported MOVSD operands: {dst!r}, {src!r}")
+
+    def addsd(self, dst: Xmm, src: Xmm | Mem):
+        """Add scalar doubles (dst += src). F2 0F 58 /r."""
+        self._sse_binary(0x58, dst, src)
+
+    def subsd(self, dst: Xmm, src: Xmm | Mem):
+        """Subtract scalar doubles (dst -= src). F2 0F 5C /r."""
+        self._sse_binary(0x5C, dst, src)
+
+    def mulsd(self, dst: Xmm, src: Xmm | Mem):
+        """Multiply scalar doubles (dst *= src). F2 0F 59 /r."""
+        self._sse_binary(0x59, dst, src)
+
+    def divsd(self, dst: Xmm, src: Xmm | Mem):
+        """Divide scalar doubles (dst /= src). F2 0F 5E /r."""
+        self._sse_binary(0x5E, dst, src)
+
+    def _sse_binary(self, opcode: int, dst: Xmm, src: Xmm | Mem):
+        # F2 0F <opcode> /r, form xmm1, xmm2/m64: dst is ModR/M.reg, src is r/m.
+        if not isinstance(dst, Xmm):
+            raise TypeError(f"scalar-double destination must be an XMM: {dst!r}")
+        match src:
+            case Xmm():
+                self._emit_sse_prefix(dst, src)
+                self.code.emit(opcode)
+                self._emit_modrm(src, dst)  # reg=dst, rm=src
+            case Mem():
+                self._emit_sse_prefix(dst, src.base, src.index)
+                self.code.emit(opcode)
+                self._emit_modrm_mem(dst, src)
+            case _:
+                raise TypeError(f"unsupported scalar-double source: {src!r}")
+
+    def cvtsi2sd(self, dst: Xmm, src: Reg | Mem):
+        """Convert a signed 64-bit integer (GP reg/m64) to a double in dst.
+        F2 REX.W 0F 2A /r; REX.W is required for the 64-bit source."""
+        if not isinstance(dst, Xmm):
+            raise TypeError(f"cvtsi2sd destination must be an XMM: {dst!r}")
+        match src:
+            case Reg():
+                self._emit_sse_prefix(dst, src, w=True)
+                self.code.emit(0x2A)
+                self._emit_modrm(src, dst)  # reg=dst, rm=src
+            case Mem():
+                self._emit_sse_prefix(dst, src.base, src.index, w=True)
+                self.code.emit(0x2A)
+                self._emit_modrm_mem(dst, src)
+            case _:
+                raise TypeError(f"unsupported cvtsi2sd source: {src!r}")
+
+    def cvttsd2si(self, dst: Reg, src: Xmm | Mem):
+        """Convert (truncating) a double (xmm/m64) to a signed 64-bit integer in
+        the GP register dst. F2 REX.W 0F 2C /r; REX.W is required."""
+        if not isinstance(dst, Reg):
+            raise TypeError(f"cvttsd2si destination must be a GP register: {dst!r}")
+        match src:
+            case Xmm():
+                self._emit_sse_prefix(dst, src, w=True)
+                self.code.emit(0x2C)
+                self._emit_modrm(src, dst)  # reg=dst, rm=src
+            case Mem():
+                self._emit_sse_prefix(dst, src.base, src.index, w=True)
+                self.code.emit(0x2C)
+                self._emit_modrm_mem(dst, src)
+            case _:
+                raise TypeError(f"unsupported cvttsd2si source: {src!r}")
 
     def ret(self):
         self.code.emit(0xC3)  # RET opcode
