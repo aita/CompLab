@@ -86,6 +86,26 @@ ENCODINGS = [
     ("pop rax",          lambda a: a.pop(RAX),          "58"),
     ("pop r12",          lambda a: a.pop(R12),          "415c"),
     ("leave",            lambda a: a.leave(),           "c9"),
+    # Bitwise, unary, test, multiply, and lea.
+    ("and rax, rbx",     lambda a: a.and_(RAX, RBX),    "4821d8"),
+    ("or rax, rbx",      lambda a: a.or_(RAX, RBX),     "4809d8"),
+    ("xor rax, rbx",     lambda a: a.xor(RAX, RBX),     "4831d8"),
+    ("xor eax, eax",     lambda a: a.xor(EAX, EAX),     "31c0"),
+    ("or rax, 1",        lambda a: a.or_(RAX, 1),       "4883c801"),
+    ("not rax",          lambda a: a.not_(RAX),         "48f7d0"),
+    ("neg rax",          lambda a: a.neg(RAX),          "48f7d8"),
+    ("neg r8",           lambda a: a.neg(R8),           "49f7d8"),
+    ("test rax, rax",    lambda a: a.test(RAX, RAX),    "4885c0"),
+    ("test eax, eax",    lambda a: a.test(EAX, EAX),    "85c0"),
+    ("imul rax, rbx",    lambda a: a.imul(RAX, RBX),    "480fafc3"),
+    ("imul rax, [rdi]",  lambda a: a.imul(RAX, RDI + 0), "480faf07"),
+    ("imul rax, 3",      lambda a: a.imul(RAX, 3),      "486bc003"),
+    ("imul rax, 1000",   lambda a: a.imul(RAX, 1000),   "4869c0e8030000"),
+    ("lea rax, [rdi+8]", lambda a: a.lea(RAX, RDI + 8), "488d4708"),
+    ("lea rax, [rdi+rsi*4]",
+     lambda a: a.lea(RAX, RDI + RSI * 4),               "488d04b7"),
+    ("lea rax, [rdi+rsi*4+16]",
+     lambda a: a.lea(RAX, RDI + RSI * 4 + 16),          "488d44b710"),
 ]
 
 
@@ -329,6 +349,56 @@ def test_run_calls_another_jit_function():
 
     fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(caller_addr)
     assert fn(41) == 42
+
+
+def test_run_multiply():
+    # return rdi * rsi
+    def build(a):
+        a.mov(RAX, RDI)
+        a.imul(RAX, RSI)
+        a.ret()
+
+    result = run(build, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+                 args=(6, 7))
+    assert result == 42
+
+
+def test_run_lea_address_math():
+    # return rdi + rsi*4 + 8, computed purely with lea (no memory access)
+    def build(a):
+        a.lea(RAX, RDI + RSI * 4 + 8)
+        a.ret()
+
+    result = run(build, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+                 args=(10, 3))
+    assert result == 30
+
+
+def test_run_bitwise_mask():
+    # return rdi & 0xff
+    def build(a):
+        a.mov(RAX, RDI)
+        a.and_(RAX, 0xFF)
+        a.ret()
+
+    for x in (0x1234, 0xFF, 0x100, 0):
+        result = run(build, ctypes.c_int64, ctypes.c_int64, args=(x,))
+        assert result == (x & 0xFF)
+
+
+def test_run_test_and_branch():
+    # return 0 if rdi == 0 else 1, using `test rdi, rdi; je`
+    def build(a):
+        zero = Label("zero")
+        a.xor(RAX, RAX)        # rax = 0  (the classic zeroing idiom)
+        a.test(RDI, RDI)
+        a.je(zero)
+        a.mov(RAX, 1)
+        a.bind(zero)
+        a.ret()
+
+    assert run(build, ctypes.c_int64, ctypes.c_int64, args=(0,)) == 0
+    assert run(build, ctypes.c_int64, ctypes.c_int64, args=(42,)) == 1
 
 
 def _const_fn(value):

@@ -242,6 +242,18 @@ class Assembler:
         """Compare dst with src (dst - src), setting flags only."""
         self._alu(0x38, 7, dst, src)
 
+    def and_(self, dst: Reg | Mem, src: Reg | Mem | int):
+        """Bitwise AND src into dst (dst &= src)."""
+        self._alu(0x20, 4, dst, src)
+
+    def or_(self, dst: Reg | Mem, src: Reg | Mem | int):
+        """Bitwise OR src into dst (dst |= src)."""
+        self._alu(0x08, 1, dst, src)
+
+    def xor(self, dst: Reg | Mem, src: Reg | Mem | int):
+        """Bitwise XOR src into dst (dst ^= src)."""
+        self._alu(0x30, 6, dst, src)
+
     def _alu(self, base: int, ext: int, dst: Reg | Mem, src: Reg | Mem | int):
         # `base` is the r/m<-r opcode of the ALU family (ADD=0x00, SUB=0x28,
         # CMP=0x38, ...); the other forms are fixed offsets from it. `ext` is
@@ -287,6 +299,70 @@ class Assembler:
             imm_size = min(dst.bitsize // 8, 4)  # imm32 is max (sign-extended on 64)
         self._emit_modrm(dst, ext)  # mod=11, reg=ext (opcode extension), rm=dst
         self.code.emit_int(self._encode_imm(imm, imm_size), imm_size)
+
+    def imul(self, dst: Reg, src: Reg | Mem | int):
+        """Signed multiply into dst (dst *= src)."""
+        match dst, src:
+            case Reg(), Reg():
+                self._emit_prefixes(dst.bitsize, dst, src)
+                self.code.emit(0x0F)
+                self.code.emit(0xAF)  # IMUL r, r/m
+                self._emit_modrm(src, dst)  # reg=dst, rm=src
+            case Reg(), Mem():
+                self._emit_prefixes(dst.bitsize, dst, src.base, src.index)
+                self.code.emit(0x0F)
+                self.code.emit(0xAF)
+                self._emit_modrm_mem(dst, src)
+            case Reg(), int():
+                # imul dst, dst, imm  (three-operand form with dst as source)
+                self._emit_prefixes(dst.bitsize, dst, dst)
+                if -128 <= src <= 127:
+                    self.code.emit(0x6B)  # IMUL r, r/m, imm8
+                    imm_size = 1
+                else:
+                    self.code.emit(0x69)  # IMUL r, r/m, imm32
+                    imm_size = min(dst.bitsize // 8, 4)
+                self._emit_modrm(dst, dst)  # reg=dst, rm=dst
+                self.code.emit_int(self._encode_imm(src, imm_size), imm_size)
+            case _:
+                raise TypeError(f"unsupported IMUL operands: {dst!r}, {src!r}")
+
+    def not_(self, dst: Reg):
+        """Bitwise NOT in place (one's complement)."""
+        self._unary(2, dst)
+
+    def neg(self, dst: Reg):
+        """Two's-complement negate in place (dst = -dst)."""
+        self._unary(3, dst)
+
+    def _unary(self, ext: int, dst: Reg):
+        # F7 /ext (F6 for 8-bit): the ModR/M.reg field selects not(/2), neg(/3).
+        self._emit_prefixes(dst.bitsize, None, dst)
+        self.code.emit(0xF6 if dst.bitsize == 8 else 0xF7)
+        self._emit_modrm(dst, ext)  # reg=ext, rm=dst
+
+    def test(self, a: Reg, b: Reg | int):
+        """Set flags from a AND b, discarding the result."""
+        match a, b:
+            case Reg(), Reg():
+                self._check_sizes(a, b)
+                self._emit_prefixes(a.bitsize, b, a)
+                self.code.emit(0x84 if a.bitsize == 8 else 0x85)  # TEST r/m, r
+                self._emit_modrm(a, b)  # rm=a, reg=b
+            case Reg(), int():
+                self._emit_prefixes(a.bitsize, None, a)
+                self.code.emit(0xF6 if a.bitsize == 8 else 0xF7)  # TEST r/m, imm /0
+                self._emit_modrm(a, 0)  # reg=0, rm=a
+                imm_size = 1 if a.bitsize == 8 else min(a.bitsize // 8, 4)
+                self.code.emit_int(self._encode_imm(b, imm_size), imm_size)
+            case _:
+                raise TypeError(f"unsupported TEST operands: {a!r}, {b!r}")
+
+    def lea(self, dst: Reg, src: Mem):
+        """Load the effective address of src into dst (no memory access)."""
+        self._emit_prefixes(dst.bitsize, dst, src.base, src.index)
+        self.code.emit(0x8D)  # LEA r, m
+        self._emit_modrm_mem(dst, src)
 
     def ret(self):
         self.code.emit(0xC3)  # RET opcode
