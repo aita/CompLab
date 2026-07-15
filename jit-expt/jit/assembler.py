@@ -197,48 +197,32 @@ class Assembler:
         """Move src into dst."""
         match dst, src:
             case Reg(), Reg():
-                self._mov_reg_reg(dst, src)
+                self._check_sizes(dst, src)
+                self._emit_prefixes(dst.bitsize, src, dst)
+                self.code.emit(0x88 if dst.bitsize == 8 else 0x89)  # MOV r/m, r
+                self._emit_modrm(dst, src)
             case Reg(), Mem():
-                self._mov_reg_mem(dst, src)
+                self._emit_prefixes(dst.bitsize, dst, src.base, src.index)
+                self.code.emit(0x8A if dst.bitsize == 8 else 0x8B)  # MOV r, r/m
+                self._emit_modrm_mem(dst, src)
             case Mem(), Reg():
-                self._mov_mem_reg(dst, src)
+                self._emit_prefixes(src.bitsize, src, dst.base, dst.index)
+                self.code.emit(0x88 if src.bitsize == 8 else 0x89)  # MOV r/m, r
+                self._emit_modrm_mem(src, dst)
             case Reg(), int():
-                self._mov_reg_imm(dst, src)
+                self._emit_prefixes(dst.bitsize, None, dst)
+                self.code.emit((0xB0 if dst.bitsize == 8 else 0xB8) + (int(dst) & 7))
+                size = dst.bitsize // 8  # full-width immediate (imm8/16/32/64)
+                self.code.emit_int(self._encode_imm(src, size), size)
             case Mem(), int():
-                self._mov_mem_imm(dst, src)
+                bits = self._mem_bitsize(dst)
+                self._emit_prefixes(bits, None, dst.base, dst.index)
+                self.code.emit(0xC6 if bits == 8 else 0xC7)  # MOV r/m, imm (/0)
+                self._emit_modrm_mem(0, dst)  # reg field = 0 (opcode extension /0)
+                size = 1 if bits == 8 else min(bits // 8, 4)
+                self.code.emit_int(self._encode_imm(src, size), size)
             case _:
                 raise TypeError(f"unsupported MOV operands: {dst!r}, {src!r}")
-
-    def _mov_reg_reg(self, reg_dst: Reg, reg_src: Reg):
-        self._check_sizes(reg_dst, reg_src)
-        self._emit_prefixes(reg_dst.bitsize, reg_src, reg_dst)
-        self.code.emit(0x88 if reg_dst.bitsize == 8 else 0x89)  # MOV r/m, r
-        self._emit_modrm(reg_dst, reg_src)
-
-    def _mov_reg_imm(self, reg_dst: Reg, imm: int):
-        self._emit_prefixes(reg_dst.bitsize, None, reg_dst)
-        base = 0xB0 if reg_dst.bitsize == 8 else 0xB8  # MOV r, imm
-        self.code.emit(base + (int(reg_dst) & 7))
-        imm_size = reg_dst.bitsize // 8  # full-width immediate (imm8/16/32/64)
-        self.code.emit_int(self._encode_imm(imm, imm_size), imm_size)
-
-    def _mov_reg_mem(self, reg_dst: Reg, mem_src: Mem):
-        self._emit_prefixes(reg_dst.bitsize, reg_dst, mem_src.base, mem_src.index)
-        self.code.emit(0x8A if reg_dst.bitsize == 8 else 0x8B)  # MOV r, r/m (load)
-        self._emit_modrm_mem(reg_dst, mem_src)
-
-    def _mov_mem_reg(self, mem_dst: Mem, reg_src: Reg):
-        self._emit_prefixes(reg_src.bitsize, reg_src, mem_dst.base, mem_dst.index)
-        self.code.emit(0x88 if reg_src.bitsize == 8 else 0x89)  # MOV r/m, r (store)
-        self._emit_modrm_mem(reg_src, mem_dst)
-
-    def _mov_mem_imm(self, mem_dst: Mem, imm: int):
-        bits = self._mem_bitsize(mem_dst)
-        self._emit_prefixes(bits, None, mem_dst.base, mem_dst.index)
-        self.code.emit(0xC6 if bits == 8 else 0xC7)  # MOV r/m, imm  (/0)
-        self._emit_modrm_mem(0, mem_dst)  # reg field = 0 (opcode extension /0)
-        imm_size = 1 if bits == 8 else min(bits // 8, 4)
-        self.code.emit_int(self._encode_imm(imm, imm_size), imm_size)
 
     def add(self, dst: Reg | Mem, src: Reg | Mem | int):
         """Add src into dst (dst += src)."""
@@ -266,66 +250,48 @@ class Assembler:
 
     def _alu(self, base: int, ext: int, dst: Reg | Mem, src: Reg | Mem | int):
         # `base` is the r/m<-r opcode of the ALU family (ADD=0x00, SUB=0x28,
-        # CMP=0x38, ...); the other forms are fixed offsets from it. `ext` is
-        # the ModR/M.reg extension digit used by the immediate forms.
+        # CMP=0x38, AND=0x20, OR=0x08, XOR=0x30); the other forms are fixed
+        # offsets from it. `ext` is the ModR/M.reg extension digit used by the
+        # immediate forms.
         match dst, src:
             case Reg(), Reg():
-                self._alu_reg_reg(base, dst, src)
+                self._check_sizes(dst, src)
+                self._emit_prefixes(dst.bitsize, src, dst)
+                self.code.emit(base + (0 if dst.bitsize == 8 else 1))  # r/m, r
+                self._emit_modrm(dst, src)
             case Reg(), Mem():
-                self._alu_reg_mem(base, dst, src)
+                self._emit_prefixes(dst.bitsize, dst, src.base, src.index)
+                self.code.emit(base + (2 if dst.bitsize == 8 else 3))  # r, r/m
+                self._emit_modrm_mem(dst, src)
             case Mem(), Reg():
-                self._alu_mem_reg(base, dst, src)
+                self._emit_prefixes(src.bitsize, src, dst.base, dst.index)
+                self.code.emit(base + (0 if src.bitsize == 8 else 1))  # r/m, r
+                self._emit_modrm_mem(src, dst)
             case Reg(), int():
-                self._alu_reg_imm(ext, dst, src)
+                self._emit_prefixes(dst.bitsize, None, dst)
+                size = self._emit_alu_imm_opcode(dst.bitsize, src)
+                self._emit_modrm(dst, ext)  # reg=ext (opcode extension), rm=dst
+                self.code.emit_int(self._encode_imm(src, size), size)
             case Mem(), int():
-                self._alu_mem_imm(ext, dst, src)
+                bits = self._mem_bitsize(dst)
+                self._emit_prefixes(bits, None, dst.base, dst.index)
+                size = self._emit_alu_imm_opcode(bits, src)
+                self._emit_modrm_mem(ext, dst)  # reg field = ext
+                self.code.emit_int(self._encode_imm(src, size), size)
             case _:
                 raise TypeError(f"unsupported ALU operands: {dst!r}, {src!r}")
 
-    def _alu_reg_reg(self, base: int, dst: Reg, src: Reg):
-        self._check_sizes(dst, src)
-        self._emit_prefixes(dst.bitsize, src, dst)
-        self.code.emit(base + (0 if dst.bitsize == 8 else 1))  # <op> r/m, r
-        self._emit_modrm(dst, src)
-
-    def _alu_reg_mem(self, base: int, dst: Reg, mem: Mem):
-        self._emit_prefixes(dst.bitsize, dst, mem.base, mem.index)
-        self.code.emit(base + (2 if dst.bitsize == 8 else 3))  # <op> r, r/m (load)
-        self._emit_modrm_mem(dst, mem)
-
-    def _alu_mem_reg(self, base: int, mem: Mem, src: Reg):
-        self._emit_prefixes(src.bitsize, src, mem.base, mem.index)
-        self.code.emit(base + (0 if src.bitsize == 8 else 1))  # <op> r/m, r (store)
-        self._emit_modrm_mem(src, mem)
-
-    def _alu_reg_imm(self, ext: int, dst: Reg, imm: int):
-        self._emit_prefixes(dst.bitsize, None, dst)
-        if dst.bitsize == 8:
-            self.code.emit(0x80)  # <op> r/m8, imm8
-            imm_size = 1
-        elif -128 <= imm <= 127:
-            self.code.emit(0x83)  # <op> r/m, imm8 (sign-extended)
-            imm_size = 1
-        else:
-            self.code.emit(0x81)  # <op> r/m, imm16/32
-            imm_size = min(dst.bitsize // 8, 4)  # imm32 is max (sign-extended on 64)
-        self._emit_modrm(dst, ext)  # mod=11, reg=ext (opcode extension), rm=dst
-        self.code.emit_int(self._encode_imm(imm, imm_size), imm_size)
-
-    def _alu_mem_imm(self, ext: int, mem: Mem, imm: int):
-        bits = self._mem_bitsize(mem)
-        self._emit_prefixes(bits, None, mem.base, mem.index)
+    def _emit_alu_imm_opcode(self, bits: int, imm: int) -> int:
+        # Emit the ALU immediate-form opcode for a `bits`-wide destination and
+        # return the immediate's byte width.
         if bits == 8:
             self.code.emit(0x80)  # <op> r/m8, imm8
-            imm_size = 1
-        elif -128 <= imm <= 127:
+            return 1
+        if -128 <= imm <= 127:
             self.code.emit(0x83)  # <op> r/m, imm8 (sign-extended)
-            imm_size = 1
-        else:
-            self.code.emit(0x81)  # <op> r/m, imm16/32
-            imm_size = min(bits // 8, 4)
-        self._emit_modrm_mem(ext, mem)  # reg field = ext (opcode extension)
-        self.code.emit_int(self._encode_imm(imm, imm_size), imm_size)
+            return 1
+        self.code.emit(0x81)  # <op> r/m, imm16/32
+        return min(bits // 8, 4)  # imm32 is max (sign-extended on 64)
 
     @staticmethod
     def _mem_bitsize(mem: Mem) -> int:
