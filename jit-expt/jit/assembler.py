@@ -6,13 +6,30 @@ from .operands import Mem, Reg
 
 
 @dataclass(frozen=True)
+class Symbol:
+    """A named 64-bit address referenced with `mov reg, Symbol(name)`. Its
+    real address is supplied to Runtime.add(symbols=...) at load time."""
+
+    name: str
+
+
+@dataclass(frozen=True)
+class Reloc:
+    """An absolute 64-bit relocation: patch the 8 bytes at `offset` with the
+    address of `symbol` once it is known."""
+
+    offset: int
+    symbol: str
+
+
+@dataclass(frozen=True)
 class ObjectCode:
     """Assembled machine code produced by Assembler.finalize(): the resolved
-    bytes, plus any relocations still needing the final load address (none
-    yet — reserved for future absolute references)."""
+    bytes, plus any absolute relocations still needing final addresses, which
+    Runtime.add() fills in from its symbol table."""
 
     code: bytes
-    relocs: tuple = ()
+    relocs: tuple[Reloc, ...] = ()
 
 
 class CodeBuffer:
@@ -56,6 +73,7 @@ class Assembler:
     def __init__(self):
         self.code = CodeBuffer()
         self._fixups: list[tuple[int, Label]] = []  # (rel32 offset, target)
+        self._relocs: list[Reloc] = []  # absolute symbol relocations
 
     def _emit_prefixes(self, bitsize: int, reg: Reg | None, rm: Reg | None,
                        index: Reg | None = None):
@@ -193,9 +211,16 @@ class Assembler:
                              f"{bits}-bit field [{lo}, {hi}]")
         return imm & hi
 
-    def mov(self, dst: Reg | Mem, src: Reg | Mem | int):
+    def mov(self, dst: Reg | Mem, src: Reg | Mem | int | Symbol):
         """Move src into dst."""
         match dst, src:
+            case Reg(), Symbol():
+                if dst.bitsize != 64:
+                    raise ValueError("a symbol address needs a 64-bit register")
+                self._emit_prefixes(64, None, dst)  # REX.W movabs
+                self.code.emit(0xB8 + (int(dst) & 7))  # MOV r64, imm64
+                self._relocs.append(Reloc(len(self.code), src.name))
+                self.code.emit_int(0, 8)  # 8-byte placeholder, patched at load
             case Reg(), Reg():
                 self._check_sizes(dst, src)
                 self._emit_prefixes(dst.bitsize, src, dst)
@@ -501,7 +526,7 @@ class Assembler:
         mutate the assembler, so it is safe to call more than once."""
         out = CodeBuffer(self.code.code)  # copy, so finalize stays non-destructive
         self._link(out)
-        return ObjectCode(bytes(out.code))
+        return ObjectCode(bytes(out.code), tuple(self._relocs))
 
     def _link(self, buf: CodeBuffer) -> None:
         """Backpatch each recorded jump fixup's rel32 field in `buf`."""

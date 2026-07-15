@@ -43,8 +43,17 @@ class Runtime:
         self._align = align
         self._libc = ctypes.CDLL(None, use_errno=True)
 
-    def add(self, obj: ObjectCode) -> int:
-        blob = obj.code
+    def add(self, obj: ObjectCode, symbols: dict[str, int] | None = None) -> int:
+        blob = bytearray(obj.code)
+        # Apply absolute relocations by writing each symbol's address into its
+        # 8-byte placeholder. Symbols must already be known (e.g. a C function
+        # address, or a JIT function added earlier), so add callees first.
+        symbols = symbols or {}
+        for reloc in obj.relocs:
+            if reloc.symbol not in symbols:
+                raise KeyError(f"unresolved symbol {reloc.symbol!r}")
+            addr = symbols[reloc.symbol]
+            blob[reloc.offset:reloc.offset + 8] = addr.to_bytes(8, "little")
         n = len(blob)
 
         page = self._page_with_room(n)
@@ -55,8 +64,6 @@ class Runtime:
         page.buf.seek(offset)
         page.buf.write(blob)
         self._protect(page, write=False)
-        # obj.relocs would be applied here once we support absolute
-        # references that need the now-known base address (none yet).
 
         # Advance the cursor, keeping the next function entry aligned.
         end = offset + n

@@ -22,7 +22,9 @@ from jit import (
     Assembler,
     Label,
     Mem,
+    Reloc,
     Runtime,
+    Symbol,
     byte,
     dword,
     qword,
@@ -408,6 +410,70 @@ def test_run_calls_another_jit_function():
 
     fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(caller_addr)
     assert fn(41) == 42
+
+
+def test_symbol_movabs_reloc():
+    a = Assembler()
+    a.mov(RAX, Symbol("foo"))
+    obj = a.finalize()
+    assert obj.code.hex() == "48b80000000000000000"  # movabs rax, 0 (placeholder)
+    assert obj.relocs == (Reloc(offset=2, symbol="foo"),)
+
+
+def test_symbol_requires_64bit_register():
+    with pytest.raises(ValueError, match="64-bit register"):
+        encode(lambda a: a.mov(EAX, Symbol("x")))
+
+
+def test_add_unresolved_symbol_raises():
+    a = Assembler()
+    a.mov(RAX, Symbol("missing"))
+    a.ret()
+    with pytest.raises(KeyError, match="missing"):
+        Runtime().add(a.finalize())
+
+
+def test_run_calls_c_function_by_symbol():
+    sig = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)
+    callback = sig(lambda x: x + 100)
+    cb_addr = ctypes.cast(callback, ctypes.c_void_p).value
+
+    a = Assembler()
+    a.push(RBP)
+    a.mov(RBP, RSP)
+    a.mov(RAX, Symbol("cb"))    # address resolved at load time
+    a.call(RAX)
+    a.leave()
+    a.ret()
+
+    rt = Runtime()
+    addr = rt.add(a.finalize(), symbols={"cb": cb_addr})
+    fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(addr)
+    assert fn(5) == 105
+    assert callback  # keep alive
+
+
+def test_run_jit_calls_jit_by_symbol():
+    rt = Runtime()
+
+    # square(x) = x * x, added first so its address is known
+    callee = Assembler()
+    callee.mov(RAX, RDI)
+    callee.imul(RAX, RDI)
+    callee.ret()
+    square_addr = rt.add(callee.finalize())
+
+    caller = Assembler()
+    caller.push(RBP)
+    caller.mov(RBP, RSP)
+    caller.mov(RAX, Symbol("square"))
+    caller.call(RAX)
+    caller.leave()
+    caller.ret()
+    caller_addr = rt.add(caller.finalize(), symbols={"square": square_addr})
+
+    fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(caller_addr)
+    assert fn(9) == 81
 
 
 def test_run_multiply():
