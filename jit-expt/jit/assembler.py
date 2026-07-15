@@ -10,7 +10,8 @@ class Assembler:
     def __init__(self, code: CodeBuffer):
         self.code = code
 
-    def _emit_prefixes(self, bitsize: int, reg, rm, index=None):
+    def _emit_prefixes(self, bitsize: int, reg: Reg | None, rm: Reg | None,
+                       index: Reg | None = None):
         # Operand-size prefix for 16-bit, then REX if required.
         #   reg   -> the ModR/M.reg operand (None if none, e.g. reg-imm)
         #   rm    -> the ModR/M.rm operand or the memory base
@@ -145,7 +146,7 @@ class Assembler:
                              f"{bits}-bit field [{lo}, {hi}]")
         return imm & hi
 
-    def mov(self, dst, src):
+    def mov(self, dst: Reg | Mem, src: Reg | Mem | int):
         """Emit a MOV, dispatching on the operand types (and sizes)."""
         match dst, src:
             case Reg(), Reg():
@@ -182,19 +183,19 @@ class Assembler:
         self.code.emit(0x88 if reg_src.bitsize == 8 else 0x89)  # MOV r/m, r (store)
         self._emit_modrm_mem(reg_src, mem_dst)
 
-    def add(self, dst, src):
+    def add(self, dst: Reg | Mem, src: Reg | Mem | int):
         """Emit an ADD, dispatching on the operand types (and sizes)."""
         self._alu(0x00, 0, dst, src)
 
-    def sub(self, dst, src):
+    def sub(self, dst: Reg | Mem, src: Reg | Mem | int):
         """Emit a SUB, dispatching on the operand types (and sizes)."""
         self._alu(0x28, 5, dst, src)
 
-    def cmp(self, dst, src):
+    def cmp(self, dst: Reg | Mem, src: Reg | Mem | int):
         """Emit a CMP, dispatching on the operand types (and sizes)."""
         self._alu(0x38, 7, dst, src)
 
-    def _alu(self, base: int, ext: int, dst, src):
+    def _alu(self, base: int, ext: int, dst: Reg | Mem, src: Reg | Mem | int):
         # `base` is the r/m<-r opcode of the ALU family (ADD=0x00, SUB=0x28,
         # CMP=0x38, ...); the other forms are fixed offsets from it. `ext` is
         # the ModR/M.reg extension digit used by the immediate forms.
