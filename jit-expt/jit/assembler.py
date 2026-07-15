@@ -452,9 +452,37 @@ class Assembler:
         """Jump if greater or equal, signed (SF=OF)."""
         self._jcc("ge", target)
 
+    # Unsigned variants (ja/jae/jb/jbe) read as "dst <cond> src" after
+    # `cmp dst, src` when the operands are treated as unsigned.
+
+    def ja(self, target: Label):
+        """Jump if above, unsigned (CF=0 and ZF=0)."""
+        self._jcc("a", target)
+
+    def jae(self, target: Label):
+        """Jump if above or equal, unsigned (CF=0)."""
+        self._jcc("ae", target)
+
+    def jb(self, target: Label):
+        """Jump if below, unsigned (CF=1)."""
+        self._jcc("b", target)
+
+    def jbe(self, target: Label):
+        """Jump if below or equal, unsigned (CF=1 or ZF=1)."""
+        self._jcc("be", target)
+
+    def js(self, target: Label):
+        """Jump if sign (SF=1), i.e. the result was negative."""
+        self._jcc("s", target)
+
+    def jns(self, target: Label):
+        """Jump if not sign (SF=0), i.e. the result was non-negative."""
+        self._jcc("ns", target)
+
     # Condition codes: the low nibble of the 0F 8x conditional-jump opcodes.
     _CC = {"e": 0x4, "z": 0x4, "ne": 0x5, "nz": 0x5,
-           "l": 0xC, "ge": 0xD, "le": 0xE, "g": 0xF}
+           "l": 0xC, "ge": 0xD, "le": 0xE, "g": 0xF,
+           "a": 0x7, "ae": 0x3, "b": 0x2, "be": 0x6, "s": 0x8, "ns": 0x9}
 
     def _jcc(self, cond: str, target: Label):
         # Conditional near jump: 0F 8x rel32, x = condition code.

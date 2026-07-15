@@ -173,6 +173,41 @@ def test_jump_encodings():
     assert encode(_jump_sequence).hex() == expected
 
 
+def _ujump_sequence(a):
+    # ja/jae/jb/jbe/js/jns t; t:
+    t = Label("t")
+    for j in (a.ja, a.jae, a.jb, a.jbe, a.js, a.jns):
+        j(t)
+    a.bind(t)
+
+
+def test_unsigned_jump_encodings():
+    expected = (
+        "0f871e000000" "0f8318000000"        # ja, jae
+        "0f8212000000" "0f860c000000"        # jb, jbe
+        "0f8806000000" "0f8900000000"        # js, jns
+    )
+    assert encode(_ujump_sequence).hex() == expected
+
+
+def test_run_unsigned_min():
+    # return min(rdi, rsi) treating both as unsigned
+    def build(a):
+        first = Label("first")
+        a.mov(RAX, RDI)
+        a.cmp(RDI, RSI)
+        a.jbe(first)       # rdi <= rsi (unsigned) -> keep rdi
+        a.mov(RAX, RSI)
+        a.bind(first)
+        a.ret()
+
+    # -1 as unsigned is the largest 64-bit value, so min(-1, 5) == 5
+    for x, y in [(3, 7), (7, 3), (-1, 5)]:
+        result = run(build, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64,
+                     args=(x & 0xFFFFFFFFFFFFFFFF, y))
+        assert result == min(x & 0xFFFFFFFFFFFFFFFF, y)
+
+
 def test_finalize_unbound_label_raises():
     a = Assembler()
     a.jmp(Label("nowhere"))  # target never bound
