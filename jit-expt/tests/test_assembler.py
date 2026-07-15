@@ -1,4 +1,5 @@
 import ctypes
+import mmap
 
 import pytest
 
@@ -140,3 +141,48 @@ def test_run_store_to_memory():
     run(build, None, ctypes.c_void_p, ctypes.c_int64,
         args=(ctypes.addressof(cell), 99))
     assert cell.value == 99
+
+
+def _const_fn(value):
+    def build(a):
+        a.mov(RAX, value)
+        a.ret()
+
+    return build
+
+
+def test_runtime_pools_functions_into_one_page():
+    # Many small functions should share pages, not take one page each, and
+    # every one must stay executable after later additions flip protections.
+    rt = Runtime()
+    sig = ctypes.CFUNCTYPE(ctypes.c_int64)
+
+    fns = []
+    pages = set()
+    for value in range(50):
+        code = CodeBuffer()
+        _const_fn(value)(Assembler(code))
+        addr = rt.add(code)
+        fns.append((sig(addr), value))
+        pages.add(addr & ~(mmap.PAGESIZE - 1))
+
+    assert len(pages) < 50  # packed, not one page per function
+
+    # Call them in reverse so the earliest-added (most re-protected) run last.
+    for fn, value in reversed(fns):
+        assert fn() == value
+
+
+def test_entries_are_aligned():
+    rt = Runtime(align=16)
+    code = CodeBuffer()
+    _const_fn(1)(Assembler(code))  # 10 bytes (movabs) + 1 (ret) = 11
+    first = rt.add(code)
+
+    code = CodeBuffer()
+    _const_fn(2)(Assembler(code))
+    second = rt.add(code)
+
+    assert first % 16 == 0
+    assert second % 16 == 0
+    assert second - first == 16  # 11 bytes rounded up to the alignment
