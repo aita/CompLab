@@ -6,6 +6,10 @@ import mmap
 from .assembler import ObjectCode, RelocKind
 
 
+def _fits_rel32(rel: int) -> bool:
+    return -(1 << 31) <= rel < (1 << 31)
+
+
 class _Page:
     """One executable mmap and a bump cursor into it."""
 
@@ -43,6 +47,7 @@ class Runtime:
         self._align = align
         self._libc = ctypes.CDLL(None, use_errno=True)
         self._symbols: dict[str, int] = {}  # name -> address
+        self._veneers: dict[int, int] = {}  # far target -> veneer address
 
     def define(self, name: str, addr: int) -> None:
         """Register an external address (e.g. a C function) under `name` so
@@ -52,11 +57,7 @@ class Runtime:
     def add(self, obj: ObjectCode, name: str | None = None,
             symbols: dict[str, int] | None = None) -> int:
         blob = bytearray(obj.code)
-        n = len(blob)
-
-        page = self._page_with_room(n)
-        offset = page.cursor
-        addr = page.base + offset
+        page, offset, addr = self._alloc_slot(len(blob))
 
         # The symbol table for this add: the runtime's registry, plus any
         # one-off symbols, plus this function's own name (so it can recurse).
@@ -65,20 +66,13 @@ class Runtime:
             self._symbols[name] = addr
             table[name] = addr
 
+        # Reserving the slot above means any veneers created while relocating
+        # are placed after this function, not on top of it.
         self._relocate(blob, addr, obj.relocs, table)
-
-        # Flip to writable, copy the function in, then back to read+execute.
-        self._protect(page, write=True)
-        page.buf.seek(offset)
-        page.buf.write(blob)
-        self._protect(page, write=False)
-
-        # Advance the cursor, keeping the next function entry aligned.
-        page.cursor = (offset + n + self._align - 1) & ~(self._align - 1)
+        self._write_slot(page, offset, blob)
         return addr
 
-    @staticmethod
-    def _relocate(blob: bytearray, base: int, relocs, table: dict[str, int]):
+    def _relocate(self, blob: bytearray, base: int, relocs, table: dict[str, int]):
         for r in relocs:
             if r.symbol not in table:
                 raise KeyError(f"unresolved symbol {r.symbol!r}")
@@ -87,10 +81,42 @@ class Runtime:
                 blob[r.offset:r.offset + 8] = target.to_bytes(8, "little")
             else:  # REL32: distance from the end of the 4-byte field
                 rel = target - (base + r.offset + 4)
-                if not (-(1 << 31) <= rel < (1 << 31)):
-                    raise ValueError(
-                        f"symbol {r.symbol!r} too far for a rel32 call ({rel})")
+                if not _fits_rel32(rel):
+                    # Too far for a direct call: route through a near veneer
+                    # that jumps to the absolute target.
+                    rel = self._veneer(target) - (base + r.offset + 4)
+                    if not _fits_rel32(rel):
+                        raise ValueError(
+                            f"symbol {r.symbol!r} unreachable even via a veneer")
                 blob[r.offset:r.offset + 4] = rel.to_bytes(4, "little", signed=True)
+
+    def _veneer(self, target: int) -> int:
+        """Address of a stub near the code that jumps to `target` (created and
+        cached on first use). Lets a rel32 call reach an arbitrary address."""
+        if target not in self._veneers:
+            stub = (b"\x49\xbb" + target.to_bytes(8, "little")  # movabs r11, target
+                    + b"\x41\xff\xe3")                          # jmp r11
+            self._veneers[target] = self._place(stub)
+        return self._veneers[target]
+
+    def _place(self, blob: bytes) -> int:
+        """Bump-allocate `blob` into an executable page and return its address."""
+        page, offset, addr = self._alloc_slot(len(blob))
+        self._write_slot(page, offset, blob)
+        return addr
+
+    def _alloc_slot(self, n: int) -> tuple[_Page, int, int]:
+        page = self._page_with_room(n)
+        offset = page.cursor
+        page.cursor = (offset + n + self._align - 1) & ~(self._align - 1)
+        return page, offset, page.base + offset
+
+    def _write_slot(self, page: _Page, offset: int, blob: bytes) -> None:
+        # Flip to writable, copy the bytes in, then back to read+execute.
+        self._protect(page, write=True)
+        page.buf.seek(offset)
+        page.buf.write(blob)
+        self._protect(page, write=False)
 
     def _page_with_room(self, n: int) -> _Page:
         if self._active is not None and self._active.remaining() >= n:

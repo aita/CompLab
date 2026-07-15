@@ -520,6 +520,38 @@ def test_run_recursion_by_symbol():
     assert fn(10) == 3628800
 
 
+def test_run_far_call_uses_veneer():
+    # A rel32 call reaches only +-2GB. Map a target far below the JIT pages so
+    # call(Symbol) must route through a movabs+jmp veneer.
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.mmap.restype = ctypes.c_void_p
+    libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int,
+                          ctypes.c_int, ctypes.c_int, ctypes.c_long]
+    MAP_FIXED_NOREPLACE = 0x100000
+    flags = mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
+    far = None
+    for hint in (0x40000000, 0x50000000, 0x60000000, 0x30000000):
+        if libc.mmap(ctypes.c_void_p(hint), 4096, 1 | 2 | 4, flags, -1, 0) == hint:
+            far = hint
+            break
+    if far is None:
+        pytest.skip("could not map a far executable page")
+    ctypes.memmove(far, bytes([0xB8, 99, 0, 0, 0, 0xC3]), 6)  # mov eax, 99; ret
+
+    rt = Runtime()
+    rt.define("far", far)
+    a = Assembler()
+    a.sub(RSP, 8)
+    a.call(Symbol("far"))
+    a.add(RSP, 8)
+    a.ret()
+    addr = rt.add(a.finalize())
+    assert abs(addr - far) > (1 << 31)  # confirm the target really is far
+    assert rt._veneers                  # a veneer was created for it
+    fn = ctypes.CFUNCTYPE(ctypes.c_int64)(addr)
+    assert fn() == 99
+
+
 def test_run_multiply():
     # return rdi * rsi
     def build(a):
