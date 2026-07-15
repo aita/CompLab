@@ -204,6 +204,8 @@ class Assembler:
                 self._mov_mem_reg(dst, src)
             case Reg(), int():
                 self._mov_reg_imm(dst, src)
+            case Mem(), int():
+                self._mov_mem_imm(dst, src)
             case _:
                 raise TypeError(f"unsupported MOV operands: {dst!r}, {src!r}")
 
@@ -229,6 +231,14 @@ class Assembler:
         self._emit_prefixes(reg_src.bitsize, reg_src, mem_dst.base, mem_dst.index)
         self.code.emit(0x88 if reg_src.bitsize == 8 else 0x89)  # MOV r/m, r (store)
         self._emit_modrm_mem(reg_src, mem_dst)
+
+    def _mov_mem_imm(self, mem_dst: Mem, imm: int):
+        bits = self._mem_bitsize(mem_dst)
+        self._emit_prefixes(bits, None, mem_dst.base, mem_dst.index)
+        self.code.emit(0xC6 if bits == 8 else 0xC7)  # MOV r/m, imm  (/0)
+        self._emit_modrm_mem(0, mem_dst)  # reg field = 0 (opcode extension /0)
+        imm_size = 1 if bits == 8 else min(bits // 8, 4)
+        self.code.emit_int(self._encode_imm(imm, imm_size), imm_size)
 
     def add(self, dst: Reg | Mem, src: Reg | Mem | int):
         """Add src into dst (dst += src)."""
@@ -267,6 +277,8 @@ class Assembler:
                 self._alu_mem_reg(base, dst, src)
             case Reg(), int():
                 self._alu_reg_imm(ext, dst, src)
+            case Mem(), int():
+                self._alu_mem_imm(ext, dst, src)
             case _:
                 raise TypeError(f"unsupported ALU operands: {dst!r}, {src!r}")
 
@@ -299,6 +311,28 @@ class Assembler:
             imm_size = min(dst.bitsize // 8, 4)  # imm32 is max (sign-extended on 64)
         self._emit_modrm(dst, ext)  # mod=11, reg=ext (opcode extension), rm=dst
         self.code.emit_int(self._encode_imm(imm, imm_size), imm_size)
+
+    def _alu_mem_imm(self, ext: int, mem: Mem, imm: int):
+        bits = self._mem_bitsize(mem)
+        self._emit_prefixes(bits, None, mem.base, mem.index)
+        if bits == 8:
+            self.code.emit(0x80)  # <op> r/m8, imm8
+            imm_size = 1
+        elif -128 <= imm <= 127:
+            self.code.emit(0x83)  # <op> r/m, imm8 (sign-extended)
+            imm_size = 1
+        else:
+            self.code.emit(0x81)  # <op> r/m, imm16/32
+            imm_size = min(bits // 8, 4)
+        self._emit_modrm_mem(ext, mem)  # reg field = ext (opcode extension)
+        self.code.emit_int(self._encode_imm(imm, imm_size), imm_size)
+
+    @staticmethod
+    def _mem_bitsize(mem: Mem) -> int:
+        if mem.bitsize is None:
+            raise ValueError("memory operand needs a size; wrap it with "
+                             "byte()/word()/dword()/qword()")
+        return mem.bitsize
 
     def imul(self, dst: Reg, src: Reg | Mem | int):
         """Signed multiply into dst (dst *= src)."""

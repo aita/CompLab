@@ -23,6 +23,10 @@ from jit import (
     Label,
     Mem,
     Runtime,
+    byte,
+    dword,
+    qword,
+    word,
 )
 
 
@@ -106,7 +110,27 @@ ENCODINGS = [
      lambda a: a.lea(RAX, RDI + RSI * 4),               "488d04b7"),
     ("lea rax, [rdi+rsi*4+16]",
      lambda a: a.lea(RAX, RDI + RSI * 4 + 16),          "488d44b710"),
+    # Immediate to memory (size given by byte/word/dword/qword).
+    ("mov qword [rdi], 5",
+     lambda a: a.mov(qword(RDI + 0), 5),                "48c70705000000"),
+    ("mov dword [rdi], 5",
+     lambda a: a.mov(dword(RDI + 0), 5),                "c70705000000"),
+    ("mov word [rdi], 5",
+     lambda a: a.mov(word(RDI + 0), 5),                 "66c7070500"),
+    ("mov byte [rdi], 5",
+     lambda a: a.mov(byte(RDI + 0), 5),                 "c60705"),
+    ("add qword [rdi], 5",
+     lambda a: a.add(qword(RDI + 0), 5),                "48830705"),
+    ("and dword [rdi], 0xff",
+     lambda a: a.and_(dword(RDI + 0), 0xFF),            "8127ff000000"),
+    ("add qword [rdi+rsi*4+16], 7",
+     lambda a: a.add(qword(RDI + RSI * 4 + 16), 7),     "488344b71007"),
 ]
+
+
+def test_memory_immediate_needs_size():
+    with pytest.raises(ValueError, match="needs a size"):
+        encode(lambda a: a.mov(RDI + 0, 5))  # no byte/word/dword/qword
 
 
 def test_call_label_encoding():
@@ -434,6 +458,30 @@ def test_run_test_and_branch():
 
     assert run(build, ctypes.c_int64, ctypes.c_int64, args=(0,)) == 0
     assert run(build, ctypes.c_int64, ctypes.c_int64, args=(42,)) == 1
+
+
+def test_run_store_immediate():
+    # *(int64*)rdi = 12345;  then bump it by 100 with add qword [rdi], 100
+    def build(a):
+        a.mov(qword(RDI + 0), 12345)
+        a.add(qword(RDI + 0), 100)
+        a.ret()
+
+    cell = ctypes.c_int64(0)
+    run(build, None, ctypes.c_void_p, args=(ctypes.addressof(cell),))
+    assert cell.value == 12445
+
+
+def test_run_store_immediate_bytes():
+    # write two bytes at [rdi] and [rdi+1]
+    def build(a):
+        a.mov(byte(RDI + 0), 0xAB)
+        a.mov(byte(RDI + 1), 0xCD)
+        a.ret()
+
+    buf = (ctypes.c_uint8 * 2)(0, 0)
+    run(build, None, ctypes.c_void_p, args=(ctypes.cast(buf, ctypes.c_void_p),))
+    assert list(buf) == [0xAB, 0xCD]
 
 
 def _const_fn(value):

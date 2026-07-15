@@ -47,10 +47,16 @@ class _Index:
 
 
 class Mem:
-    """A memory operand of the form [base + index*scale + disp]."""
+    """A memory operand of the form [base + index*scale + disp].
+
+    `bitsize` is the access width. It stays None when a register operand
+    already fixes the size (e.g. `mov rax, [rdi]`); it must be set via the
+    byte/word/dword/qword helpers when the width is otherwise ambiguous, as
+    in a store of an immediate (`mov qword [rdi], 5`)."""
 
     def __init__(self, base: Reg, disp: int = 0,
-                 index: Reg | None = None, scale: int = 1):
+                 index: Reg | None = None, scale: int = 1,
+                 bitsize: int | None = None):
         if index is not None:
             if scale not in (1, 2, 4, 8):
                 raise ValueError(f"invalid scale {scale}; must be 1, 2, 4, or 8")
@@ -63,16 +69,22 @@ class Mem:
         self.disp = disp
         self.index = index
         self.scale = scale
+        self.bitsize = bitsize
 
     def __add__(self, other) -> Mem:
         if isinstance(other, _Index):
-            return Mem(self.base, self.disp, other.reg, other.scale)
+            return Mem(self.base, self.disp, other.reg, other.scale, self.bitsize)
         if isinstance(other, Reg):
-            return Mem(self.base, self.disp, other, self.scale)
-        return Mem(self.base, self.disp + other, self.index, self.scale)
+            return Mem(self.base, self.disp, other, self.scale, self.bitsize)
+        return Mem(self.base, self.disp + other, self.index, self.scale,
+                   self.bitsize)
 
     def __sub__(self, disp: int) -> Mem:
-        return Mem(self.base, self.disp - disp, self.index, self.scale)
+        return Mem(self.base, self.disp - disp, self.index, self.scale,
+                   self.bitsize)
+
+    def sized(self, bitsize: int) -> Mem:
+        return Mem(self.base, self.disp, self.index, self.scale, bitsize)
 
     def __repr__(self):
         s = f"[{self.base!r}"
@@ -81,6 +93,26 @@ class Mem:
         if self.disp:
             s += f"{self.disp:+d}"
         return s + "]"
+
+
+def byte(mem: Mem) -> Mem:
+    """Annotate a memory operand as an 8-bit access."""
+    return mem.sized(8)
+
+
+def word(mem: Mem) -> Mem:
+    """Annotate a memory operand as a 16-bit access."""
+    return mem.sized(16)
+
+
+def dword(mem: Mem) -> Mem:
+    """Annotate a memory operand as a 32-bit access."""
+    return mem.sized(32)
+
+
+def qword(mem: Mem) -> Mem:
+    """Annotate a memory operand as a 64-bit access."""
+    return mem.sized(64)
 
 
 # Register tables, indexed by encoding number 0..15.
@@ -117,4 +149,5 @@ AL, CL, DL, BL, SPL, BPL, SIL, DIL, \
 AH, CH, DH, BH = (Reg(code, name, 8, high=True) for code, name in _R8H.items())
 
 
-__all__ = ["Reg", "Mem", *_R64, *_R32, *_R16, *_R8, "AH", "CH", "DH", "BH"]
+__all__ = ["Reg", "Mem", "byte", "word", "dword", "qword",
+           *_R64, *_R32, *_R16, *_R8, "AH", "CH", "DH", "BH"]
