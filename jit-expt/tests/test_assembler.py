@@ -23,6 +23,7 @@ from jit import (
     Label,
     Mem,
     Reloc,
+    RelocKind,
     Runtime,
     Symbol,
     byte,
@@ -412,12 +413,20 @@ def test_run_calls_another_jit_function():
     assert fn(41) == 42
 
 
-def test_symbol_movabs_reloc():
+def test_mov_symbol_is_abs64_reloc():
     a = Assembler()
     a.mov(RAX, Symbol("foo"))
     obj = a.finalize()
     assert obj.code.hex() == "48b80000000000000000"  # movabs rax, 0 (placeholder)
-    assert obj.relocs == (Reloc(offset=2, symbol="foo"),)
+    assert obj.relocs == (Reloc(offset=2, symbol="foo", kind=RelocKind.ABS64),)
+
+
+def test_call_symbol_is_rel32_reloc():
+    a = Assembler()
+    a.call(Symbol("bar"))
+    obj = a.finalize()
+    assert obj.code.hex() == "e800000000"  # E8 + 4-byte rel32 placeholder
+    assert obj.relocs == (Reloc(offset=1, symbol="bar", kind=RelocKind.REL32),)
 
 
 def test_symbol_requires_64bit_register():
@@ -434,6 +443,8 @@ def test_add_unresolved_symbol_raises():
 
 
 def test_run_calls_c_function_by_symbol():
+    # A C function can be far away, so load its absolute address (ABS64) into a
+    # register and call indirectly. Its address is registered with define().
     sig = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)
     callback = sig(lambda x: x + 100)
     cb_addr = ctypes.cast(callback, ctypes.c_void_p).value
@@ -441,13 +452,14 @@ def test_run_calls_c_function_by_symbol():
     a = Assembler()
     a.push(RBP)
     a.mov(RBP, RSP)
-    a.mov(RAX, Symbol("cb"))    # address resolved at load time
+    a.mov(RAX, Symbol("cb"))    # ABS64 reloc, resolved from the symbol table
     a.call(RAX)
     a.leave()
     a.ret()
 
     rt = Runtime()
-    addr = rt.add(a.finalize(), symbols={"cb": cb_addr})
+    rt.define("cb", cb_addr)
+    addr = rt.add(a.finalize())
     fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(addr)
     assert fn(5) == 105
     assert callback  # keep alive
@@ -456,24 +468,56 @@ def test_run_calls_c_function_by_symbol():
 def test_run_jit_calls_jit_by_symbol():
     rt = Runtime()
 
-    # square(x) = x * x, added first so its address is known
-    callee = Assembler()
-    callee.mov(RAX, RDI)
-    callee.imul(RAX, RDI)
-    callee.ret()
-    square_addr = rt.add(callee.finalize())
+    # square(x) = x * x, added under a name so callers can reference it
+    square = Assembler()
+    square.mov(RAX, RDI)
+    square.imul(RAX, RDI)
+    square.ret()
+    rt.add(square.finalize(), name="square")
 
+    # caller makes a direct rel32 call to the pooled square (no dict needed)
     caller = Assembler()
-    caller.push(RBP)
-    caller.mov(RBP, RSP)
-    caller.mov(RAX, Symbol("square"))
-    caller.call(RAX)
-    caller.leave()
+    caller.sub(RSP, 8)             # 16-byte align for the call
+    caller.call(Symbol("square"))
+    caller.add(RSP, 8)
     caller.ret()
-    caller_addr = rt.add(caller.finalize(), symbols={"square": square_addr})
+    caller_addr = rt.add(caller.finalize())
 
     fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(caller_addr)
     assert fn(9) == 81
+
+
+def test_run_recursion_by_symbol():
+    # fact(n) = n <= 1 ? 1 : n * fact(n-1), calling itself by symbol. Adding
+    # with name="fact" registers the address before relocs resolve, so the
+    # self-reference binds.
+    rt = Runtime()
+    a = Assembler()
+    recurse, done = Label("recurse"), Label("done")
+    a.push(RBP)
+    a.mov(RBP, RSP)
+    a.push(RBX)
+    a.sub(RSP, 8)           # save rbx (callee-saved) and keep 16-byte alignment
+    a.mov(RBX, RDI)         # rbx = n, preserved across the recursive call
+    a.cmp(RDI, 1)
+    a.jg(recurse)
+    a.mov(RAX, 1)
+    a.jmp(done)
+    a.bind(recurse)
+    a.mov(RDI, RBX)
+    a.sub(RDI, 1)
+    a.call(Symbol("fact"))  # rax = fact(n-1)
+    a.imul(RAX, RBX)        # n * fact(n-1)
+    a.bind(done)
+    a.add(RSP, 8)
+    a.pop(RBX)
+    a.leave()
+    a.ret()
+    addr = rt.add(a.finalize(), name="fact")
+
+    fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(addr)
+    assert fn(5) == 120
+    assert fn(10) == 3628800
 
 
 def test_run_multiply():

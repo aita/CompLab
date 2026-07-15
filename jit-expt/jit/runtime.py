@@ -3,7 +3,7 @@ from __future__ import annotations
 import ctypes
 import mmap
 
-from .assembler import ObjectCode
+from .assembler import ObjectCode, RelocKind
 
 
 class _Page:
@@ -42,22 +42,30 @@ class Runtime:
         self._active: _Page | None = None  # page currently being filled
         self._align = align
         self._libc = ctypes.CDLL(None, use_errno=True)
+        self._symbols: dict[str, int] = {}  # name -> address
 
-    def add(self, obj: ObjectCode, symbols: dict[str, int] | None = None) -> int:
+    def define(self, name: str, addr: int) -> None:
+        """Register an external address (e.g. a C function) under `name` so
+        code added later can reference it as Symbol(name)."""
+        self._symbols[name] = addr
+
+    def add(self, obj: ObjectCode, name: str | None = None,
+            symbols: dict[str, int] | None = None) -> int:
         blob = bytearray(obj.code)
-        # Apply absolute relocations by writing each symbol's address into its
-        # 8-byte placeholder. Symbols must already be known (e.g. a C function
-        # address, or a JIT function added earlier), so add callees first.
-        symbols = symbols or {}
-        for reloc in obj.relocs:
-            if reloc.symbol not in symbols:
-                raise KeyError(f"unresolved symbol {reloc.symbol!r}")
-            addr = symbols[reloc.symbol]
-            blob[reloc.offset:reloc.offset + 8] = addr.to_bytes(8, "little")
         n = len(blob)
 
         page = self._page_with_room(n)
         offset = page.cursor
+        addr = page.base + offset
+
+        # The symbol table for this add: the runtime's registry, plus any
+        # one-off symbols, plus this function's own name (so it can recurse).
+        table = {**self._symbols, **(symbols or {})}
+        if name is not None:
+            self._symbols[name] = addr
+            table[name] = addr
+
+        self._relocate(blob, addr, obj.relocs, table)
 
         # Flip to writable, copy the function in, then back to read+execute.
         self._protect(page, write=True)
@@ -66,9 +74,23 @@ class Runtime:
         self._protect(page, write=False)
 
         # Advance the cursor, keeping the next function entry aligned.
-        end = offset + n
-        page.cursor = (end + self._align - 1) & ~(self._align - 1)
-        return page.base + offset
+        page.cursor = (offset + n + self._align - 1) & ~(self._align - 1)
+        return addr
+
+    @staticmethod
+    def _relocate(blob: bytearray, base: int, relocs, table: dict[str, int]):
+        for r in relocs:
+            if r.symbol not in table:
+                raise KeyError(f"unresolved symbol {r.symbol!r}")
+            target = table[r.symbol]
+            if r.kind is RelocKind.ABS64:
+                blob[r.offset:r.offset + 8] = target.to_bytes(8, "little")
+            else:  # REL32: distance from the end of the 4-byte field
+                rel = target - (base + r.offset + 4)
+                if not (-(1 << 31) <= rel < (1 << 31)):
+                    raise ValueError(
+                        f"symbol {r.symbol!r} too far for a rel32 call ({rel})")
+                blob[r.offset:r.offset + 4] = rel.to_bytes(4, "little", signed=True)
 
     def _page_with_room(self, n: int) -> _Page:
         if self._active is not None and self._active.remaining() >= n:

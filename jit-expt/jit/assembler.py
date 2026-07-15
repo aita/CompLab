@@ -1,25 +1,34 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 from .operands import Mem, Reg
 
 
 @dataclass(frozen=True)
 class Symbol:
-    """A named 64-bit address referenced with `mov reg, Symbol(name)`. Its
-    real address is supplied to Runtime.add(symbols=...) at load time."""
+    """A named address referenced by an instruction. `call Symbol(name)` makes
+    a direct relative call to it; `mov reg, Symbol(name)` loads its absolute
+    address. The address is bound by the loader (Runtime) at map time."""
 
     name: str
 
 
+class RelocKind(Enum):
+    """How a relocation's field is patched with its symbol's address."""
+
+    ABS64 = "abs64"   # write the absolute 64-bit address (movabs immediate)
+    REL32 = "rel32"   # write a signed 32-bit distance from the field's end
+
+
 @dataclass(frozen=True)
 class Reloc:
-    """An absolute 64-bit relocation: patch the 8 bytes at `offset` with the
-    address of `symbol` once it is known."""
+    """Patch the field at `offset` with `symbol`'s address, per `kind`."""
 
     offset: int
     symbol: str
+    kind: RelocKind
 
 
 @dataclass(frozen=True)
@@ -219,7 +228,8 @@ class Assembler:
                     raise ValueError("a symbol address needs a 64-bit register")
                 self._emit_prefixes(64, None, dst)  # REX.W movabs
                 self.code.emit(0xB8 + (int(dst) & 7))  # MOV r64, imm64
-                self._relocs.append(Reloc(len(self.code), src.name))
+                self._relocs.append(
+                    Reloc(len(self.code), src.name, RelocKind.ABS64))
                 self.code.emit_int(0, 8)  # 8-byte placeholder, patched at load
             case Reg(), Reg():
                 self._check_sizes(dst, src)
@@ -421,24 +431,26 @@ class Assembler:
         label.offset = len(self.code)
         return label
 
-    def jmp(self, target: Label):
-        """Unconditional near jump (E9 rel32)."""
+    def jmp(self, target: Label | Symbol):
+        """Unconditional near jump (E9 rel32). A Label targets code within this
+        object; a Symbol targets another object, resolved at load time."""
         self.code.emit(0xE9)
-        self._emit_rel32_fixup(target)
+        self._emit_rel32_target(target)
 
-    def call(self, target: Reg | Label):
+    def call(self, target: Reg | Label | Symbol):
         """Call a function. A Reg is an indirect call through that register
         (FF /2), used to reach an absolute address loaded with `mov reg, addr`.
-        A Label is a direct RIP-relative call (E8 rel32) within this code."""
+        A Label (internal) or Symbol (external) is a direct RIP-relative call
+        (E8 rel32)."""
         match target:
             case Reg():
                 if int(target) >= 8:
                     self.code.emit(0x41)  # REX.B for r8..r15
                 self.code.emit(0xFF)
                 self.code.emit(0xD0 | (int(target) & 7))  # /2, mod=11, rm=reg
-            case Label():
+            case Label() | Symbol():
                 self.code.emit(0xE8)
-                self._emit_rel32_fixup(target)
+                self._emit_rel32_target(target)
             case _:
                 raise TypeError(f"unsupported CALL operand: {target!r}")
 
@@ -513,11 +525,16 @@ class Assembler:
         # Conditional near jump: 0F 8x rel32, x = condition code.
         self.code.emit(0x0F)
         self.code.emit(0x80 | self._CC[cond])
-        self._emit_rel32_fixup(target)
+        self._emit_rel32_target(target)
 
-    def _emit_rel32_fixup(self, target: Label):
-        # Record where the rel32 field starts, then emit a 4-byte placeholder.
-        self._fixups.append((len(self.code), target))
+    def _emit_rel32_target(self, target: Label | Symbol):
+        # Emit a 4-byte rel32 placeholder for a Label (resolved internally by
+        # finalize) or a Symbol (resolved externally by the loader).
+        at = len(self.code)
+        if isinstance(target, Symbol):
+            self._relocs.append(Reloc(at, target.name, RelocKind.REL32))
+        else:
+            self._fixups.append((at, target))
         self.code.emit_int(0, 4)
 
     def finalize(self) -> ObjectCode:
