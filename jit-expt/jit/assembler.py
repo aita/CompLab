@@ -10,10 +10,11 @@ class Assembler:
     def __init__(self, code: CodeBuffer):
         self.code = code
 
-    def _emit_prefixes(self, bitsize: int, reg, rm):
+    def _emit_prefixes(self, bitsize: int, reg, rm, index=None):
         # Operand-size prefix for 16-bit, then REX if required.
-        #   reg -> the ModR/M.reg operand (None if none, e.g. reg-imm)
-        #   rm  -> the ModR/M.rm operand or the memory base
+        #   reg   -> the ModR/M.reg operand (None if none, e.g. reg-imm)
+        #   rm    -> the ModR/M.rm operand or the memory base
+        #   index -> the SIB.index register, if any (None otherwise)
         # In 64-bit mode the default operand size is 32-bit. The 0x66
         # operand-size override prefix switches it to 16-bit (and REX.W,
         # below, switches it to 64-bit).
@@ -28,10 +29,11 @@ class Assembler:
         #   0100 .. fixed pattern (0x40) identifying REX
         #   W ..... 1 = 64-bit operand size
         #   R ..... high bit (bit 3) of the ModR/M.reg field
-        #   X ..... high bit of the SIB.index field (unused here)
+        #   X ..... high bit of the SIB.index field
         #   B ..... high bit of the ModR/M.rm / SIB.base field
         w = 1 if bitsize == 64 else 0
         r = (int(reg) >> 3) if reg is not None else 0
+        x = (int(index) >> 3) if index is not None else 0
         b = (int(rm) >> 3) if rm is not None else 0
         # 8-bit SPL/BPL/SIL/DIL are only addressable when a REX prefix is
         # present, so force an (otherwise all-zero) REX for them.
@@ -39,8 +41,8 @@ class Assembler:
             (reg is not None and getattr(reg, "needs_rex", False))
             or (rm is not None and getattr(rm, "needs_rex", False))
         )
-        if w or r or b or force:
-            self.code.emit(0x40 | (w << 3) | (r << 2) | b)
+        if w or r or x or b or force:
+            self.code.emit(0x40 | (w << 3) | (r << 2) | (x << 1) | b)
 
     def _emit_modrm(self, reg_dst: int, reg_src: int):
         # ModR/M byte:
@@ -55,8 +57,10 @@ class Assembler:
         modrm = 0xC0 | ((int(reg_src) & 7) << 3) | (int(reg_dst) & 7)
         self.code.emit(modrm)
 
+    _SCALE_BITS = {1: 0, 2: 1, 4: 2, 8: 3}
+
     def _emit_modrm_mem(self, reg: int, mem: Mem):
-        # A [base + disp] memory operand is emitted as a sequence of bytes:
+        # A [base + index*scale + disp] memory operand is emitted as:
         #
         #   +--------+  +--------+  +------------------+
         #   | ModR/M |  |  SIB   |  |   displacement   |
@@ -64,12 +68,14 @@ class Assembler:
         #    1 byte      1 byte      0 / 1 / 4 bytes
         #    always      optional*   (see mod, below)
         #
-        #   * SIB is only present when rm = 100 (base is RSP/R12).
+        #   * SIB is present when there is an index register, or when the base
+        #     is RSP/R12 (whose rm=100 encoding is what selects "SIB follows").
         #
-        # ModR/M byte (rm holds the base register, mod selects the disp size):
+        # ModR/M byte (mod selects the disp size; rm holds the base register,
+        # or 100 to mean "a SIB byte follows"):
         #    7     6 5         3 2         0
         #   +-------+-----------+-----------+
-        #   |  mod  |    reg    |  rm=base  |
+        #   |  mod  |    reg    |     rm    |
         #   +-------+-----------+-----------+
         #   mod=00  no displacement
         #   mod=01  disp8   (1-byte signed)
@@ -77,6 +83,7 @@ class Assembler:
         reg_field = int(reg) & 7
         base = int(mem.base) & 7
         disp = mem.disp
+        need_sib = mem.index is not None or base == 4  # index, or RSP/R12 base
 
         if disp == 0 and base != 5:  # base==5 (RBP/R13) can't use mod=00
             mod = 0x00
@@ -85,9 +92,10 @@ class Assembler:
         else:
             mod = 0x80
 
-        # ModR/M:  mod(2) | reg(3) | rm(3=base)
-        self.code.emit(mod | (reg_field << 3) | base)
-        if base == 4:  # RSP/R12 require a SIB byte
+        # ModR/M:  mod(2) | reg(3) | rm(3);  rm=100 selects the SIB byte
+        rm = 4 if need_sib else base
+        self.code.emit(mod | (reg_field << 3) | rm)
+        if need_sib:
             # SIB byte:
             #    7     6 5         3 2         0
             #   +-------+-----------+-----------+
@@ -96,8 +104,13 @@ class Assembler:
             #   scale .. index is multiplied by 2^scale (00=1,01=2,10=4,11=8)
             #   index .. index register; 100 = none
             #   base ... base register
-            #   0x24 = 00 100 100 -> scale=1, index=none, base=RSP/R12
-            self.code.emit(0x24)
+            if mem.index is not None:
+                index = int(mem.index) & 7
+                scale = self._SCALE_BITS[mem.scale]
+            else:
+                index = 4  # 100 = no index (plain [RSP]/[R12])
+                scale = 0
+            self.code.emit((scale << 6) | (index << 3) | base)
         if mod == 0x40:
             # disp8: one signed (two's-complement) byte
             #   +-----------+
@@ -160,12 +173,12 @@ class Assembler:
         self.code.emit_int(self._encode_imm(imm, imm_size), imm_size)
 
     def _mov_reg_mem(self, reg_dst: Reg, mem_src: Mem):
-        self._emit_prefixes(reg_dst.bitsize, reg_dst, mem_src.base)
+        self._emit_prefixes(reg_dst.bitsize, reg_dst, mem_src.base, mem_src.index)
         self.code.emit(0x8A if reg_dst.bitsize == 8 else 0x8B)  # MOV r, r/m (load)
         self._emit_modrm_mem(reg_dst, mem_src)
 
     def _mov_mem_reg(self, mem_dst: Mem, reg_src: Reg):
-        self._emit_prefixes(reg_src.bitsize, reg_src, mem_dst.base)
+        self._emit_prefixes(reg_src.bitsize, reg_src, mem_dst.base, mem_dst.index)
         self.code.emit(0x88 if reg_src.bitsize == 8 else 0x89)  # MOV r/m, r (store)
         self._emit_modrm_mem(reg_src, mem_dst)
 
@@ -204,12 +217,12 @@ class Assembler:
         self._emit_modrm(dst, src)
 
     def _alu_reg_mem(self, base: int, dst: Reg, mem: Mem):
-        self._emit_prefixes(dst.bitsize, dst, mem.base)
+        self._emit_prefixes(dst.bitsize, dst, mem.base, mem.index)
         self.code.emit(base + (2 if dst.bitsize == 8 else 3))  # <op> r, r/m (load)
         self._emit_modrm_mem(dst, mem)
 
     def _alu_mem_reg(self, base: int, mem: Mem, src: Reg):
-        self._emit_prefixes(src.bitsize, src, mem.base)
+        self._emit_prefixes(src.bitsize, src, mem.base, mem.index)
         self.code.emit(base + (0 if src.bitsize == 8 else 1))  # <op> r/m, r (store)
         self._emit_modrm_mem(src, mem)
 

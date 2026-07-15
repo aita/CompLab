@@ -8,8 +8,11 @@ from jit import (
     AX,
     EAX,
     R8,
+    R12,
     RAX,
     RBX,
+    RCX,
+    RDX,
     RDI,
     RSI,
     RSP,
@@ -17,6 +20,7 @@ from jit import (
     SPL,
     Assembler,
     CodeBuffer,
+    Mem,
     Runtime,
 )
 
@@ -55,6 +59,23 @@ ENCODINGS = [
     ("mov [rdi], rax",   lambda a: a.mov(RDI + 0, RAX), "488907"),
     ("mov rax, [rsp]",   lambda a: a.mov(RAX, RSP + 0), "488b0424"),
     ("mov rax, [rbp]",   lambda a: a.mov(RAX, RBP + 0), "488b4500"),
+    # Scaled-index (SIB) addressing.
+    ("mov rax, [rcx+rdx*4]",
+     lambda a: a.mov(RAX, RCX + RDX * 4),               "488b0491"),
+    ("mov rax, [rcx+rdx*4+0x10]",
+     lambda a: a.mov(RAX, RCX + RDX * 4 + 0x10),        "488b449110"),
+    ("mov rax, [rbp+rdx*8]",
+     lambda a: a.mov(RAX, RBP + RDX * 8),               "488b44d500"),
+    ("mov rax, [r12+rax*2]",
+     lambda a: a.mov(RAX, R12 + RAX * 2),               "498b0444"),
+    ("mov rax, [rcx+r8*4]",
+     lambda a: a.mov(RAX, RCX + R8 * 4),                "4a8b0481"),
+    ("mov rax, [rax+rcx]",
+     lambda a: a.mov(RAX, RAX + RCX),                   "488b0408"),
+    ("mov rax, [rcx+rdx*4+0x1000]",
+     lambda a: a.mov(RAX, RCX + RDX * 4 + 0x1000),      "488b849100100000"),
+    ("mov [rcx+rdx*8], rax",
+     lambda a: a.mov(RCX + RDX * 8, RAX),               "488904d1"),
     ("ret",              lambda a: a.ret(),             "c3"),
 ]
 
@@ -88,6 +109,16 @@ def test_immediate_out_of_range_raises(build):
 def test_unsupported_operands_raise(build):
     with pytest.raises(TypeError):
         encode(build)
+
+
+def test_rsp_index_rejected():
+    with pytest.raises(ValueError, match="index register"):
+        Mem(RAX, index=RSP)
+
+
+def test_invalid_scale_rejected():
+    with pytest.raises(ValueError, match="scale"):
+        Mem(RAX, index=RDX, scale=3)
 
 
 # --- Functional tests: assemble, map executable, and actually run it. ---
@@ -141,6 +172,33 @@ def test_run_store_to_memory():
     run(build, None, ctypes.c_void_p, ctypes.c_int64,
         args=(ctypes.addressof(cell), 99))
     assert cell.value == 99
+
+
+def test_run_scaled_index_load():
+    # int64 arr[]; return arr[idx] via [RDI + RSI*8].  (RDI=arr, RSI=idx)
+    def build(a):
+        a.mov(RAX, RDI + RSI * 8)
+        a.ret()
+
+    arr = (ctypes.c_int64 * 4)(10, 20, 30, 40)
+    load = ctypes.cast(arr, ctypes.c_void_p)
+    for idx in range(4):
+        result = run(build, ctypes.c_int64, ctypes.c_void_p, ctypes.c_int64,
+                     args=(load, idx))
+        assert result == arr[idx]
+
+
+def test_run_scaled_index_store():
+    # arr[idx] = val via [RDI + RSI*8] = RDX.  (RDI=arr, RSI=idx, RDX=val)
+    def build(a):
+        a.mov(RDI + RSI * 8, RDX)
+        a.ret()
+
+    arr = (ctypes.c_int64 * 3)(0, 0, 0)
+    base = ctypes.cast(arr, ctypes.c_void_p)
+    run(build, None, ctypes.c_void_p, ctypes.c_int64, ctypes.c_int64,
+        args=(base, 2, 777))
+    assert list(arr) == [0, 0, 777]
 
 
 def _const_fn(value):

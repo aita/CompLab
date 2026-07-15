@@ -22,22 +22,65 @@ class Reg(int):
     def __repr__(self):
         return self.name
 
-    def __add__(self, disp: int) -> Mem:
-        return Mem(self, disp)
+    def __mul__(self, scale: int) -> _Index:
+        return _Index(self, scale)
+
+    def __add__(self, other) -> Mem:
+        # base + disp / base + index / base + index*scale
+        if isinstance(other, _Index):
+            return Mem(self, index=other.reg, scale=other.scale)
+        if isinstance(other, Reg):
+            return Mem(self, index=other)
+        return Mem(self, disp=other)
 
     def __sub__(self, disp: int) -> Mem:
-        return Mem(self, -disp)
+        return Mem(self, disp=-disp)
+
+
+class _Index:
+    """An `index * scale` term, produced by `reg * scale` and folded into a
+    Mem's SIB byte."""
+
+    def __init__(self, reg: Reg, scale: int):
+        self.reg = reg
+        self.scale = scale
 
 
 class Mem:
-    """A memory operand of the form [base + disp]."""
+    """A memory operand of the form [base + index*scale + disp]."""
 
-    def __init__(self, base: Reg, disp: int = 0):
+    def __init__(self, base: Reg, disp: int = 0,
+                 index: Reg | None = None, scale: int = 1):
+        if index is not None:
+            if scale not in (1, 2, 4, 8):
+                raise ValueError(f"invalid scale {scale}; must be 1, 2, 4, or 8")
+            # SIB index field 100 means "no index", so RSP (encoding 4) has no
+            # index encoding and cannot be used. (R12 shares the low 3 bits but
+            # is distinguished by REX.X, so it is fine.)
+            if int(index) == 4:
+                raise ValueError(f"{index!r} cannot be used as an index register")
         self.base = base
         self.disp = disp
+        self.index = index
+        self.scale = scale
+
+    def __add__(self, other) -> Mem:
+        if isinstance(other, _Index):
+            return Mem(self.base, self.disp, other.reg, other.scale)
+        if isinstance(other, Reg):
+            return Mem(self.base, self.disp, other, self.scale)
+        return Mem(self.base, self.disp + other, self.index, self.scale)
+
+    def __sub__(self, disp: int) -> Mem:
+        return Mem(self.base, self.disp - disp, self.index, self.scale)
 
     def __repr__(self):
-        return f"[{self.base!r}{self.disp:+d}]"
+        s = f"[{self.base!r}"
+        if self.index is not None:
+            s += f"+{self.index!r}*{self.scale}"
+        if self.disp:
+            s += f"{self.disp:+d}"
+        return s + "]"
 
 
 # Register tables, indexed by encoding number 0..15.
