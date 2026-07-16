@@ -61,11 +61,11 @@ _SHIFT_EXT = {0: "rol", 1: "ror", 2: "rcl", 3: "rcr",
               4: "shl", 5: "shr", 6: "sal", 7: "sar"}
 
 
-class _Trunc(Exception):
+class Trunc(Exception):
     """Raised when a decode would read past the end of the buffer."""
 
 
-class _Rex:
+class Rex:
     __slots__ = ("w", "r", "x", "b", "present")
 
     def __init__(self, byte=None):
@@ -104,7 +104,7 @@ def _fmt_imm(v):
     return f"0x{v:x}"
 
 
-class _Decoder:
+class Decoder:
     def __init__(self, code, origin):
         self.code = code
         self.origin = origin
@@ -115,14 +115,14 @@ class _Decoder:
 
     def _u8(self):
         if self.pos >= len(self.code):
-            raise _Trunc()
+            raise Trunc()
         b = self.code[self.pos]
         self.pos += 1
         return b
 
     def _read(self, n, signed):
         if self.pos + n > len(self.code):
-            raise _Trunc()
+            raise Trunc()
         v = int.from_bytes(self.code[self.pos:self.pos + n], "little",
                            signed=signed)
         self.pos += n
@@ -212,7 +212,7 @@ class _Decoder:
 
     def decode_one(self):
         """Decode one instruction starting at self.pos. Returns text, or
-        raises _Trunc / returns None to signal a graceful fallback."""
+        raises Trunc / returns None to signal a graceful fallback."""
         self.start = self.pos
         has66 = hasf2 = hasf3 = False
         while True:
@@ -225,9 +225,9 @@ class _Decoder:
                 hasf3 = True
             else:
                 break
-        rex = _Rex()
+        rex = Rex()
         if 0x40 <= b <= 0x4F:
-            rex = _Rex(b)
+            rex = Rex(b)
             b = self._u8()
 
         if b == 0x0F:
@@ -541,13 +541,13 @@ def disassemble(code, origin: int = 0,
         code = code.code
     if code_size is None:
         code_size = len(code)
-    dec = _Decoder(code, origin)
+    dec = Decoder(code, origin)
     out: list[Insn] = []
     while dec.pos < code_size:
         start = dec.pos
         try:
             text = dec.decode_one()
-        except _Trunc:
+        except Trunc:
             text = None
         if text is None:
             dec.pos = start + 1  # graceful fallback: one raw byte

@@ -18,7 +18,7 @@ _PROT_EXEC = 0x4
 _MAP_FAILED = ctypes.c_void_p(-1).value
 
 
-class _Page:
+class Page:
     """One physical memory region mapped TWICE from the same memfd: a WRITABLE
     view code is copied through, and a permanently READ+EXEC view functions are
     executed from. Both views alias the same physical pages, so a write to the
@@ -93,7 +93,7 @@ class Runtime:
     addresses. Small functions are packed into shared pages (a bump
     allocator) rather than getting a whole page each.
 
-    Each page is backed by one physical region mapped twice (see _Page): a
+    Each page is backed by one physical region mapped twice (see Page): a
     writable view code is copied through and a permanently read+execute view it
     runs from. Writes never touch the R+X view, so functions already placed in a
     page stay continuously executable while add() copies a new one in — safe
@@ -104,8 +104,8 @@ class Runtime:
     the symbol/veneer tables. Executing already-added functions takes no lock."""
 
     def __init__(self, align: int = 16):
-        self._pages: list[_Page] = []      # all pages, kept alive
-        self._active: _Page | None = None  # page currently being filled
+        self._pages: list[Page] = []      # all pages, kept alive
+        self._active: Page | None = None  # page currently being filled
         self._align = align
         self._lock = threading.Lock()      # guards the mutating operations
         self._libc = ctypes.CDLL(None, use_errno=True)
@@ -119,7 +119,7 @@ class Runtime:
         self._symbols: dict[str, int] = {}  # name -> address
         self._veneers: dict[int, int] = {}  # far target -> veneer address
         # Items reserved by stage() but not yet relocated/written by link().
-        self._pending: list[tuple[ObjectCode, _Page, int, int]] = []
+        self._pending: list[tuple[ObjectCode, Page, int, int]] = []
 
     def define(self, name: str, addr: int) -> None:
         """Register an external address (e.g. a C function) under `name` so
@@ -202,25 +202,25 @@ class Runtime:
         self._write_slot(page, offset, blob)
         return addr
 
-    def _alloc_slot(self, n: int) -> tuple[_Page, int, int]:
+    def _alloc_slot(self, n: int) -> tuple[Page, int, int]:
         page = self._page_with_room(n)
         offset = page.cursor
         page.cursor = (offset + n + self._align - 1) & ~(self._align - 1)
         return page, offset, page.base + offset
 
-    def _write_slot(self, page: _Page, offset: int, blob: bytes) -> None:
+    def _write_slot(self, page: Page, offset: int, blob: bytes) -> None:
         # Copy through the writable view; the change is immediately live in the
         # aliased read+execute view. No protection flip, so other functions in
         # the page never stop being executable.
         ctypes.memmove(page.write_base + offset, bytes(blob), len(blob))
 
-    def _page_with_room(self, n: int) -> _Page:
+    def _page_with_room(self, n: int) -> Page:
         if self._active is not None and self._active.remaining() >= n:
             return self._active
         # Round up to whole pages so a larger-than-page function still fits.
         pagesize = mmap.PAGESIZE
         size = max(pagesize, ((n + pagesize - 1) // pagesize) * pagesize)
-        page = _Page(size, self._libc)
+        page = Page(size, self._libc)
         self._pages.append(page)
         self._active = page
         return page

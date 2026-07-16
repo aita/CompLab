@@ -22,12 +22,12 @@ class Reg(int):
     def __repr__(self):
         return self.name
 
-    def __mul__(self, scale: int) -> _Index:
-        return _Index(self, scale)
+    def __mul__(self, scale: int) -> Index:
+        return Index(self, scale)
 
     def __add__(self, other) -> Mem:
         # base + disp / base + index / base + index*scale
-        if isinstance(other, _Index):
+        if isinstance(other, Index):
             return Mem(self, index=other.reg, scale=other.scale)
         if isinstance(other, Reg):
             return Mem(self, index=other)
@@ -54,7 +54,7 @@ class Xmm(int):
         return self.name
 
 
-class _Index:
+class Index:
     """An `index * scale` term, produced by `reg * scale` and folded into a
     Mem's SIB byte."""
 
@@ -94,7 +94,7 @@ class Mem:
         self.bitsize = bitsize
 
     def __add__(self, other) -> Mem:
-        if isinstance(other, _Index):
+        if isinstance(other, Index):
             return Mem(self.base, self.disp, other.reg, other.scale, self.bitsize)
         if isinstance(other, Reg):
             return Mem(self.base, self.disp, other, self.scale, self.bitsize)
@@ -118,7 +118,7 @@ class Mem:
         return s + "]"
 
 
-class _RipRel(Mem):
+class RipRel(Mem):
     """A RIP-relative reference to a Label, encoded as `[rip + disp32]`
     (ModR/M mod=00, rm=101, no SIB, no base). The disp32 is resolved to the
     label's final offset by the assembler's fixup machinery at finalize(),
@@ -135,18 +135,18 @@ class _RipRel(Mem):
         self.scale = 1
         self.bitsize = bitsize
 
-    def sized(self, bitsize: int) -> "_RipRel":
-        return _RipRel(self.label, bitsize)
+    def sized(self, bitsize: int) -> "RipRel":
+        return RipRel(self.label, bitsize)
 
     def __repr__(self):
         return f"[rip {self.label!r}]"
 
 
-def rip(label) -> _RipRel:
+def rip(label) -> RipRel:
     """Reference `label` RIP-relatively as a memory operand, e.g.
     `mov(RAX, rip(L))` / `lea(RAX, rip(L))`. Combine with byte/word/dword/qword
     when a store or immediate makes the access width ambiguous."""
-    return _RipRel(label)
+    return RipRel(label)
 
 
 def byte(mem: Mem) -> Mem:

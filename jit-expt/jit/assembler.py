@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from .operands import Mem, Reg, Xmm, _RipRel
+from .operands import Mem, Reg, Xmm, RipRel
 
 
 @dataclass(frozen=True)
@@ -186,7 +186,7 @@ class Assembler:
         #   mod=01  disp8   (1-byte signed)
         #   mod=10  disp32  (4-byte signed)
         reg_field = int(reg) & 7
-        if isinstance(mem, _RipRel):
+        if isinstance(mem, RipRel):
             # RIP-relative: ModR/M mod=00, reg=<reg>, rm=101, then a disp32 and
             # NO SIB/base. The disp32 = target - end_of_instruction, and since it
             # is the final field, end = disp32_offset + 4 -- exactly a rel32.
@@ -1185,29 +1185,37 @@ class Assembler:
         explicitly, after all labels are bound, before running. Does not
         mutate the assembler, so it is safe to call more than once."""
         out = CodeBuffer(self.code.code)  # copy, so finalize stays non-destructive
-        code_size = len(out)  # code ends here; the data section follows
-        # Append each pending read-only data blob after the code, padding to its
-        # alignment, and bind its label to the final offset -- THEN link, so
-        # both jump fixups and RIP-relative disp32 fixups resolve. The result is
+        code_size = len(out)  # code ends here; the data/jump-table section follows
+        # Append data and jump tables and bind their labels BEFORE linking, so
+        # jump fixups and RIP-relative disp32 fixups all resolve. The result is
         # fully position-independent; no load-time relocation is needed.
+        self._emit_data(out)
+        self._emit_jump_tables(out)
+        self._link(out)
+        return ObjectCode(bytes(out.code), tuple(self._relocs), code_size)
+
+    def _emit_data(self, buf: CodeBuffer) -> None:
+        """Append each read-only data blob after the code (padded to its
+        alignment) and bind its label to the final offset."""
         for label, blob, align in self._data:
             if align > 1:
-                out.code.extend(b"\x00" * (-len(out) % align))
-            label.offset = len(out)
-            out.code.extend(blob)
-        # Jump tables: 4-byte signed offsets of each target from the table base.
+                buf.code.extend(b"\x00" * (-len(buf) % align))
+            label.offset = len(buf)
+            buf.code.extend(blob)
+
+    def _emit_jump_tables(self, buf: CodeBuffer) -> None:
+        """Append each jump table: 4-byte signed offsets of each target from the
+        table base, and bind the table's label."""
         for table, targets in self._jump_tables:
-            out.code.extend(b"\x00" * (-len(out) % 4))  # align entries to 4
-            table.offset = len(out)
+            buf.code.extend(b"\x00" * (-len(buf) % 4))  # align entries to 4
+            table.offset = len(buf)
             for t in targets:
                 if t.offset is None:
                     raise ValueError(f"jump_table target {t!r} was never bound")
                 rel = t.offset - table.offset
                 if not (-(1 << 31) <= rel < (1 << 31)):
                     raise ValueError(f"jump_table entry {rel} does not fit in 32 bits")
-                out.code.extend(rel.to_bytes(4, "little", signed=True))
-        self._link(out)
-        return ObjectCode(bytes(out.code), tuple(self._relocs), code_size)
+                buf.code.extend(rel.to_bytes(4, "little", signed=True))
 
     def _link(self, buf: CodeBuffer) -> None:
         """Backpatch each recorded jump fixup's rel32 field in `buf`."""
