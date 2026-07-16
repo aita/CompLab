@@ -7,7 +7,7 @@ from jit import (
     RAX, RBX, RCX, RDI, RSI, EAX, R8, XMM0, XMM1, qword,
 )
 from jit.operands import rip
-from jit.disasm import disassemble, format_disassembly
+from jit.disasm import disassemble, disasm
 
 
 def asm(build):
@@ -17,7 +17,7 @@ def asm(build):
 
 
 def text(build):
-    return format_disassembly(asm(build)).lower()
+    return disasm(asm(build)).lower()
 
 
 def test_mov_reg_reg():
@@ -168,13 +168,16 @@ def test_cmovcc():
     assert "cmove" in t and "rax" in t and "rbx" in t
 
 
-def test_disassemble_returns_tuples():
+def test_disassemble_returns_insn_rows():
     rows = disassemble(asm(lambda a: a.mov(RAX, RBX)))
     assert len(rows) == 1
-    off, raw, txt = rows[0]
-    assert off == 0
-    assert isinstance(raw, bytes) and len(raw) == 3
-    assert "mov" in txt
+    row = rows[0]
+    # NamedTuple: both index/unpack (backward compatible) and named access work.
+    off, raw, txt = row
+    assert (off, raw, txt) == (row.offset, row.raw, row.text)
+    assert row.offset == 0
+    assert isinstance(row.raw, bytes) and len(row.raw) == 3
+    assert "mov" in row.text
 
 
 def test_graceful_fallback_bogus_byte():
@@ -193,11 +196,27 @@ def test_fallback_advances_and_continues():
 
 
 def test_origin_offsets():
-    t = format_disassembly(asm(lambda a: a.ret()), origin=0x400000)
+    t = disasm(asm(lambda a: a.ret()), origin=0x400000)
     assert "400000:" in t
 
 
 def test_format_shows_hex_bytes():
-    t = format_disassembly(asm(lambda a: a.mov(RAX, RBX)))
+    t = disasm(asm(lambda a: a.mov(RAX, RBX)))
     # REX.W MOV rax, rbx = 48 89 d8
     assert "48 89 d8" in t
+
+
+def test_data_section_shown_as_db_not_instructions():
+    # With code_size given, bytes past the code (the data section) are dumped as
+    # db and NOT mis-decoded as instructions.
+    a = Assembler()
+    L = a.data(b"\x01\x02\x03\x04\x05\x06\x07\x08")
+    a.lea(RAX, rip(L))
+    a.ret()
+    obj = a.finalize()
+    rows = disassemble(obj)  # ObjectCode: code_size is used automatically
+    assert any(r[2].startswith("lea") for r in rows)
+    assert rows[-1][2].startswith("db 0x01")           # the data, as bytes
+    # Passing the raw bytes (no code_size) mis-decodes the tail as instructions.
+    naive = disassemble(obj.code)
+    assert not any(r[2].startswith("db 0x01") for r in naive)

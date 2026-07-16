@@ -8,12 +8,26 @@ scalar-SSE ops; movabs and ``[rip+disp32]``) and degrades gracefully to a
 ``db 0xNN`` pseudo-op (advancing a single byte) on anything it does not
 recognise. It is not a general-purpose x86 decoder.
 
+Both public functions accept an ObjectCode or a raw bytes buffer.
+
 Public API:
-    disassemble(code, origin=0) -> list[(offset, raw_bytes, text)]
-    format_disassembly(code, origin=0) -> str
+    disassemble(code, origin=0) -> list[Insn]   # Insn(offset, raw, text)
+    disasm(code, origin=0) -> str
 """
 
 from __future__ import annotations
+
+from typing import NamedTuple
+
+
+class Insn(NamedTuple):
+    """One decoded instruction (or ``db`` data/fallback entry). A NamedTuple, so
+    it still unpacks and indexes like the old ``(offset, raw, text)`` tuple."""
+
+    offset: int   # byte offset from the start of the buffer
+    raw: bytes    # the instruction's raw bytes
+    text: str     # Intel-syntax mnemonic + operands
+
 
 # --- Register name tables (lowercase for output), indexed by code 0..15 ------
 
@@ -510,14 +524,26 @@ class _Decoder:
         return f"0x{self.origin + self.pos + rel:x}"
 
 
-def disassemble(code: bytes, origin: int = 0) -> list[tuple[int, bytes, str]]:
-    """Decode `code` into a list of (offset, raw_bytes, text) tuples, one per
+def disassemble(code, origin: int = 0,
+                code_size: int | None = None) -> list[Insn]:
+    """Decode `code` into a list of `Insn` (offset, raw, text) rows, one per
     instruction. `offset`/target addresses are computed relative to `origin`.
     Bytes that are not part of a recognised encoding become a single-byte
-    ``db 0xNN`` entry so decoding always makes forward progress."""
+    ``db 0xNN`` entry so decoding always makes forward progress.
+
+    `code` may be an ObjectCode or a raw bytes buffer. `code_size` marks where
+    the instruction section ends (e.g. ``ObjectCode.code_size``); bytes past it
+    are the read-only data section and are dumped as ``db`` rather than decoded
+    as instructions. Defaults to the whole buffer."""
+    if hasattr(code, "code"):  # an ObjectCode
+        if code_size is None:
+            code_size = code.code_size
+        code = code.code
+    if code_size is None:
+        code_size = len(code)
     dec = _Decoder(code, origin)
-    out: list[tuple[int, bytes, str]] = []
-    while dec.pos < len(code):
+    out: list[Insn] = []
+    while dec.pos < code_size:
         start = dec.pos
         try:
             text = dec.decode_one()
@@ -525,22 +551,36 @@ def disassemble(code: bytes, origin: int = 0) -> list[tuple[int, bytes, str]]:
             text = None
         if text is None:
             dec.pos = start + 1  # graceful fallback: one raw byte
-            out.append((start, bytes(code[start:start + 1]),
-                        f"db 0x{code[start]:02x}"))
+            out.append(Insn(start, bytes(code[start:start + 1]),
+                            f"db 0x{code[start]:02x}"))
         else:
-            out.append((start, bytes(code[start:dec.pos]), text))
+            out.append(Insn(start, bytes(code[start:dec.pos]), text))
+    # Remaining bytes are the data section: dump as db lines (8 bytes each).
+    i = dec.pos
+    while i < len(code):
+        chunk = bytes(code[i:i + 8])
+        text = "db " + ", ".join(f"0x{b:02x}" for b in chunk)
+        out.append(Insn(i, chunk, text))
+        i += len(chunk)
     return out
 
 
-def format_disassembly(code: bytes, origin: int = 0) -> str:
-    """Render `code` as a multi-line dump, one instruction per line, e.g.::
+def disasm(code, origin: int = 0, code_size: int | None = None) -> str:
+    """Render assembled code as a multi-line dump, one instruction per line::
 
         0000: 48 89 d8    mov rax, rbx
+
+    `code` may be an ObjectCode (its ``.code`` bytes are used, and its
+    ``.code_size`` marks where the data section starts) or a raw bytes buffer.
     """
-    rows = disassemble(code, origin)
-    hexw = max((len(raw) for _, raw, _ in rows), default=0) * 3
+    if hasattr(code, "code"):  # an ObjectCode
+        if code_size is None:
+            code_size = code.code_size
+        code = code.code
+    rows = disassemble(code, origin, code_size)
+    hexw = max((len(row.raw) for row in rows), default=0) * 3
     lines = []
-    for off, raw, text in rows:
-        hexed = " ".join(f"{b:02x}" for b in raw)
-        lines.append(f"{origin + off:04x}: {hexed:<{hexw}}  {text}")
+    for row in rows:
+        hexed = " ".join(f"{b:02x}" for b in row.raw)
+        lines.append(f"{origin + row.offset:04x}: {hexed:<{hexw}}  {row.text}")
     return "\n".join(lines)

@@ -1,6 +1,7 @@
 import ctypes
 
 from jit import RAX, RDI, Assembler, Label, Runtime
+from jit.disasm import disasm
 
 
 def main():
@@ -29,9 +30,15 @@ def main():
     asm.bind(done)
     asm.ret()
 
+    obj = asm.finalize()
+
+    # Show the machine code we just assembled.
+    print("disassembly:")
+    print(disasm(obj))
+    print()
+
     rt = Runtime()
-    addr = rt.add(asm.finalize())
-    fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(addr)
+    fn = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)(rt.add(obj))
 
     for n in (5, 10, 100):
         print(f"sum(1..{n}) = {fn(n)}")

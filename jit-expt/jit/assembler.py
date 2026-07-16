@@ -35,10 +35,14 @@ class Reloc:
 class ObjectCode:
     """Assembled machine code produced by Assembler.finalize(): the resolved
     bytes, plus any absolute relocations still needing final addresses, which
-    Runtime.add() fills in from its symbol table."""
+    Runtime.add() fills in from its symbol table.
+
+    `code_size` is the length of the instruction section; any bytes after it
+    are the appended read-only data (so a disassembler knows where code ends)."""
 
     code: bytes
     relocs: tuple[Reloc, ...] = ()
+    code_size: int = 0
 
 
 class CodeBuffer:
@@ -422,21 +426,22 @@ class Assembler:
     def mul(self, operand: Reg | Mem):
         """Unsigned multiply of the accumulator by operand: the double-width
         product goes into (r)DX:(r)AX (F7 /4; F6 for 8-bit)."""
-        self._muldiv(4, operand)
+        self._group3(4, operand)
 
     def div(self, divisor: Reg | Mem):
         """Unsigned divide of (r)DX:(r)AX by divisor: quotient into (r)AX,
         remainder into (r)DX (F7 /6; F6 for 8-bit)."""
-        self._muldiv(6, divisor)
+        self._group3(6, divisor)
 
     def idiv(self, divisor: Reg | Mem):
         """Signed divide of (r)DX:(r)AX by divisor: quotient into (r)AX,
         remainder into (r)DX (F7 /7; F6 for 8-bit)."""
-        self._muldiv(7, divisor)
+        self._group3(7, divisor)
 
-    def _muldiv(self, ext: int, operand: Reg | Mem):
-        # F7 /ext (F6 for 8-bit): a single r/m operand; the ModR/M.reg field is
-        # the opcode extension digit selecting mul(/4), div(/6), idiv(/7).
+    def _group3(self, ext: int, operand: Reg | Mem):
+        # The F6/F7 "Group 3": a single r/m operand whose ModR/M.reg field is
+        # the opcode extension digit -- not(/2), neg(/3), mul(/4), div(/6),
+        # idiv(/7). Works on a register or memory operand.
         match operand:
             case Reg():
                 self._emit_prefixes(operand.bitsize, None, operand)
@@ -448,7 +453,7 @@ class Assembler:
                 self.code.emit(0xF6 if bits == 8 else 0xF7)
                 self._emit_modrm_mem(ext, operand)
             case _:
-                raise TypeError(f"unsupported mul/div operand: {operand!r}")
+                raise TypeError(f"unsupported unary operand: {operand!r}")
 
     def cqo(self):
         """Sign-extend RAX into RDX:RAX (48 99), setting up a 64-bit idiv."""
@@ -518,19 +523,13 @@ class Assembler:
             case _:
                 raise TypeError(f"unsupported bit-scan source: {src!r}")
 
-    def not_(self, dst: Reg):
+    def not_(self, dst: Reg | Mem):
         """Bitwise NOT in place (one's complement)."""
-        self._unary(2, dst)
+        self._group3(2, dst)
 
-    def neg(self, dst: Reg):
+    def neg(self, dst: Reg | Mem):
         """Two's-complement negate in place (dst = -dst)."""
-        self._unary(3, dst)
-
-    def _unary(self, ext: int, dst: Reg):
-        # F7 /ext (F6 for 8-bit): the ModR/M.reg field selects not(/2), neg(/3).
-        self._emit_prefixes(dst.bitsize, None, dst)
-        self.code.emit(0xF6 if dst.bitsize == 8 else 0xF7)
-        self._emit_modrm(dst, ext)  # reg=ext, rm=dst
+        self._group3(3, dst)
 
     def shl(self, dst: Reg | Mem, count: int | Reg):
         """Shift dst left by count, filling with zeros (dst <<= count)."""
@@ -1146,6 +1145,7 @@ class Assembler:
         explicitly, after all labels are bound, before running. Does not
         mutate the assembler, so it is safe to call more than once."""
         out = CodeBuffer(self.code.code)  # copy, so finalize stays non-destructive
+        code_size = len(out)  # code ends here; the data section follows
         # Append each pending read-only data blob after the code, padding to its
         # alignment, and bind its label to the final offset -- THEN link, so
         # both jump fixups and RIP-relative disp32 fixups resolve. The result is
@@ -1156,7 +1156,7 @@ class Assembler:
             label.offset = len(out)
             out.code.extend(blob)
         self._link(out)
-        return ObjectCode(bytes(out.code), tuple(self._relocs))
+        return ObjectCode(bytes(out.code), tuple(self._relocs), code_size)
 
     def _link(self, buf: CodeBuffer) -> None:
         """Backpatch each recorded jump fixup's rel32 field in `buf`."""
