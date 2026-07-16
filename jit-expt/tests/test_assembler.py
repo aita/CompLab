@@ -102,6 +102,13 @@ ENCODINGS = [
     # Calls, stack, and frame teardown.
     ("call rax",         lambda a: a.call(RAX),         "ffd0"),
     ("call r10",         lambda a: a.call(R10),         "41ffd2"),
+    ("call [rax]",       lambda a: a.call(Mem(RAX)),    "ff10"),
+    ("call [rdi+8]",     lambda a: a.call(RDI + 8),     "ff5708"),
+    ("jmp rax",          lambda a: a.jmp(RAX),          "ffe0"),
+    ("jmp r10",          lambda a: a.jmp(R10),          "41ffe2"),
+    ("jmp [rax]",        lambda a: a.jmp(Mem(RAX)),     "ff20"),
+    ("jmp [rdi+rsi*8]",
+     lambda a: a.jmp(Mem(RDI, index=RSI, scale=8)),     "ff24f7"),
     ("push rax",         lambda a: a.push(RAX),         "50"),
     ("push r12",         lambda a: a.push(R12),         "4154"),
     ("pop rax",          lambda a: a.pop(RAX),          "58"),
@@ -857,6 +864,51 @@ def test_run_store_immediate_bytes():
     buf = (ctypes.c_uint8 * 2)(0, 0)
     run(build, None, ctypes.c_void_p, args=(ctypes.cast(buf, ctypes.c_void_p),))
     assert list(buf) == [0xAB, 0xCD]
+
+
+def test_run_jump_table_dispatch():
+    # Interpreter-style dispatch: jump to handler[op] via a jump table, each
+    # handler returning a distinct value. Exercises jump_table + indirect jmp.
+    def build(a):
+        h0, h1, h2 = Label(), Label(), Label()
+        tbl = a.jump_table([h0, h1, h2])
+        a.lea(RAX, rip(tbl))
+        a.movsx(RCX, dword(RAX + RDI * 4))  # RDI = op; RCX = signed table[op]
+        a.add(RAX, RCX)                     # RAX = handler address
+        a.jmp(RAX)
+        a.bind(h0)
+        a.mov(RAX, 10)
+        a.ret()
+        a.bind(h1)
+        a.mov(RAX, 20)
+        a.ret()
+        a.bind(h2)
+        a.mov(RAX, 30)
+        a.ret()
+
+    for op, expected in [(0, 10), (1, 20), (2, 30)]:
+        assert run(build, ctypes.c_int64, ctypes.c_int64, args=(op,)) == expected
+
+
+def test_run_call_through_pointer_table():
+    # Indirect call through a memory slot holding a function address (like a
+    # method/vtable dispatch). Store a callback address in a cell, call [cell].
+    sig = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)
+    cb = sig(lambda x: x + 1)
+    cell = ctypes.c_void_p(ctypes.cast(cb, ctypes.c_void_p).value)
+
+    def build(a):
+        a.push(RBP)
+        a.mov(RBP, RSP)
+        a.mov(RAX, RSI)        # RSI = &cell
+        a.call(Mem(RAX))       # call [cell]  (arg already in RDI)
+        a.leave()
+        a.ret()
+
+    result = run(build, ctypes.c_int64, ctypes.c_int64, ctypes.c_void_p,
+                 args=(41, ctypes.addressof(cell)))
+    assert result == 42
+    assert cb  # keep alive
 
 
 def _const_fn(value):

@@ -90,6 +90,10 @@ class Assembler:
         # Read-only data blobs appended after the code at finalize() time:
         # (label, bytes, alignment). Each label is bound to its final offset.
         self._data: list[tuple[Label, bytes, int]] = []
+        # Jump tables appended after the code at finalize(): (table label,
+        # target labels). Each 4-byte entry is a target's signed offset from the
+        # table base, so an indirect jump through the table is position-free.
+        self._jump_tables: list[tuple[Label, list[Label]]] = []
 
     def _emit_prefixes(self, bitsize: int, reg: Reg | None, rm: Reg | None,
                        index: Reg | None = None):
@@ -876,23 +880,59 @@ class Assembler:
         self._data.append((label, bytes(blob), align))
         return label
 
-    def jmp(self, target: Label | Symbol):
-        """Unconditional near jump (E9 rel32). A Label targets code within this
-        object; a Symbol targets another object, resolved at load time."""
-        self.code.emit(0xE9)
-        self._emit_rel32_target(target)
+    def jump_table(self, targets: list[Label]) -> Label:
+        """Build a read-only dispatch table over `targets` and return its Label.
+        Each 4-byte entry is a target's signed byte offset from the table base,
+        so the table is position-independent. Dispatch reaches `targets[i]` with:
 
-    def call(self, target: Reg | Label | Symbol):
-        """Call a function. A Reg is an indirect call through that register
-        (FF /2), used to reach an absolute address loaded with `mov reg, addr`.
-        A Label (internal) or Symbol (external) is a direct RIP-relative call
-        (E8 rel32)."""
+            tbl = a.jump_table([h0, h1, h2])
+            a.lea(RAX, rip(tbl))              # RAX = &table
+            a.movsx(RCX, dword(RAX + i * 4))  # RCX = table[i] (signed offset)
+            a.add(RAX, RCX)                   # RAX = target address
+            a.jmp(RAX)                        # indirect jump
+
+        The targets must be bound by finalize(), when the table is appended
+        after the code."""
+        table = Label()
+        self._jump_tables.append((table, list(targets)))
+        return table
+
+    def jmp(self, target: Label | Symbol | Reg | Mem):
+        """Unconditional near jump. A Label (internal) or Symbol (external) is a
+        direct rel32 jump (E9); a Reg or Mem is an indirect jump (FF /4) through
+        that register or memory location -- the basis for jump/dispatch tables."""
+        match target:
+            case Reg():
+                if int(target) >= 8:
+                    self.code.emit(0x41)  # REX.B for r8..r15
+                self.code.emit(0xFF)
+                self.code.emit(0xE0 | (int(target) & 7))  # /4, mod=11, rm=reg
+            case Mem():
+                # bitsize 32 -> no REX.W (jmp is implicitly 64-bit) but still
+                # REX.B/X for an extended base/index register.
+                self._emit_prefixes(32, None, target.base, target.index)
+                self.code.emit(0xFF)
+                self._emit_modrm_mem(4, target)  # /4
+            case Label() | Symbol():
+                self.code.emit(0xE9)
+                self._emit_rel32_target(target)
+            case _:
+                raise TypeError(f"unsupported JMP operand: {target!r}")
+
+    def call(self, target: Reg | Mem | Label | Symbol):
+        """Call a function. A Reg or Mem is an indirect call (FF /2) through
+        that register or memory location (e.g. a function-pointer table); a
+        Label (internal) or Symbol (external) is a direct rel32 call (E8)."""
         match target:
             case Reg():
                 if int(target) >= 8:
                     self.code.emit(0x41)  # REX.B for r8..r15
                 self.code.emit(0xFF)
                 self.code.emit(0xD0 | (int(target) & 7))  # /2, mod=11, rm=reg
+            case Mem():
+                self._emit_prefixes(32, None, target.base, target.index)
+                self.code.emit(0xFF)
+                self._emit_modrm_mem(2, target)  # /2
             case Label() | Symbol():
                 self.code.emit(0xE8)
                 self._emit_rel32_target(target)
@@ -1155,6 +1195,17 @@ class Assembler:
                 out.code.extend(b"\x00" * (-len(out) % align))
             label.offset = len(out)
             out.code.extend(blob)
+        # Jump tables: 4-byte signed offsets of each target from the table base.
+        for table, targets in self._jump_tables:
+            out.code.extend(b"\x00" * (-len(out) % 4))  # align entries to 4
+            table.offset = len(out)
+            for t in targets:
+                if t.offset is None:
+                    raise ValueError(f"jump_table target {t!r} was never bound")
+                rel = t.offset - table.offset
+                if not (-(1 << 31) <= rel < (1 << 31)):
+                    raise ValueError(f"jump_table entry {rel} does not fit in 32 bits")
+                out.code.extend(rel.to_bytes(4, "little", signed=True))
         self._link(out)
         return ObjectCode(bytes(out.code), tuple(self._relocs), code_size)
 
