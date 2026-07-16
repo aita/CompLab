@@ -69,11 +69,16 @@ class Mem:
     `bitsize` is the access width. It stays None when a register operand
     already fixes the size (e.g. `mov rax, [rdi]`); it must be set via the
     byte/word/dword/qword helpers when the width is otherwise ambiguous, as
-    in a store of an immediate (`mov qword [rdi], 5`)."""
+    in a store of an immediate (`mov qword [rdi], 5`).
 
-    def __init__(self, base: Reg, disp: int = 0,
+    `base` may be None for a base-less `[index*scale + disp32]` operand, whose
+    absolute address is index*scale plus the (sign-extended) 32-bit disp."""
+
+    def __init__(self, base: Reg | None, disp: int = 0,
                  index: Reg | None = None, scale: int = 1,
                  bitsize: int | None = None):
+        if base is None and index is None:
+            raise ValueError("a memory operand needs a base or an index register")
         if index is not None:
             if scale not in (1, 2, 4, 8):
                 raise ValueError(f"invalid scale {scale}; must be 1, 2, 4, or 8")
@@ -104,9 +109,10 @@ class Mem:
         return Mem(self.base, self.disp, self.index, self.scale, bitsize)
 
     def __repr__(self):
-        s = f"[{self.base!r}"
+        s = "[" if self.base is None else f"[{self.base!r}"
         if self.index is not None:
-            s += f"+{self.index!r}*{self.scale}"
+            sep = "" if self.base is None else "+"
+            s += f"{sep}{self.index!r}*{self.scale}"
         if self.disp:
             s += f"{self.disp:+d}"
         return s + "]"

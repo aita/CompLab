@@ -12,6 +12,7 @@ from jit import (
     EAX,
     EBX,
     ECX,
+    EDX,
     R8,
     R10,
     R12,
@@ -213,6 +214,73 @@ ENCODINGS = [
      lambda a: a.cvttsd2si(RAX, XMM0),                  "f2480f2cc0"),
     ("cvttsd2si r10, xmm11",
      lambda a: a.cvttsd2si(R10, XMM11),                 "f24d0f2cd3"),
+    # Sign-extend accumulator (setup for idiv), one-operand mul/div/idiv.
+    ("cqo",              lambda a: a.cqo(),             "4899"),
+    ("cdq",              lambda a: a.cdq(),             "99"),
+    ("idiv rcx",         lambda a: a.idiv(RCX),         "48f7f9"),
+    ("idiv ecx",         lambda a: a.idiv(ECX),         "f7f9"),
+    ("idiv cl",          lambda a: a.idiv(CL),          "f6f9"),
+    ("idiv byte [rdi]",  lambda a: a.idiv(byte(RDI + 0)), "f63f"),
+    ("div ecx",          lambda a: a.div(ECX),          "f7f1"),
+    ("div rcx",          lambda a: a.div(RCX),          "48f7f1"),
+    ("mul rcx",          lambda a: a.mul(RCX),          "48f7e1"),
+    ("mul ecx",          lambda a: a.mul(ECX),          "f7e1"),
+    # Add-with-carry / subtract-with-borrow (full ALU family).
+    ("adc rax, rbx",     lambda a: a.adc(RAX, RBX),     "4811d8"),
+    ("adc eax, 5",       lambda a: a.adc(EAX, 5),       "83d005"),
+    ("sbb rax, rbx",     lambda a: a.sbb(RAX, RBX),     "4819d8"),
+    ("sbb rax, 5",       lambda a: a.sbb(RAX, 5),       "4883d805"),
+    # Rotates (shift family) by immediate and by CL.
+    ("rol rax, 3",       lambda a: a.rol(RAX, 3),       "48c1c003"),
+    ("rol eax, 3",       lambda a: a.rol(EAX, 3),       "c1c003"),
+    ("rol al, 3",        lambda a: a.rol(AL, 3),        "c0c003"),
+    ("ror eax, cl",      lambda a: a.ror(EAX, CL),      "d3c8"),
+    ("rol rax, cl",      lambda a: a.rol(RAX, CL),      "48d3c0"),
+    ("ror rax, 3",       lambda a: a.ror(RAX, 3),       "48c1c803"),
+    ("rol byte [rdi], 3",
+     lambda a: a.rol(byte(RDI + 0), 3),                 "c00703"),
+    # Misc: nop, int3, bswap, bit-scan / population count, bit test.
+    ("nop",              lambda a: a.nop(),             "90"),
+    ("int3",             lambda a: a.int3(),            "cc"),
+    ("bswap rax",        lambda a: a.bswap(RAX),        "480fc8"),
+    ("bswap eax",        lambda a: a.bswap(EAX),        "0fc8"),
+    ("bswap r8",         lambda a: a.bswap(R8),         "490fc8"),
+    ("popcnt rax, rbx",  lambda a: a.popcnt(RAX, RBX),  "f3480fb8c3"),
+    ("popcnt eax, ebx",  lambda a: a.popcnt(EAX, EBX),  "f30fb8c3"),
+    ("bsf rax, rbx",     lambda a: a.bsf(RAX, RBX),     "480fbcc3"),
+    ("bsr rax, rbx",     lambda a: a.bsr(RAX, RBX),     "480fbdc3"),
+    ("bt rax, 5",        lambda a: a.bt(RAX, 5),        "480fbae005"),
+    ("bt eax, 5",        lambda a: a.bt(EAX, 5),        "0fbae005"),
+    # Scalar float compares (set integer EFLAGS).
+    ("ucomisd xmm0, xmm1", lambda a: a.ucomisd(XMM0, XMM1), "660f2ec1"),
+    ("comisd xmm0, xmm1",  lambda a: a.comisd(XMM0, XMM1),  "660f2fc1"),
+    ("ucomiss xmm0, xmm1", lambda a: a.ucomiss(XMM0, XMM1), "0f2ec1"),
+    # Scalar single-precision (F3) arithmetic and moves.
+    ("movss xmm0, xmm1",  lambda a: a.movss(XMM0, XMM1), "f30f10c1"),
+    ("movss xmm0, [rdi]",
+     lambda a: a.movss(XMM0, RDI + 0),                  "f30f1007"),
+    ("movss [rdi], xmm0",
+     lambda a: a.movss(RDI + 0, XMM0),                  "f30f1107"),
+    ("addss xmm0, xmm1",  lambda a: a.addss(XMM0, XMM1), "f30f58c1"),
+    ("subss xmm2, xmm3",  lambda a: a.subss(XMM2, XMM3), "f30f5cd3"),
+    ("mulss xmm0, xmm1",  lambda a: a.mulss(XMM0, XMM1), "f30f59c1"),
+    ("divss xmm0, xmm1",  lambda a: a.divss(XMM0, XMM1), "f30f5ec1"),
+    ("sqrtss xmm0, xmm1", lambda a: a.sqrtss(XMM0, XMM1), "f30f51c1"),
+    ("sqrtsd xmm0, xmm1", lambda a: a.sqrtsd(XMM0, XMM1), "f20f51c1"),
+    # Float <-> float and int <-> float conversions.
+    ("cvtss2sd xmm0, xmm1", lambda a: a.cvtss2sd(XMM0, XMM1), "f30f5ac1"),
+    ("cvtsd2ss xmm0, xmm1", lambda a: a.cvtsd2ss(XMM0, XMM1), "f20f5ac1"),
+    ("cvtsi2ss xmm0, rdi",
+     lambda a: a.cvtsi2ss(XMM0, RDI),                   "f3480f2ac7"),
+    ("cvttss2si rax, xmm0",
+     lambda a: a.cvttss2si(RAX, XMM0),                  "f3480f2cc0"),
+    # Base-less [index*scale + disp32] addressing.
+    ("mov rax, [rsi*4+8]",
+     lambda a: a.mov(RAX, Mem(base=None, index=RSI, scale=4, disp=8)),
+                                                        "488b04b508000000"),
+    ("lea rax, [rdi*4+8]",
+     lambda a: a.lea(RAX, Mem(base=None, index=RDI, scale=4, disp=8)),
+                                                        "488d04bd08000000"),
 ]
 
 
@@ -1047,6 +1115,178 @@ def test_run_scalar_double_across_registers():
     result = run(build, ctypes.c_double, ctypes.c_double, ctypes.c_double,
                  args=(2.5, 4.0))
     assert result == (2.5 * 4.0) + 2.5
+
+
+def test_run_idiv_quotient_and_remainder():
+    # signed division: quotient in RAX, remainder in RDX after cqo+idiv.
+    def build_quot(a):
+        a.mov(RAX, RDI)
+        a.cqo()             # sign-extend RAX into RDX:RAX
+        a.idiv(RSI)
+        a.ret()
+
+    def build_rem(a):
+        a.mov(RAX, RDI)
+        a.cqo()
+        a.idiv(RSI)
+        a.mov(RAX, RDX)     # remainder
+        a.ret()
+
+    for x, y in [(17, 5), (-17, 5), (17, -5), (100, 7), (-100, 7)]:
+        q = run(build_quot, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+                args=(x, y))
+        r = run(build_rem, ctypes.c_int64, ctypes.c_int64, ctypes.c_int64,
+                args=(x, y))
+        assert q == int(x / y)      # C truncates toward zero, like idiv
+        assert r == x - q * y
+
+
+def test_run_div_unsigned():
+    # unsigned division: zero-extend the dividend into RDX first.
+    def build(a):
+        a.mov(RAX, RDI)
+        a.xor(EDX, EDX)     # RDX = 0 (zero-extend for unsigned div)
+        a.div(RSI)
+        a.ret()
+
+    for x, y in [(17, 5), (100, 7), (0xFFFFFFFFFFFFFFFF, 3)]:
+        result = run(build, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64,
+                     args=(x, y))
+        assert result == x // y
+
+
+def test_run_rotate():
+    # rotate rdi left by 4, then right by 4 -> identity (64-bit)
+    def build(a):
+        a.mov(RAX, RDI)
+        a.rol(RAX, 4)
+        a.ror(RAX, 4)
+        a.ret()
+
+    for x in (1, 0x123456789ABCDEF, 0xFF00000000000000):
+        result = run(build, ctypes.c_uint64, ctypes.c_uint64, args=(x,))
+        assert result == x
+
+
+def test_run_rotate_by_cl():
+    # rotate rdi left by rsi (in CL); compare against a Python rotate
+    def build(a):
+        a.mov(RAX, RDI)
+        a.mov(RCX, RSI)
+        a.rol(RAX, CL)
+        a.ret()
+
+    for x, n in [(1, 4), (0xF, 8), (0x8000000000000000, 1)]:
+        result = run(build, ctypes.c_uint64, ctypes.c_uint64, ctypes.c_uint64,
+                     args=(x, n))
+        expected = ((x << n) | (x >> (64 - n))) & 0xFFFFFFFFFFFFFFFF
+        assert result == expected
+
+
+def test_run_popcnt():
+    def build(a):
+        a.popcnt(RAX, RDI)
+        a.ret()
+
+    for x in (0, 1, 0xFF, 0x123456789ABCDEF, 0xFFFFFFFFFFFFFFFF):
+        result = run(build, ctypes.c_uint64, ctypes.c_uint64, args=(x,))
+        assert result == bin(x).count("1")
+
+
+def test_run_ucomisd_min_max():
+    # min and max of two doubles via ucomisd + unsigned branch.
+    def build_max(a):
+        done = Label("done")
+        a.ucomisd(XMM0, XMM1)
+        a.ja(done)            # XMM0 > XMM1 -> keep XMM0
+        a.movsd(XMM0, XMM1)
+        a.bind(done)
+        a.ret()
+
+    def build_min(a):
+        done = Label("done")
+        a.ucomisd(XMM0, XMM1)
+        a.jb(done)            # XMM0 < XMM1 -> keep XMM0
+        a.movsd(XMM0, XMM1)
+        a.bind(done)
+        a.ret()
+
+    for x, y in [(1.5, 2.5), (2.5, 1.5), (-1.0, 1.0), (3.0, 3.0)]:
+        assert run(build_max, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+                   args=(x, y)) == max(x, y)
+        assert run(build_min, ctypes.c_double, ctypes.c_double, ctypes.c_double,
+                   args=(x, y)) == min(x, y)
+
+
+def test_run_addss_single_precision():
+    def build(a):
+        a.addss(XMM0, XMM1)
+        a.ret()
+
+    result = run(build, ctypes.c_float, ctypes.c_float, ctypes.c_float,
+                 args=(1.5, 2.25))
+    assert result == 3.75
+
+
+def test_run_sqrtsd():
+    def build(a):
+        a.sqrtsd(XMM0, XMM0)
+        a.ret()
+
+    for x in (4.0, 2.0, 9.0, 0.25):
+        result = run(build, ctypes.c_double, ctypes.c_double, args=(x,))
+        assert result == x ** 0.5
+
+
+def test_run_int_to_single():
+    def build(a):
+        a.cvtsi2ss(XMM0, RDI)  # int arg -> float return
+        a.ret()
+
+    assert run(build, ctypes.c_float, ctypes.c_int64, args=(7,)) == 7.0
+
+
+def test_run_single_to_int():
+    def build(a):
+        a.cvttss2si(RAX, XMM0)  # truncate float arg -> int return
+        a.ret()
+
+    assert run(build, ctypes.c_int64, ctypes.c_float, args=(3.9,)) == 3
+
+
+def test_run_float_double_roundtrip():
+    # promote the float arg to double, back to float, and return it
+    def build(a):
+        a.cvtss2sd(XMM0, XMM0)
+        a.cvtsd2ss(XMM0, XMM0)
+        a.ret()
+
+    assert run(build, ctypes.c_float, ctypes.c_float, args=(2.5,)) == 2.5
+
+
+def test_run_baseless_index_lea():
+    # compute rdi*4 + 8 with a base-less [index*scale + disp32] effective address
+    def build(a):
+        a.lea(RAX, Mem(base=None, index=RDI, scale=4, disp=8))
+        a.ret()
+
+    for x in (0, 1, 10, 100):
+        assert run(build, ctypes.c_int64, ctypes.c_int64, args=(x,)) == x * 4 + 8
+
+
+def test_mov_rip_symbol_is_rel32_reloc():
+    # mov rax, [rip + Symbol] emits 48 8b 05 <disp32> and records a REL32 reloc
+    # so the loader can bind the external symbol RIP-relatively.
+    a = Assembler()
+    a.mov(RAX, rip(Symbol("g")))
+    obj = a.finalize()
+    assert obj.code.hex() == "488b0500000000"  # disp32 placeholder
+    assert obj.relocs == (Reloc(offset=3, symbol="g", kind=RelocKind.REL32),)
+
+
+def test_baseless_needs_index():
+    with pytest.raises(ValueError, match="base or an index"):
+        Mem(base=None)
 
 
 def test_entries_are_aligned():

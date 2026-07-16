@@ -136,13 +136,17 @@ class Assembler:
         self.code.emit(modrm)
 
     def _emit_sse_prefix(self, reg: int | None, rm: int | None,
-                         index: int | None = None, *, w: bool = False):
-        # Scalar-SSE prefix path. The mandatory prefix (F2 for the scalar-double
-        # ops) comes BEFORE the REX byte, which comes before the 0F escape and
-        # opcode. This is deliberately separate from _emit_prefixes, which emits
-        # the 0x66 operand-size prefix for 16-bit and derives REX.W from the
-        # operand size; here REX.W is set only for the 64-bit convert ops (`w`).
-        self.code.emit(0xF2)  # mandatory prefix
+                         index: int | None = None, *, w: bool = False,
+                         prefix: int | None = 0xF2):
+        # Scalar-SSE prefix path. The mandatory prefix (F2 for scalar-double, F3
+        # for scalar-single, 66 for the packed-double compares, or None for the
+        # single-precision compares) comes BEFORE the REX byte, which comes
+        # before the 0F escape and opcode. This is deliberately separate from
+        # _emit_prefixes, which emits the 0x66 operand-size prefix for 16-bit and
+        # derives REX.W from the operand size; here REX.W is set only for the
+        # 64-bit convert ops (`w`).
+        if prefix is not None:
+            self.code.emit(prefix)  # mandatory prefix
         r = (int(reg) >> 3) if reg is not None else 0
         x = (int(index) >> 3) if index is not None else 0
         b = (int(rm) >> 3) if rm is not None else 0
@@ -176,12 +180,30 @@ class Assembler:
         reg_field = int(reg) & 7
         if isinstance(mem, _RipRel):
             # RIP-relative: ModR/M mod=00, reg=<reg>, rm=101, then a disp32 and
-            # NO SIB/base. The disp32 = label.offset - end_of_instruction, and
-            # since it is the final field, end = disp32_offset + 4 -- exactly a
-            # rel32 fixup, so reuse the _fixups/_link path.
+            # NO SIB/base. The disp32 = target - end_of_instruction, and since it
+            # is the final field, end = disp32_offset + 4 -- exactly a rel32.
+            # A Label target is resolved internally by the _fixups/_link path; a
+            # Symbol target is an external reference resolved by the loader via a
+            # REL32 relocation (the same machinery as a rel32 call).
             self.code.emit(0x00 | (reg_field << 3) | 0x05)
-            self._fixups.append((len(self.code), mem.label))
-            self.code.emit_int(0, 4)  # disp32 placeholder, patched by _link
+            at = len(self.code)
+            if isinstance(mem.label, Symbol):
+                self._relocs.append(Reloc(at, mem.label.name, RelocKind.REL32))
+            else:
+                self._fixups.append((at, mem.label))
+            self.code.emit_int(0, 4)  # disp32 placeholder, patched by _link/loader
+            return
+        if mem.base is None:
+            # Base-less [index*scale + disp32]: ModR/M mod=00, rm=100 (SIB
+            # follows), then a SIB byte whose base field is 101 (which, with
+            # mod=00, means "no base -- a disp32 follows instead").
+            if mem.index is None:
+                raise ValueError("a base-less memory operand needs an index")
+            self.code.emit(0x00 | (reg_field << 3) | 0x04)
+            index = int(mem.index) & 7
+            scale = self._SCALE_BITS[mem.scale]
+            self.code.emit((scale << 6) | (index << 3) | 0x05)  # base=101
+            self.code.emit_int(mem.disp & 0xFFFFFFFF, 4)  # absolute disp32
             return
         base = int(mem.base) & 7
         disp = mem.disp
@@ -310,6 +332,14 @@ class Assembler:
         """Bitwise XOR src into dst (dst ^= src)."""
         self._alu(0x30, 6, dst, src)
 
+    def adc(self, dst: Reg | Mem, src: Reg | Mem | int):
+        """Add with carry (dst += src + CF)."""
+        self._alu(0x10, 2, dst, src)
+
+    def sbb(self, dst: Reg | Mem, src: Reg | Mem | int):
+        """Subtract with borrow (dst -= src + CF)."""
+        self._alu(0x18, 3, dst, src)
+
     def _alu(self, base: int, ext: int, dst: Reg | Mem, src: Reg | Mem | int):
         # `base` is the r/m<-r opcode of the ALU family (ADD=0x00, SUB=0x28,
         # CMP=0x38, AND=0x20, OR=0x08, XOR=0x30); the other forms are fixed
@@ -389,6 +419,105 @@ class Assembler:
             case _:
                 raise TypeError(f"unsupported IMUL operands: {dst!r}, {src!r}")
 
+    def mul(self, operand: Reg | Mem):
+        """Unsigned multiply of the accumulator by operand: the double-width
+        product goes into (r)DX:(r)AX (F7 /4; F6 for 8-bit)."""
+        self._muldiv(4, operand)
+
+    def div(self, divisor: Reg | Mem):
+        """Unsigned divide of (r)DX:(r)AX by divisor: quotient into (r)AX,
+        remainder into (r)DX (F7 /6; F6 for 8-bit)."""
+        self._muldiv(6, divisor)
+
+    def idiv(self, divisor: Reg | Mem):
+        """Signed divide of (r)DX:(r)AX by divisor: quotient into (r)AX,
+        remainder into (r)DX (F7 /7; F6 for 8-bit)."""
+        self._muldiv(7, divisor)
+
+    def _muldiv(self, ext: int, operand: Reg | Mem):
+        # F7 /ext (F6 for 8-bit): a single r/m operand; the ModR/M.reg field is
+        # the opcode extension digit selecting mul(/4), div(/6), idiv(/7).
+        match operand:
+            case Reg():
+                self._emit_prefixes(operand.bitsize, None, operand)
+                self.code.emit(0xF6 if operand.bitsize == 8 else 0xF7)
+                self._emit_modrm(operand, ext)  # reg=ext, rm=operand
+            case Mem():
+                bits = self._mem_bitsize(operand)
+                self._emit_prefixes(bits, None, operand.base, operand.index)
+                self.code.emit(0xF6 if bits == 8 else 0xF7)
+                self._emit_modrm_mem(ext, operand)
+            case _:
+                raise TypeError(f"unsupported mul/div operand: {operand!r}")
+
+    def cqo(self):
+        """Sign-extend RAX into RDX:RAX (48 99), setting up a 64-bit idiv."""
+        self.code.emit(0x48)  # REX.W
+        self.code.emit(0x99)
+
+    def cdq(self):
+        """Sign-extend EAX into EDX:EAX (99), setting up a 32-bit idiv."""
+        self.code.emit(0x99)
+
+    def nop(self):
+        """Do nothing (90)."""
+        self.code.emit(0x90)
+
+    def int3(self):
+        """Breakpoint trap (CC)."""
+        self.code.emit(0xCC)
+
+    def bswap(self, reg: Reg):
+        """Reverse the byte order of a 32- or 64-bit register (0F C8+r)."""
+        if reg.bitsize not in (32, 64):
+            raise ValueError("bswap needs a 32- or 64-bit register")
+        self._emit_prefixes(reg.bitsize, None, reg)
+        self.code.emit(0x0F)
+        self.code.emit(0xC8 + (int(reg) & 7))
+
+    def bt(self, reg: Reg, imm: int):
+        """Copy bit `imm` of reg into CF (0F BA /4 ib)."""
+        self._emit_prefixes(reg.bitsize, None, reg)
+        self.code.emit(0x0F)
+        self.code.emit(0xBA)
+        self._emit_modrm(reg, 4)  # reg=ext 4, rm=reg
+        self.code.emit_int(self._encode_imm(imm, 1), 1)
+
+    def popcnt(self, dst: Reg, src: Reg | Mem):
+        """Count the set bits of src into dst (F3 0F B8 /r)."""
+        self._bit_scan(0xB8, dst, src, prefix=0xF3)
+
+    def bsf(self, dst: Reg, src: Reg | Mem):
+        """Index of the lowest set bit of src into dst (0F BC /r)."""
+        self._bit_scan(0xBC, dst, src)
+
+    def bsr(self, dst: Reg, src: Reg | Mem):
+        """Index of the highest set bit of src into dst (0F BD /r)."""
+        self._bit_scan(0xBD, dst, src)
+
+    def _bit_scan(self, opcode: int, dst: Reg, src: Reg | Mem,
+                  prefix: int | None = None):
+        # Two-byte 0F <opcode> /r with dst as ModR/M.reg and src as r/m, like
+        # imul r, r/m. popcnt carries a mandatory F3 prefix (before REX); bsf/bsr
+        # have none. Prefix / REX follow the destination width.
+        if not isinstance(dst, Reg):
+            raise TypeError(f"bit-scan destination must be a register: {dst!r}")
+        if prefix is not None:
+            self.code.emit(prefix)
+        match src:
+            case Reg():
+                self._emit_prefixes(dst.bitsize, dst, src)
+                self.code.emit(0x0F)
+                self.code.emit(opcode)
+                self._emit_modrm(src, dst)  # reg=dst, rm=src
+            case Mem():
+                self._emit_prefixes(dst.bitsize, dst, src.base, src.index)
+                self.code.emit(0x0F)
+                self.code.emit(opcode)
+                self._emit_modrm_mem(dst, src)
+            case _:
+                raise TypeError(f"unsupported bit-scan source: {src!r}")
+
     def not_(self, dst: Reg):
         """Bitwise NOT in place (one's complement)."""
         self._unary(2, dst)
@@ -417,10 +546,18 @@ class Assembler:
         (signed dst >>= count)."""
         self._shift(7, dst, count)
 
+    def rol(self, dst: Reg | Mem, count: int | Reg):
+        """Rotate dst left by count (bits shifted out re-enter on the right)."""
+        self._shift(0, dst, count)
+
+    def ror(self, dst: Reg | Mem, count: int | Reg):
+        """Rotate dst right by count (bits shifted out re-enter on the left)."""
+        self._shift(1, dst, count)
+
     def _shift(self, ext: int, dst: Reg | Mem, count: int | Reg):
-        # Group 2 shifts: C1/C0 /ext with an imm8 count, or D3/D2 /ext to
-        # shift by the count in CL. ext selects shl(/4), shr(/5), sar(/7);
-        # the C0/D2 opcodes are the 8-bit forms.
+        # Group 2 shifts/rotates: C1/C0 /ext with an imm8 count, or D3/D2 /ext to
+        # shift by the count in CL. ext selects rol(/0), ror(/1), shl(/4),
+        # shr(/5), sar(/7); the C0/D2 opcodes are the 8-bit forms.
         if isinstance(count, Reg):
             if int(count) != 1 or count.bitsize != 8:  # CL is code 1, 8-bit
                 raise TypeError(f"shift count register must be CL, not {count!r}")
@@ -543,21 +680,32 @@ class Assembler:
     def movsd(self, dst: Xmm | Mem, src: Xmm | Mem):
         """Move a scalar double (low 64 bits of an XMM). Load xmm<-xmm/m64 is
         F2 0F 10 /r; store m64<-xmm is F2 0F 11 /r."""
+        self._mov_scalar(dst, src, prefix=0xF2)
+
+    def movss(self, dst: Xmm | Mem, src: Xmm | Mem):
+        """Move a scalar single (low 32 bits of an XMM). Load xmm<-xmm/m32 is
+        F3 0F 10 /r; store m32<-xmm is F3 0F 11 /r."""
+        self._mov_scalar(dst, src, prefix=0xF3)
+
+    def _mov_scalar(self, dst: Xmm | Mem, src: Xmm | Mem, *, prefix: int):
+        # <prefix> 0F 10/11 /r: load (10) with the XMM as ModR/M.reg, store (11)
+        # with the XMM as ModR/M.reg and the memory as r/m. F2 selects double, F3
+        # single -- the only difference between movsd and movss.
         match dst, src:
             case Xmm(), Xmm():
-                self._emit_sse_prefix(dst, src)
+                self._emit_sse_prefix(dst, src, prefix=prefix)
                 self.code.emit(0x10)
                 self._emit_modrm(src, dst)  # reg=dst, rm=src
             case Xmm(), Mem():
-                self._emit_sse_prefix(dst, src.base, src.index)
+                self._emit_sse_prefix(dst, src.base, src.index, prefix=prefix)
                 self.code.emit(0x10)  # load
                 self._emit_modrm_mem(dst, src)
             case Mem(), Xmm():
-                self._emit_sse_prefix(src, dst.base, dst.index)
+                self._emit_sse_prefix(src, dst.base, dst.index, prefix=prefix)
                 self.code.emit(0x11)  # store
                 self._emit_modrm_mem(src, dst)
             case _:
-                raise TypeError(f"unsupported MOVSD operands: {dst!r}, {src!r}")
+                raise TypeError(f"unsupported scalar-move operands: {dst!r}, {src!r}")
 
     def addsd(self, dst: Xmm, src: Xmm | Mem):
         """Add scalar doubles (dst += src). F2 0F 58 /r."""
@@ -575,55 +723,118 @@ class Assembler:
         """Divide scalar doubles (dst /= src). F2 0F 5E /r."""
         self._sse_binary(0x5E, dst, src)
 
-    def _sse_binary(self, opcode: int, dst: Xmm, src: Xmm | Mem):
-        # F2 0F <opcode> /r, form xmm1, xmm2/m64: dst is ModR/M.reg, src is r/m.
+    def sqrtsd(self, dst: Xmm, src: Xmm | Mem):
+        """Square root of a scalar double (dst = sqrt(src)). F2 0F 51 /r."""
+        self._sse_binary(0x51, dst, src)
+
+    def addss(self, dst: Xmm, src: Xmm | Mem):
+        """Add scalar singles (dst += src). F3 0F 58 /r."""
+        self._sse_binary(0x58, dst, src, prefix=0xF3)
+
+    def subss(self, dst: Xmm, src: Xmm | Mem):
+        """Subtract scalar singles (dst -= src). F3 0F 5C /r."""
+        self._sse_binary(0x5C, dst, src, prefix=0xF3)
+
+    def mulss(self, dst: Xmm, src: Xmm | Mem):
+        """Multiply scalar singles (dst *= src). F3 0F 59 /r."""
+        self._sse_binary(0x59, dst, src, prefix=0xF3)
+
+    def divss(self, dst: Xmm, src: Xmm | Mem):
+        """Divide scalar singles (dst /= src). F3 0F 5E /r."""
+        self._sse_binary(0x5E, dst, src, prefix=0xF3)
+
+    def sqrtss(self, dst: Xmm, src: Xmm | Mem):
+        """Square root of a scalar single (dst = sqrt(src)). F3 0F 51 /r."""
+        self._sse_binary(0x51, dst, src, prefix=0xF3)
+
+    def cvtss2sd(self, dst: Xmm, src: Xmm | Mem):
+        """Convert a scalar single to a scalar double (dst = (double)src).
+        F3 0F 5A /r."""
+        self._sse_binary(0x5A, dst, src, prefix=0xF3)
+
+    def cvtsd2ss(self, dst: Xmm, src: Xmm | Mem):
+        """Convert a scalar double to a scalar single (dst = (float)src).
+        F2 0F 5A /r."""
+        self._sse_binary(0x5A, dst, src, prefix=0xF2)
+
+    # Ordered/unordered scalar compares set the integer EFLAGS (ZF/PF/CF) from
+    # dst vs src, so an unsigned branch (ja/jae/jb/jbe) reads as "dst <cond> src".
+
+    def ucomisd(self, a: Xmm, b: Xmm | Mem):
+        """Unordered compare of scalar doubles, setting EFLAGS. 66 0F 2E /r."""
+        self._sse_binary(0x2E, a, b, prefix=0x66)
+
+    def comisd(self, a: Xmm, b: Xmm | Mem):
+        """Ordered compare of scalar doubles, setting EFLAGS. 66 0F 2F /r."""
+        self._sse_binary(0x2F, a, b, prefix=0x66)
+
+    def ucomiss(self, a: Xmm, b: Xmm | Mem):
+        """Unordered compare of scalar singles, setting EFLAGS. 0F 2E /r."""
+        self._sse_binary(0x2E, a, b, prefix=None)
+
+    def comiss(self, a: Xmm, b: Xmm | Mem):
+        """Ordered compare of scalar singles, setting EFLAGS. 0F 2F /r."""
+        self._sse_binary(0x2F, a, b, prefix=None)
+
+    def _sse_binary(self, opcode: int, dst: Xmm, src: Xmm | Mem, *,
+                    prefix: int | None = 0xF2):
+        # <prefix> 0F <opcode> /r, form xmm1, xmm2/m: dst is ModR/M.reg, src is
+        # r/m. F2 = scalar-double, F3 = scalar-single, 66 = packed-double
+        # compares, None = single-precision compares.
         if not isinstance(dst, Xmm):
-            raise TypeError(f"scalar-double destination must be an XMM: {dst!r}")
+            raise TypeError(f"scalar-SSE destination must be an XMM: {dst!r}")
         match src:
             case Xmm():
-                self._emit_sse_prefix(dst, src)
+                self._emit_sse_prefix(dst, src, prefix=prefix)
                 self.code.emit(opcode)
                 self._emit_modrm(src, dst)  # reg=dst, rm=src
             case Mem():
-                self._emit_sse_prefix(dst, src.base, src.index)
+                self._emit_sse_prefix(dst, src.base, src.index, prefix=prefix)
                 self.code.emit(opcode)
                 self._emit_modrm_mem(dst, src)
             case _:
-                raise TypeError(f"unsupported scalar-double source: {src!r}")
+                raise TypeError(f"unsupported scalar-SSE source: {src!r}")
 
     def cvtsi2sd(self, dst: Xmm, src: Reg | Mem):
         """Convert a signed 64-bit integer (GP reg/m64) to a double in dst.
         F2 REX.W 0F 2A /r; REX.W is required for the 64-bit source."""
-        if not isinstance(dst, Xmm):
-            raise TypeError(f"cvtsi2sd destination must be an XMM: {dst!r}")
-        match src:
-            case Reg():
-                self._emit_sse_prefix(dst, src, w=True)
-                self.code.emit(0x2A)
-                self._emit_modrm(src, dst)  # reg=dst, rm=src
-            case Mem():
-                self._emit_sse_prefix(dst, src.base, src.index, w=True)
-                self.code.emit(0x2A)
-                self._emit_modrm_mem(dst, src)
-            case _:
-                raise TypeError(f"unsupported cvtsi2sd source: {src!r}")
+        self._cvt_int_float(0x2A, dst, src, Xmm, prefix=0xF2, want="XMM")
+
+    def cvtsi2ss(self, dst: Xmm, src: Reg | Mem):
+        """Convert a signed 64-bit integer (GP reg/m64) to a single in dst.
+        F3 REX.W 0F 2A /r; REX.W is required for the 64-bit source."""
+        self._cvt_int_float(0x2A, dst, src, Xmm, prefix=0xF3, want="XMM")
 
     def cvttsd2si(self, dst: Reg, src: Xmm | Mem):
         """Convert (truncating) a double (xmm/m64) to a signed 64-bit integer in
         the GP register dst. F2 REX.W 0F 2C /r; REX.W is required."""
-        if not isinstance(dst, Reg):
-            raise TypeError(f"cvttsd2si destination must be a GP register: {dst!r}")
+        self._cvt_int_float(0x2C, dst, src, Reg, prefix=0xF2, want="GP register")
+
+    def cvttss2si(self, dst: Reg, src: Xmm | Mem):
+        """Convert (truncating) a single (xmm/m32) to a signed 64-bit integer in
+        the GP register dst. F3 REX.W 0F 2C /r; REX.W is required."""
+        self._cvt_int_float(0x2C, dst, src, Reg, prefix=0xF3, want="GP register")
+
+    def _cvt_int_float(self, opcode: int, dst, src, dst_type, *,
+                       prefix: int, want: str):
+        # <prefix> REX.W 0F <opcode> /r: dst is ModR/M.reg, src is r/m. REX.W is
+        # always set here for the 64-bit GP operand (2A converts from it, 2C to
+        # it). Works for both directions: for 2A dst is an XMM and src a GP
+        # reg/mem, for 2C dst is a GP reg and src an XMM/mem.
+        if not isinstance(dst, dst_type):
+            raise TypeError(f"conversion destination must be a {want}: {dst!r}")
         match src:
-            case Xmm():
-                self._emit_sse_prefix(dst, src, w=True)
-                self.code.emit(0x2C)
+            case Reg() | Xmm():
+                self._emit_sse_prefix(dst, src, w=True, prefix=prefix)
+                self.code.emit(opcode)
                 self._emit_modrm(src, dst)  # reg=dst, rm=src
             case Mem():
-                self._emit_sse_prefix(dst, src.base, src.index, w=True)
-                self.code.emit(0x2C)
+                self._emit_sse_prefix(dst, src.base, src.index, w=True,
+                                      prefix=prefix)
+                self.code.emit(opcode)
                 self._emit_modrm_mem(dst, src)
             case _:
-                raise TypeError(f"unsupported cvttsd2si source: {src!r}")
+                raise TypeError(f"unsupported conversion source: {src!r}")
 
     def ret(self):
         self.code.emit(0xC3)  # RET opcode
