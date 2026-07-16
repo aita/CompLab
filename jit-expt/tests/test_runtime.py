@@ -95,3 +95,38 @@ def test_concurrent_execute_while_adding():
     assert errors == []
     # The original function is still intact after all the concurrent adds.
     assert victim() == 7
+
+
+def test_concurrent_adds_from_many_threads():
+    # Several threads call add() on the SAME runtime at once. The lock must
+    # serialize them so the bump allocator/symbol tables aren't corrupted: every
+    # function gets a distinct address and returns its own value.
+    rt = Runtime()
+    threads = 8
+    per_thread = 300
+    results: list[list[tuple[int, int]]] = [[] for _ in range(threads)]
+    errors = []
+
+    def worker(tid):
+        try:
+            for i in range(per_thread):
+                value = tid * per_thread + i
+                addr = rt.add(_const_fn(value))
+                results[tid].append((addr, value))
+        except Exception as exc:  # pragma: no cover - failure path
+            errors.append(repr(exc))
+
+    ts = [threading.Thread(target=worker, args=(t,)) for t in range(threads)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+
+    assert errors == []
+    placed = [pair for r in results for pair in r]
+    assert len(placed) == threads * per_thread
+    # No two functions were allocated the same address (no cursor race).
+    assert len({addr for addr, _ in placed}) == len(placed)
+    # Every function still executes and returns its own value.
+    for addr, value in placed:
+        assert ctypes.CFUNCTYPE(ctypes.c_int64)(addr)() == value

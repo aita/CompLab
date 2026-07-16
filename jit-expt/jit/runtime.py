@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import mmap
+import threading
 
 from .assembler import ObjectCode, RelocKind
 
@@ -96,12 +97,17 @@ class Runtime:
     writable view code is copied through and a permanently read+execute view it
     runs from. Writes never touch the R+X view, so functions already placed in a
     page stay continuously executable while add() copies a new one in — safe
-    even if another thread is executing pooled code concurrently."""
+    even if another thread is executing pooled code concurrently.
+
+    A lock serializes the mutating operations (add/stage/link/define) so several
+    threads may build code concurrently without corrupting the bump allocator or
+    the symbol/veneer tables. Executing already-added functions takes no lock."""
 
     def __init__(self, align: int = 16):
         self._pages: list[_Page] = []      # all pages, kept alive
         self._active: _Page | None = None  # page currently being filled
         self._align = align
+        self._lock = threading.Lock()      # guards the mutating operations
         self._libc = ctypes.CDLL(None, use_errno=True)
         # mmap returns a pointer; declare it so ctypes doesn't truncate the
         # address to a 32-bit C int.
@@ -118,25 +124,27 @@ class Runtime:
     def define(self, name: str, addr: int) -> None:
         """Register an external address (e.g. a C function) under `name` so
         code added later can reference it as Symbol(name)."""
-        self._symbols[name] = addr
+        with self._lock:
+            self._symbols[name] = addr
 
     def add(self, obj: ObjectCode, name: str | None = None,
             symbols: dict[str, int] | None = None) -> int:
-        blob = bytearray(obj.code)
-        page, offset, addr = self._alloc_slot(len(blob))
+        with self._lock:
+            blob = bytearray(obj.code)
+            page, offset, addr = self._alloc_slot(len(blob))
 
-        # The symbol table for this add: the runtime's registry, plus any
-        # one-off symbols, plus this function's own name (so it can recurse).
-        table = {**self._symbols, **(symbols or {})}
-        if name is not None:
-            self._symbols[name] = addr
-            table[name] = addr
+            # The symbol table for this add: the runtime's registry, plus any
+            # one-off symbols, plus this function's own name (so it can recurse).
+            table = {**self._symbols, **(symbols or {})}
+            if name is not None:
+                self._symbols[name] = addr
+                table[name] = addr
 
-        # Reserving the slot above means any veneers created while relocating
-        # are placed after this function, not on top of it.
-        self._relocate(blob, addr, obj.relocs, table)
-        self._write_slot(page, offset, blob)
-        return addr
+            # Reserving the slot above means any veneers created while relocating
+            # are placed after this function, not on top of it.
+            self._relocate(blob, addr, obj.relocs, table)
+            self._write_slot(page, offset, blob)
+            return addr
 
     def stage(self, obj: ObjectCode, name: str | None = None) -> int:
         """Reserve a slot for `obj` and register `name -> addr` now, but defer
@@ -144,20 +152,22 @@ class Runtime:
         before linking lets them reference each other's names (mutual
         recursion), since every name is registered up front. Returns the
         reserved address."""
-        page, offset, addr = self._alloc_slot(len(obj.code))
-        if name is not None:
-            self._symbols[name] = addr
-        self._pending.append((obj, page, offset, addr))
-        return addr
+        with self._lock:
+            page, offset, addr = self._alloc_slot(len(obj.code))
+            if name is not None:
+                self._symbols[name] = addr
+            self._pending.append((obj, page, offset, addr))
+            return addr
 
     def link(self) -> None:
         """Relocate and write every staged function now that all names are
         registered. A no-op when nothing is staged."""
-        pending, self._pending = self._pending, []
-        for obj, page, offset, addr in pending:
-            blob = bytearray(obj.code)
-            self._relocate(blob, addr, obj.relocs, self._symbols)
-            self._write_slot(page, offset, blob)
+        with self._lock:
+            pending, self._pending = self._pending, []
+            for obj, page, offset, addr in pending:
+                blob = bytearray(obj.code)
+                self._relocate(blob, addr, obj.relocs, self._symbols)
+                self._write_slot(page, offset, blob)
 
     def _relocate(self, blob: bytearray, base: int, relocs, table: dict[str, int]):
         for r in relocs:
