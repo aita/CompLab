@@ -87,6 +87,7 @@ class Assembler:
         self.code = CodeBuffer()
         self._fixups: list[tuple[int, Label]] = []  # (rel32 offset, target)
         self._relocs: list[Reloc] = []  # absolute symbol relocations
+        self._labels: dict[str, Label] = {}  # named labels, deduped by name
         # Read-only data blobs appended after the code at finalize() time:
         # (label, bytes, alignment). Each label is bound to its final offset.
         self._data: list[tuple[Label, bytes, int]] = []
@@ -866,8 +867,23 @@ class Assembler:
     # is emitted and recorded as a fixup; finalize() backpatches them all once
     # the labels are known.
 
+    def label(self, name: str | None = None) -> Label:
+        """Return a Label. With a `name`, the same Label is returned for that
+        name every time (a per-assembler symbol table), so code can refer to a
+        target by name without threading the object around -- and two lookups of
+        the same name can never be mistaken for different labels. Without a name,
+        a fresh anonymous Label is returned."""
+        if name is None:
+            return Label()
+        if name not in self._labels:
+            self._labels[name] = Label(name)
+        return self._labels[name]
+
     def bind(self, label: Label) -> Label:
-        """Bind `label` to the current position in the code."""
+        """Bind `label` to the current position in the code. A label may only be
+        bound once."""
+        if label.offset is not None:
+            raise ValueError(f"label {label!r} is already bound")
         label.offset = len(self.code)
         return label
 

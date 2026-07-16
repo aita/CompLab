@@ -405,6 +405,40 @@ def test_finalize_unbound_label_raises():
         a.finalize()
 
 
+def test_named_labels_are_deduped():
+    a = Assembler()
+    # Same name -> same object, so a jmp and its bind can't get out of sync.
+    assert a.label("loop") is a.label("loop")
+    # Distinct names, and anonymous labels, are distinct objects.
+    assert a.label("loop") is not a.label("end")
+    assert a.label() is not a.label()
+
+
+def test_double_bind_raises():
+    a = Assembler()
+    end = a.label("end")
+    a.bind(end)
+    with pytest.raises(ValueError, match="already bound"):
+        a.bind(end)
+
+
+def test_run_loop_with_named_labels():
+    # The countdown loop written with a.label(...) instead of Label objects.
+    def build(a):
+        top, done = a.label("top"), a.label("done")
+        a.mov(RAX, 0)
+        a.bind(top)
+        a.cmp(RDI, 0)
+        a.je(done)
+        a.add(RAX, RDI)
+        a.sub(RDI, 1)
+        a.jmp(a.label("top"))   # reference "top" by name, not the object
+        a.bind(done)
+        a.ret()
+
+    assert run(build, ctypes.c_int64, ctypes.c_int64, args=(5,)) == 15
+
+
 def test_run_countdown_loop():
     # sum = 0; while (rdi != 0) { sum += rdi; rdi -= 1; } return sum
     def build(a):
