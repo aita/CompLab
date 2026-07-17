@@ -75,7 +75,7 @@ class Label:
         self.name = name
         self.offset: int | None = None
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         where = "unbound" if self.offset is None else f"@{self.offset}"
         return f"Label({self.name or ''} {where})"
 
@@ -87,7 +87,7 @@ class Assembler:
         self.code = CodeBuffer()
         self._fixups: list[tuple[int, Label]] = []  # (rel32 offset, target)
         self._relocs: list[Reloc] = []  # absolute symbol relocations
-        self._labels: dict[str, Label] = {}  # named labels, deduped by name
+        self._labels: dict[str, Label] = {}  # every label, keyed by name
         # Read-only data blobs appended after the code at finalize() time:
         # (label, bytes, alignment). Each label is bound to its final offset.
         self._data: list[tuple[Label, bytes, int]] = []
@@ -819,8 +819,8 @@ class Assembler:
         the GP register dst. F3 REX.W 0F 2C /r; REX.W is required."""
         self._cvt_int_float(0x2C, dst, src, Reg, prefix=0xF3, want="GP register")
 
-    def _cvt_int_float(self, opcode: int, dst, src, dst_type, *,
-                       prefix: int, want: str):
+    def _cvt_int_float(self, opcode: int, dst: Reg | Xmm, src: Reg | Xmm | Mem,
+                       dst_type: type, *, prefix: int, want: str):
         # <prefix> REX.W 0F <opcode> /r: dst is ModR/M.reg, src is r/m. REX.W is
         # always set here for the 64-bit GP operand (2A converts from it, 2C to
         # it). Works for both directions: for 2A dst is an XMM and src a GP
@@ -868,16 +868,28 @@ class Assembler:
     # the labels are known.
 
     def label(self, name: str | None = None) -> Label:
-        """Return a Label. With a `name`, the same Label is returned for that
-        name every time (a per-assembler symbol table), so code can refer to a
-        target by name without threading the object around -- and two lookups of
-        the same name can never be mistaken for different labels. Without a name,
-        a fresh anonymous Label is returned."""
+        """Return a Label tracked in this assembler's per-instance symbol table.
+        The same name always returns the same Label, so code can refer to a
+        target by name without threading the object around, and two lookups of
+        one name can never be mistaken for different labels. Without a name, a
+        fresh label is created with an auto-generated one (".L0", ".L1", ...) so
+        every label still has a (unique) name; ".L*" is reserved for these."""
         if name is None:
-            return Label()
+            return self._fresh_label(".L")
         if name not in self._labels:
             self._labels[name] = Label(name)
         return self._labels[name]
+
+    def _fresh_label(self, prefix: str) -> Label:
+        """Create and track a new label with the first free `prefix`N name.
+        Used for anonymous (.L), data (.data) and jump-table (.jt) labels, all
+        of which live in the same name table so the assembler knows every label
+        and their names never collide."""
+        n = 0
+        while f"{prefix}{n}" in self._labels:
+            n += 1
+        label = self._labels[f"{prefix}{n}"] = Label(f"{prefix}{n}")
+        return label
 
     def bind(self, label: Label) -> Label:
         """Bind `label` to the current position in the code. A label may only be
@@ -892,7 +904,7 @@ class Assembler:
         are appended after the code at finalize() time (respecting `align` with
         zero padding), which is when the label's offset becomes known. Reference
         the data position-independently with `rip(label)`."""
-        label = Label()
+        label = self._fresh_label(".data")
         self._data.append((label, bytes(blob), align))
         return label
 
@@ -909,7 +921,7 @@ class Assembler:
 
         The targets must be bound by finalize(), when the table is appended
         after the code."""
-        table = Label()
+        table = self._fresh_label(".jt")
         self._jump_tables.append((table, list(targets)))
         return table
 

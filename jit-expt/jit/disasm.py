@@ -17,7 +17,10 @@ Public API:
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
+
+if TYPE_CHECKING:
+    from .assembler import ObjectCode
 
 
 class Insn(NamedTuple):
@@ -68,7 +71,7 @@ class Trunc(Exception):
 class Rex:
     __slots__ = ("w", "r", "x", "b", "present")
 
-    def __init__(self, byte=None):
+    def __init__(self, byte: int | None = None):
         if byte is None:
             self.w = self.r = self.x = self.b = 0
             self.present = False
@@ -80,17 +83,17 @@ class Rex:
             self.present = True
 
 
-def _reg_name(code, size, rex_present):
+def _reg_name(code: int, size: int, rex_present: bool) -> str:
     if size == 8 and not rex_present and code in _R8_NOREX:
         return _R8_NOREX[code]
     return _R[size][code]
 
 
-def _xmm_name(code):
+def _xmm_name(code: int) -> str:
     return _XMM[code]
 
 
-def _fmt_disp(d):
+def _fmt_disp(d: int) -> str:
     if d == 0:
         return ""
     if d < 0:
@@ -98,14 +101,14 @@ def _fmt_disp(d):
     return f"+0x{d:x}"
 
 
-def _fmt_imm(v):
+def _fmt_imm(v: int) -> str:
     if v < 0:
         return f"-0x{-v:x}"
     return f"0x{v:x}"
 
 
 class Decoder:
-    def __init__(self, code, origin):
+    def __init__(self, code: bytes, origin: int):
         self.code = code
         self.origin = origin
         self.pos = 0
@@ -113,14 +116,14 @@ class Decoder:
 
     # -- primitive readers --------------------------------------------------
 
-    def _u8(self):
+    def _u8(self) -> int:
         if self.pos >= len(self.code):
             raise Trunc()
         b = self.code[self.pos]
         self.pos += 1
         return b
 
-    def _read(self, n, signed):
+    def _read(self, n: int, signed: bool) -> int:
         if self.pos + n > len(self.code):
             raise Trunc()
         v = int.from_bytes(self.code[self.pos:self.pos + n], "little",
@@ -128,23 +131,23 @@ class Decoder:
         self.pos += n
         return v
 
-    def _i8(self):
+    def _i8(self) -> int:
         return self._read(1, True)
 
-    def _u32(self):
+    def _u32(self) -> int:
         return self._read(4, False)
 
-    def _i32(self):
+    def _i32(self) -> int:
         return self._read(4, True)
 
     # -- ModR/M + SIB + displacement ---------------------------------------
 
-    def _modrm(self):
+    def _modrm(self) -> tuple[int, int, int]:
         """Read a ModR/M byte and return (mod, reg3, rm3)."""
         b = self._u8()
         return b >> 6, (b >> 3) & 7, b & 7
 
-    def _mem(self, mod, rm3, rex):
+    def _mem(self, mod: int, rm3: int, rex: Rex) -> str:
         """Decode a memory operand (mod != 3) into an address string. Assumes
         the ModR/M byte has already been consumed; reads SIB/disp as needed."""
         if rm3 == 4:  # SIB byte follows
@@ -169,7 +172,7 @@ class Decoder:
         disp = self._disp(mod)
         return self._join_mem(base_str, None, 1, disp)
 
-    def _disp(self, mod):
+    def _disp(self, mod: int) -> int:
         if mod == 1:
             return self._i8()
         if mod == 2:
@@ -177,7 +180,8 @@ class Decoder:
         return 0
 
     @staticmethod
-    def _join_mem(base, index, scale, disp, force_disp=False):
+    def _join_mem(base: str | None, index: str | None, scale: int, disp: int,
+                  force_disp: bool = False) -> str:
         inner = ""
         if base is not None:
             inner = base
@@ -189,7 +193,8 @@ class Decoder:
             d = "+0x0"
         return f"[{inner}{d}]"
 
-    def _rm_operand(self, mod, rm3, rex, size, xmm=False):
+    def _rm_operand(self, mod: int, rm3: int, rex: Rex, size: int,
+                    xmm: bool = False) -> str:
         """Return the r/m operand string for a register (mod==3) or memory."""
         if mod == 3:
             code = rm3 | (rex.b << 3)
@@ -199,7 +204,7 @@ class Decoder:
     # -- per-instruction size -----------------------------------------------
 
     @staticmethod
-    def _op_size(rex, has66, byte8):
+    def _op_size(rex: Rex, has66: bool, byte8: bool) -> int:
         if byte8:
             return 8
         if rex.w:
@@ -210,7 +215,7 @@ class Decoder:
 
     # -- top-level single-instruction decode --------------------------------
 
-    def decode_one(self):
+    def decode_one(self) -> str | None:
         """Decode one instruction starting at self.pos. Returns text, or
         raises Trunc / returns None to signal a graceful fallback."""
         self.start = self.pos
@@ -236,7 +241,7 @@ class Decoder:
 
     # -- one-byte opcode map -------------------------------------------------
 
-    def _decode_1(self, op, rex, has66):
+    def _decode_1(self, op: int, rex: Rex, has66: bool) -> str | None:
         # MOV r/m, r  and  MOV r, r/m
         if op in (0x88, 0x89, 0x8A, 0x8B):
             size = self._op_size(rex, has66, op in (0x88, 0x8A))
@@ -394,7 +399,7 @@ class Decoder:
 
     # -- two-byte (0F) opcode map -------------------------------------------
 
-    def _decode_0f(self, rex, has66, hasf2, hasf3):
+    def _decode_0f(self, rex: Rex, has66: bool, hasf2: bool, hasf3: bool) -> str | None:
         op = self._u8()
 
         # jcc rel32
@@ -457,7 +462,7 @@ class Decoder:
         # -- scalar SSE ----------------------------------------------------
         return self._decode_sse(op, rex, has66, hasf2, hasf3)
 
-    def _decode_sse(self, op, rex, has66, hasf2, hasf3):
+    def _decode_sse(self, op: int, rex: Rex, has66: bool, hasf2: bool, hasf3: bool) -> str | None:
         # movss/movsd load (10) and store (11)
         if op in (0x10, 0x11):
             if hasf2:
@@ -519,12 +524,12 @@ class Decoder:
 
         return None
 
-    def _rel32_target(self):
+    def _rel32_target(self) -> int:
         rel = self._i32()
         return f"0x{self.origin + self.pos + rel:x}"
 
 
-def disassemble(code, origin: int = 0,
+def disassemble(code: ObjectCode | bytes, origin: int = 0,
                 code_size: int | None = None) -> list[Insn]:
     """Decode `code` into a list of `Insn` (offset, raw, text) rows, one per
     instruction. `offset`/target addresses are computed relative to `origin`.
@@ -565,7 +570,8 @@ def disassemble(code, origin: int = 0,
     return out
 
 
-def disasm(code, origin: int = 0, code_size: int | None = None) -> str:
+def disasm(code: ObjectCode | bytes, origin: int = 0,
+           code_size: int | None = None) -> str:
     """Render assembled code as a multi-line dump, one instruction per line::
 
         0000: 48 89 d8    mov rax, rbx

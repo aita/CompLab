@@ -4,7 +4,7 @@ import ctypes
 import mmap
 import threading
 
-from .assembler import ObjectCode, RelocKind
+from .assembler import ObjectCode, Reloc, RelocKind
 
 
 def _fits_rel32(rel: int) -> bool:
@@ -29,7 +29,7 @@ class Page:
 
     Holds a bump cursor into the region."""
 
-    def __init__(self, size: int, libc):
+    def __init__(self, size: int, libc: ctypes.CDLL):
         self._libc = libc
         # Anonymous file whose pages we map twice. memfd_create is a Linux
         # 3.17+ syscall; fall back to the raw syscall number if the libc
@@ -169,7 +169,8 @@ class Runtime:
                 self._relocate(blob, addr, obj.relocs, self._symbols)
                 self._write_slot(page, offset, blob)
 
-    def _relocate(self, blob: bytearray, base: int, relocs, table: dict[str, int]):
+    def _relocate(self, blob: bytearray, base: int, relocs: tuple[Reloc, ...],
+                  table: dict[str, int]) -> None:
         for r in relocs:
             if r.symbol not in table:
                 raise KeyError(f"unresolved symbol {r.symbol!r}")

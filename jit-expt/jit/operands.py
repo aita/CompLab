@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .assembler import Label
+
 
 class Reg(int):
     """A register. Subclasses int so its 3/4-bit encoding number is usable
@@ -19,13 +24,13 @@ class Reg(int):
         obj.needs_rex = needs_rex
         return obj
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.name
 
     def __mul__(self, scale: int) -> Index:
         return Index(self, scale)
 
-    def __add__(self, other) -> Mem:
+    def __add__(self, other: Index | Reg | int) -> Mem:
         # base + disp / base + index / base + index*scale
         if isinstance(other, Index):
             return Mem(self, index=other.reg, scale=other.scale)
@@ -50,7 +55,7 @@ class Xmm(int):
         obj.bitsize = 128
         return obj
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.name
 
 
@@ -93,7 +98,7 @@ class Mem:
         self.scale = scale
         self.bitsize = bitsize
 
-    def __add__(self, other) -> Mem:
+    def __add__(self, other: Index | Reg | int) -> Mem:
         if isinstance(other, Index):
             return Mem(self.base, self.disp, other.reg, other.scale, self.bitsize)
         if isinstance(other, Reg):
@@ -108,7 +113,7 @@ class Mem:
     def sized(self, bitsize: int) -> Mem:
         return Mem(self.base, self.disp, self.index, self.scale, bitsize)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         s = "[" if self.base is None else f"[{self.base!r}"
         if self.index is not None:
             sep = "" if self.base is None else "+"
@@ -127,7 +132,7 @@ class RipRel(Mem):
     It subclasses Mem so the instruction encoders' `case Mem()` branches accept
     it; `base`/`index` are None so no base/index register is emitted."""
 
-    def __init__(self, label, bitsize: int | None = None):
+    def __init__(self, label: Label, bitsize: int | None = None):
         self.label = label
         self.base = None
         self.disp = 0
@@ -135,14 +140,14 @@ class RipRel(Mem):
         self.scale = 1
         self.bitsize = bitsize
 
-    def sized(self, bitsize: int) -> "RipRel":
+    def sized(self, bitsize: int) -> RipRel:
         return RipRel(self.label, bitsize)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"[rip {self.label!r}]"
 
 
-def rip(label) -> RipRel:
+def rip(label: Label) -> RipRel:
     """Reference `label` RIP-relatively as a memory operand, e.g.
     `mov(RAX, rip(L))` / `lea(RAX, rip(L))`. Combine with byte/word/dword/qword
     when a store or immediate makes the access width ambiguous."""

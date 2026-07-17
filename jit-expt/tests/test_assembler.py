@@ -414,6 +414,16 @@ def test_named_labels_are_deduped():
     assert a.label() is not a.label()
 
 
+def test_anonymous_labels_get_unique_names():
+    a = Assembler()
+    x, y = a.label(), a.label()
+    assert x.name and y.name and x.name != y.name   # every label has a name
+    # An auto-name never collides with a user-chosen one.
+    a2 = Assembler()
+    taken = a2.label(".L0")
+    assert a2.label() is not taken and a2.label().name != ".L0"
+
+
 def test_double_bind_raises():
     a = Assembler()
     end = a.label("end")
