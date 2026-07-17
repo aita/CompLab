@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ctypes
 import mmap
+import sys
 import threading
 
 from .assembler import ObjectCode, Reloc, RelocKind
@@ -11,81 +12,134 @@ def _fits_rel32(rel: int) -> bool:
     return -(1 << 31) <= rel < (1 << 31)
 
 
-_MFD_CLOEXEC = 0x0001
-_MAP_SHARED = 0x01
-_PROT_READ = 0x1
-_PROT_EXEC = 0x4
-_MAP_FAILED = ctypes.c_void_p(-1).value
+# --- Platform-specific executable pages -------------------------------------
+#
+# Each Page backs one region mapped TWICE: a WRITABLE view (`write_base`) code
+# is copied through, and a permanently READ+EXEC view (`base`) it runs from. The
+# two views alias the same physical memory, so a write appears in the exec view
+# without ever flipping its protection -- functions already placed stay
+# executable while a new one is copied in (no protection races). The machine
+# code itself is identical across OSes; only how the pages are obtained differs.
 
+if sys.platform == "win32":
+    _k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _k32.CreateFileMappingW.restype = ctypes.c_void_p
+    _k32.CreateFileMappingW.argtypes = [ctypes.c_void_p, ctypes.c_void_p,
+                                        ctypes.c_uint32, ctypes.c_uint32,
+                                        ctypes.c_uint32, ctypes.c_wchar_p]
+    _k32.MapViewOfFile.restype = ctypes.c_void_p
+    _k32.MapViewOfFile.argtypes = [ctypes.c_void_p, ctypes.c_uint32,
+                                   ctypes.c_uint32, ctypes.c_uint32,
+                                   ctypes.c_size_t]
+    _k32.UnmapViewOfFile.argtypes = [ctypes.c_void_p]
+    _k32.CloseHandle.argtypes = [ctypes.c_void_p]
 
-class Page:
-    """One physical memory region mapped TWICE from the same memfd: a WRITABLE
-    view code is copied through, and a permanently READ+EXEC view functions are
-    executed from. Both views alias the same physical pages, so a write to the
-    writable view is instantly visible (and executable) through the R+X view.
+    _INVALID_HANDLE = ctypes.c_void_p(-1).value
+    _PAGE_EXECUTE_READWRITE = 0x40
+    _FILE_MAP_WRITE = 0x0002
+    _FILE_MAP_READ = 0x0004
+    _FILE_MAP_EXECUTE = 0x0020
 
-    Because the R+X view is never flipped writable, functions already placed in
-    the page stay executable while a new one is copied in — no mprotect races.
+    class Page:
+        """A pagefile-backed section mapped twice with MapViewOfFile: a writable
+        view and an execute view aliasing the same physical pages."""
 
-    Holds a bump cursor into the region."""
+        def __init__(self, size: int):
+            self._hmap = _k32.CreateFileMappingW(
+                ctypes.c_void_p(_INVALID_HANDLE), None,
+                _PAGE_EXECUTE_READWRITE, 0, size, None)
+            if not self._hmap:
+                raise ctypes.WinError(ctypes.get_last_error())
+            self.write_base = _k32.MapViewOfFile(
+                self._hmap, _FILE_MAP_WRITE, 0, 0, size)
+            self.base = _k32.MapViewOfFile(
+                self._hmap, _FILE_MAP_READ | _FILE_MAP_EXECUTE, 0, 0, size)
+            if not self.write_base or not self.base:
+                raise ctypes.WinError(ctypes.get_last_error())
+            self.size = size
+            self.cursor = 0
 
-    def __init__(self, size: int, libc: ctypes.CDLL):
-        self._libc = libc
-        # Anonymous file whose pages we map twice. memfd_create is a Linux
-        # 3.17+ syscall; fall back to the raw syscall number if the libc
-        # wrapper is absent.
-        memfd = getattr(libc, "memfd_create", None)
-        if memfd is not None:
-            memfd.restype = ctypes.c_int
-            memfd.argtypes = [ctypes.c_char_p, ctypes.c_uint]
-            self.fd = memfd(b"jit", _MFD_CLOEXEC)
-        else:
-            self.fd = libc.syscall(319, b"jit", _MFD_CLOEXEC)  # __NR_memfd_create
-        if self.fd < 0:
-            raise OSError(ctypes.get_errno(), "memfd_create failed")
+        def remaining(self) -> int:
+            return self.size - self.cursor
 
-        res = libc.ftruncate(ctypes.c_int(self.fd), ctypes.c_size_t(size))
-        if res != 0:
-            raise OSError(ctypes.get_errno(), "ftruncate failed")
+        def __del__(self):
+            for view in (getattr(self, "write_base", 0), getattr(self, "base", 0)):
+                if view:
+                    try:
+                        _k32.UnmapViewOfFile(ctypes.c_void_p(view))
+                    except Exception:
+                        pass
+            if getattr(self, "_hmap", 0):
+                try:
+                    _k32.CloseHandle(ctypes.c_void_p(self._hmap))
+                except Exception:
+                    pass
 
-        # Writable view: use Python's mmap so its buffer keeps the mapping
-        # alive and from_buffer can read out the (page-aligned) base address.
-        self.buf = mmap.mmap(
-            self.fd, size,
-            flags=mmap.MAP_SHARED,
-            prot=mmap.PROT_READ | mmap.PROT_WRITE,
-        )
-        self.write_base = ctypes.addressof(ctypes.c_char.from_buffer(self.buf))
+else:
+    _libc = ctypes.CDLL(None, use_errno=True)
+    _libc.mmap.restype = ctypes.c_void_p
+    _libc.mmap.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int,
+                           ctypes.c_int, ctypes.c_int, ctypes.c_long]
 
-        # Executable view: mapped via libc mmap because a PROT_EXEC (non-writable)
-        # mapping can't be wrapped by Python's writable-buffer requirement.
-        self.base = libc.mmap(
-            None, ctypes.c_size_t(size), _PROT_READ | _PROT_EXEC,
-            _MAP_SHARED, ctypes.c_int(self.fd), ctypes.c_long(0),
-        )
-        if self.base in (None, _MAP_FAILED):
-            raise OSError(ctypes.get_errno(), "mmap (exec view) failed")
+    _MFD_CLOEXEC = 0x0001
+    _MAP_SHARED = 0x01
+    _PROT_READ = 0x1
+    _PROT_EXEC = 0x4
+    _MAP_FAILED = ctypes.c_void_p(-1).value
 
-        self.size = size
-        self.cursor = 0
+    class Page:
+        """An anonymous memfd mapped twice: a writable view (Python mmap) and an
+        execute view (libc mmap) aliasing the same physical pages."""
 
-    def remaining(self) -> int:
-        return self.size - self.cursor
+        def __init__(self, size: int):
+            # memfd_create is a Linux 3.17+ syscall; fall back to the raw
+            # syscall number if the libc wrapper is absent.
+            memfd = getattr(_libc, "memfd_create", None)
+            if memfd is not None:
+                memfd.restype = ctypes.c_int
+                memfd.argtypes = [ctypes.c_char_p, ctypes.c_uint]
+                self._fd = memfd(b"jit", _MFD_CLOEXEC)
+            else:
+                self._fd = _libc.syscall(319, b"jit", _MFD_CLOEXEC)
+            if self._fd < 0:
+                raise OSError(ctypes.get_errno(), "memfd_create failed")
+            if _libc.ftruncate(ctypes.c_int(self._fd), ctypes.c_size_t(size)) != 0:
+                raise OSError(ctypes.get_errno(), "ftruncate failed")
 
-    def __del__(self):
-        # Best-effort teardown; the process may already be exiting.
-        try:
-            self.buf.close()
-        except Exception:
-            pass
-        try:
-            self._libc.munmap(ctypes.c_void_p(self.base), ctypes.c_size_t(self.size))
-        except Exception:
-            pass
-        try:
-            self._libc.close(ctypes.c_int(self.fd))
-        except Exception:
-            pass
+            # Writable view via Python's mmap (its buffer keeps the mapping alive
+            # and from_buffer yields the page-aligned base address).
+            self._buf = mmap.mmap(self._fd, size, flags=mmap.MAP_SHARED,
+                                  prot=mmap.PROT_READ | mmap.PROT_WRITE)
+            self.write_base = ctypes.addressof(ctypes.c_char.from_buffer(self._buf))
+
+            # Execute view via libc mmap (a PROT_EXEC, non-writable mapping can't
+            # be wrapped by Python's writable-buffer requirement).
+            self.base = _libc.mmap(None, ctypes.c_size_t(size),
+                                   _PROT_READ | _PROT_EXEC, _MAP_SHARED,
+                                   ctypes.c_int(self._fd), ctypes.c_long(0))
+            if self.base in (None, _MAP_FAILED):
+                raise OSError(ctypes.get_errno(), "mmap (exec view) failed")
+
+            self.size = size
+            self.cursor = 0
+
+        def remaining(self) -> int:
+            return self.size - self.cursor
+
+        def __del__(self):
+            # Best-effort teardown; the process may already be exiting.
+            try:
+                self._buf.close()
+            except Exception:
+                pass
+            try:
+                _libc.munmap(ctypes.c_void_p(self.base), ctypes.c_size_t(self.size))
+            except Exception:
+                pass
+            try:
+                _libc.close(ctypes.c_int(self._fd))
+            except Exception:
+                pass
 
 
 class Runtime:
@@ -108,14 +162,6 @@ class Runtime:
         self._active: Page | None = None  # page currently being filled
         self._align = align
         self._lock = threading.Lock()      # guards the mutating operations
-        self._libc = ctypes.CDLL(None, use_errno=True)
-        # mmap returns a pointer; declare it so ctypes doesn't truncate the
-        # address to a 32-bit C int.
-        self._libc.mmap.restype = ctypes.c_void_p
-        self._libc.mmap.argtypes = [
-            ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int,
-            ctypes.c_int, ctypes.c_int, ctypes.c_long,
-        ]
         self._symbols: dict[str, int] = {}  # name -> address
         self._veneers: dict[int, int] = {}  # far target -> veneer address
         # Items reserved by stage() but not yet relocated/written by link().
@@ -221,7 +267,7 @@ class Runtime:
         # Round up to whole pages so a larger-than-page function still fits.
         pagesize = mmap.PAGESIZE
         size = max(pagesize, ((n + pagesize - 1) // pagesize) * pagesize)
-        page = Page(size, self._libc)
+        page = Page(size)
         self._pages.append(page)
         self._active = page
         return page

@@ -1,5 +1,6 @@
 import ctypes
 import mmap
+import sys
 
 import pytest
 
@@ -804,6 +805,8 @@ def test_link_no_pending_is_noop():
     rt.link()
 
 
+@pytest.mark.skipif(sys.platform != "linux",
+                    reason="uses the Linux mmap MAP_FIXED_NOREPLACE syscall")
 def test_run_far_call_uses_veneer():
     # A rel32 call reaches only +-2GB. Map a target far below the JIT pages so
     # call(Symbol) must route through a movabs+jmp veneer.

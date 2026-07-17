@@ -1,7 +1,9 @@
 import ctypes
 import time
 
-from jit import R12, RAX, RBP, RBX, RDI, RSP, Assembler, Label, Runtime, Symbol, disasm
+from jit import ARG_REGS, R12, RAX, RBP, RBX, RSP, Assembler, Runtime, Symbol, disasm
+
+ARG = ARG_REGS[0]  # the first integer argument register for this platform
 
 
 def fib_py(n):
@@ -10,34 +12,34 @@ def fib_py(n):
 
 
 def build_fib(a):
-    # int64 fib(int64 n)   (n arrives in RDI)
+    # int64 fib(int64 n)   (n arrives in the first argument register)
     #
     #   if n < 2: return n
     #   else:     return fib(n-1) + fib(n-2)
     #
     # RBX holds n and R12 holds fib(n-1) across the recursive calls -- both are
-    # callee-saved, so they survive a call and are restored on the way out. The
-    # push rbp / push rbx / push r12 prologue also leaves RSP 16-byte aligned,
-    # as the ABI requires at each call.
-    base = Label("base")
-    done = Label("done")
+    # callee-saved on both the SysV and Microsoft x64 ABIs, so they survive a
+    # call and are restored on the way out. The push rbp / push rbx / push r12
+    # prologue also leaves RSP 16-byte aligned, as both ABIs require at a call.
+    base = a.label("base")
+    done = a.label("done")
     a.push(RBP)
     a.mov(RBP, RSP)
     a.push(RBX)
     a.push(R12)
-    a.cmp(RDI, 2)
+    a.cmp(ARG, 2)
     a.jl(base)                 # n < 2 -> base case
-    a.mov(RBX, RDI)            # rbx = n
-    a.sub(RDI, 1)
+    a.mov(RBX, ARG)            # rbx = n
+    a.sub(ARG, 1)
     a.call(Symbol("fib"))      # rax = fib(n-1)
     a.mov(R12, RAX)            # r12 = fib(n-1)
-    a.mov(RDI, RBX)
-    a.sub(RDI, 2)
+    a.mov(ARG, RBX)
+    a.sub(ARG, 2)
     a.call(Symbol("fib"))      # rax = fib(n-2)
     a.add(RAX, R12)            # rax = fib(n-1) + fib(n-2)
     a.jmp(done)
     a.bind(base)
-    a.mov(RAX, RDI)            # return n
+    a.mov(RAX, ARG)            # return n
     a.bind(done)
     a.pop(R12)
     a.pop(RBX)

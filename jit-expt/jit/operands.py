@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -214,5 +215,25 @@ XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7, \
     (Xmm(code, name) for code, name in enumerate(_XMM))
 
 
+# Integer argument/return registers for the platform's C calling convention, so
+# code that reads its arguments and returns a value can be written portably. The
+# machine code is the same everywhere; only which registers the ABI uses differs
+# -- Microsoft x64 (Windows) vs System V AMD64 (Linux/macOS). Note Windows also
+# requires 32 bytes of shadow space and 16-byte stack alignment at each call.
+if sys.platform == "win32":
+    ARG_REGS = (RCX, RDX, R8, R9)
+else:
+    ARG_REGS = (RDI, RSI, RDX, RCX, R8, R9)
+RET_REG = RAX
+
+# Float/double argument/return registers (XMM), likewise platform-dependent.
+if sys.platform == "win32":
+    FARG_REGS = (XMM0, XMM1, XMM2, XMM3)
+else:
+    FARG_REGS = (XMM0, XMM1, XMM2, XMM3, XMM4, XMM5, XMM6, XMM7)
+FRET_REG = XMM0
+
+
 __all__ = ["Reg", "Xmm", "Mem", "rip", "byte", "word", "dword", "qword",
+           "ARG_REGS", "RET_REG", "FARG_REGS", "FRET_REG",
            *_R64, *_R32, *_R16, *_R8, "AH", "CH", "DH", "BH", *_XMM]
