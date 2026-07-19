@@ -9,7 +9,9 @@ copies a new one in, so a thread may execute pooled code concurrently with adds.
 import ctypes
 import threading
 
-from jit import Assembler, Runtime, RAX, RDI
+import pytest
+
+from jit import Assembler, JitAllocator, Runtime, RAX, RDI
 
 
 def _const_fn(value):
@@ -130,3 +132,65 @@ def test_concurrent_adds_from_many_threads():
     # Every function still executes and returns its own value.
     for addr, value in placed:
         assert ctypes.CFUNCTYPE(ctypes.c_int64)(addr)() == value
+
+
+def test_release_recycles_slot():
+    rt = Runtime()
+    a = rt.add(_const_fn(1))
+    c = rt.add(_const_fn(3))   # keep `a` from being the tail slot
+    rt.release(a)              # `a`'s slot becomes a reusable hole
+    b = rt.add(_const_fn(2))   # same size -> reuses the freed hole
+    assert b == a
+    # The reused function and the untouched neighbour both run correctly.
+    assert ctypes.CFUNCTYPE(ctypes.c_int64)(b)() == 2
+    assert ctypes.CFUNCTYPE(ctypes.c_int64)(c)() == 3
+
+
+def test_release_unknown_address_raises():
+    rt = Runtime()
+    with pytest.raises(KeyError):
+        rt.release(0xDEAD0000)
+
+
+def test_reset_soft_rewinds_and_reuses_pages():
+    rt = Runtime()
+    for i in range(5):
+        rt.add(_const_fn(i))
+    pages_before = list(rt._pages)
+    rt.reset()  # soft: keep pages, rewind cursors
+    assert rt._pages is not None and rt._pages == pages_before  # same Page objects
+    addr = rt.add(_const_fn(99))
+    assert addr == rt._pages[0].base  # cursor was rewound to the page start
+    assert ctypes.CFUNCTYPE(ctypes.c_int64)(addr)() == 99
+
+
+def test_reset_hard_drops_pages():
+    rt = Runtime()
+    rt.add(_const_fn(5))
+    rt.reset(hard=True)
+    assert rt._pages == []
+    addr = rt.add(_const_fn(6))  # allocates a fresh page
+    assert len(rt._pages) == 1
+    assert ctypes.CFUNCTYPE(ctypes.c_int64)(addr)() == 6
+
+
+def test_define_survives_reset():
+    rt = Runtime()
+    rt.define("ext", 0x1234)
+    rt.reset()
+    assert rt._symbols.get("ext") == 0x1234
+    rt.reset(hard=True)
+    assert rt._symbols.get("ext") == 0x1234
+
+
+def test_allocator_alloc_write_release_recycle():
+    alloc = JitAllocator()  # keep alive: owns the executable pages
+    code = bytes(_const_fn(77).code)
+    span = alloc.alloc(len(code))
+    alloc.write(span, 0, code)
+    assert ctypes.CFUNCTYPE(ctypes.c_int64)(span.rx)() == 77
+    keep = alloc.alloc(len(code))       # stop `span` from being tail-reclaimed
+    alloc.release(span.rx)
+    reused = alloc.alloc(len(code))     # same size -> recycles the freed slot
+    assert reused.rx == span.rx
+    assert keep.rx != span.rx

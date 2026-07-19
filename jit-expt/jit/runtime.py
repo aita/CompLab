@@ -4,6 +4,7 @@ import ctypes
 import mmap
 import sys
 import threading
+from typing import NamedTuple
 
 from .assembler import ObjectCode, Reloc, RelocKind
 
@@ -142,42 +143,191 @@ else:
                 pass
 
 
-class Runtime:
-    """Maps emitted code into executable memory and hands back function
-    addresses. Small functions are packed into shared pages (a bump
-    allocator) rather than getting a whole page each.
+class Span(NamedTuple):
+    """One slot of executable memory. `rx` is the address code runs from; `rw`
+    is its writable alias you copy bytes through (see Page); `size` is the
+    (aligned) number of bytes reserved."""
 
-    Each page is backed by one physical region mapped twice (see Page): a
-    writable view code is copied through and a permanently read+execute view it
-    runs from. Writes never touch the R+X view, so functions already placed in a
-    page stay continuously executable while add() copies a new one in — safe
-    even if another thread is executing pooled code concurrently.
+    rx: int
+    rw: int
+    size: int
 
-    A lock serializes the mutating operations (add/stage/link/define) so several
-    threads may build code concurrently without corrupting the bump allocator or
-    the symbol/veneer tables. Executing already-added functions takes no lock."""
+
+class Slot(NamedTuple):
+    """A live allocation tracked for release(): which page, its byte offset in
+    that page, and its (aligned) size."""
+
+    page: Page
+    offset: int
+    size: int
+
+
+class Hole(NamedTuple):
+    """A freed, reusable region within a page: its byte offset and (aligned)
+    size. Kept in the free list, offset-sorted and coalesced."""
+
+    offset: int
+    size: int
+
+
+class JitAllocator:
+    """Owns executable memory only — it knows nothing about code content,
+    symbols, or relocation (that is Runtime's job, mirroring asmjit's split
+    between JitAllocator and JitRuntime).
+
+    Allocations are packed into dual-mapped pages (see Page) with a bump
+    cursor; slots handed back by release() are recycled through a coalescing
+    free list before the cursor grows. Every mutating op is serialized by a
+    lock, so it is safe to alloc/release concurrently; metadata lives outside
+    the executable pages."""
 
     def __init__(self, align: int = 16):
         self._pages: list[Page] = []      # all pages, kept alive
         self._active: Page | None = None  # page currently being filled
         self._align = align
-        self._lock = threading.Lock()      # guards the mutating operations
+        self._lock = threading.Lock()
+        self._used: dict[int, Slot] = {}        # rx -> Slot(page, off, size)
+        self._holes: dict[Page, list[Hole]] = {}  # page -> offset-sorted free list
+
+    @property
+    def pages(self) -> list[Page]:
+        return self._pages
+
+    def alloc(self, n: int) -> Span:
+        """Reserve at least `n` bytes and return the slot. Bytes are undefined
+        until written through Span.rw with write()."""
+        with self._lock:
+            page, offset, size = self._alloc_slot(n)
+            return Span(page.base + offset, page.write_base + offset, size)
+
+    def write(self, span: Span, offset: int, data: bytes) -> None:
+        """Copy `data` into `span` through its writable alias; the change is
+        immediately live in the aliased read+execute view with no protection
+        flip. x86 keeps its icache coherent with these stores; on ARM this is
+        where an explicit cache flush would go."""
+        ctypes.memmove(span.rw + offset, bytes(data), len(data))
+
+    def release(self, rx: int) -> None:
+        """Free a slot previously returned by alloc(). The caller must ensure no
+        thread is still executing (or about to call) the code there — the
+        allocator does not track live activations, like asmjit's release()."""
+        with self._lock:
+            entry = self._used.pop(rx, None)
+            if entry is None:
+                raise KeyError(f"address {rx:#x} was not allocated here")
+            page, offset, size = entry
+            self._add_hole(page, offset, size)
+
+    def reset(self, hard: bool = False) -> None:
+        """Free every allocation. A soft reset (default) keeps the pages and
+        rewinds them for reuse; a hard reset drops the pages so their mappings
+        are unmapped."""
+        with self._lock:
+            self._used.clear()
+            self._holes.clear()
+            if hard:
+                self._pages.clear()   # dropping the last refs unmaps each Page
+                self._active = None
+            else:
+                for page in self._pages:
+                    page.cursor = 0
+                self._active = self._pages[0] if self._pages else None
+
+    def _alloc_slot(self, n: int) -> tuple[Page, int, int]:
+        needed = (n + self._align - 1) & ~(self._align - 1)
+        # Prefer a slot freed by release() (first-fit across pages) so released
+        # memory is recycled before the bump cursor grows.
+        for page, holes in self._holes.items():
+            for i, hole in enumerate(holes):
+                if hole.size >= needed:
+                    if hole.size > needed:
+                        holes[i] = Hole(hole.offset + needed, hole.size - needed)
+                    else:
+                        holes.pop(i)
+                    self._used[page.base + hole.offset] = Slot(page, hole.offset, needed)
+                    return page, hole.offset, needed
+        # Otherwise bump-allocate. `offset` is align-aligned and `needed` is a
+        # multiple of align, so the new cursor stays aligned.
+        page = self._page_with_room(needed)
+        offset = page.cursor
+        page.cursor = offset + needed
+        self._used[page.base + offset] = Slot(page, offset, needed)
+        return page, offset, needed
+
+    def _add_hole(self, page: Page, offset: int, size: int) -> None:
+        holes = self._holes.setdefault(page, [])
+        holes.append(Hole(offset, size))
+        holes.sort()
+        # Coalesce adjacent free slots into one larger slot.
+        merged: list[Hole] = []
+        for hole in holes:
+            if merged and merged[-1].offset + merged[-1].size == hole.offset:
+                merged[-1] = Hole(merged[-1].offset, merged[-1].size + hole.size)
+            else:
+                merged.append(hole)
+        # If the last free slot reaches the bump cursor, hand it straight back to
+        # the cursor rather than leaving a trailing hole.
+        if merged and merged[-1].offset + merged[-1].size == page.cursor:
+            page.cursor = merged[-1].offset
+            merged.pop()
+        if merged:
+            self._holes[page] = merged
+        else:
+            self._holes.pop(page, None)
+
+    def _page_with_room(self, n: int) -> Page:
+        if self._active is not None and self._active.remaining() >= n:
+            return self._active
+        # Round up to whole pages so a larger-than-page function still fits.
+        pagesize = mmap.PAGESIZE
+        size = max(pagesize, ((n + pagesize - 1) // pagesize) * pagesize)
+        page = Page(size)
+        self._pages.append(page)
+        self._active = page
+        return page
+
+
+class Runtime:
+    """Maps emitted code into executable memory and hands back function
+    addresses. Memory is owned by a JitAllocator; Runtime adds the linker on
+    top: a symbol table, veneers for far calls, relocation, and staged linking.
+
+    Small functions are packed into shared, dual-mapped pages (see Page): a
+    writable view code is copied through and a permanently read+execute view it
+    runs from. Writes never touch the R+X view, so functions already placed in a
+    page stay continuously executable while add() copies a new one in — safe
+    even if another thread is executing pooled code concurrently.
+
+    A lock serializes the mutating operations (add/stage/link/define/release/
+    reset) so several threads may build code concurrently without corrupting the
+    symbol/veneer tables. Executing already-added functions takes no lock."""
+
+    def __init__(self, align: int = 16):
+        self._alloc = JitAllocator(align)
+        self._lock = threading.Lock()      # guards the symbol/veneer/pending state
         self._symbols: dict[str, int] = {}  # name -> address
+        self._externals: dict[str, int] = {}  # define()d addresses (survive reset)
         self._veneers: dict[int, int] = {}  # far target -> veneer address
         # Items reserved by stage() but not yet relocated/written by link().
-        self._pending: list[tuple[ObjectCode, Page, int, int]] = []
+        self._pending: list[tuple[ObjectCode, Span]] = []
+
+    @property
+    def _pages(self) -> list[Page]:
+        return self._alloc.pages
 
     def define(self, name: str, addr: int) -> None:
         """Register an external address (e.g. a C function) under `name` so
         code added later can reference it as Symbol(name)."""
         with self._lock:
+            self._externals[name] = addr
             self._symbols[name] = addr
 
     def add(self, obj: ObjectCode, name: str | None = None,
             symbols: dict[str, int] | None = None) -> int:
         with self._lock:
             blob = bytearray(obj.code)
-            page, offset, addr = self._alloc_slot(len(blob))
+            span = self._alloc.alloc(len(blob))
+            addr = span.rx
 
             # The symbol table for this add: the runtime's registry, plus any
             # one-off symbols, plus this function's own name (so it can recurse).
@@ -189,7 +339,7 @@ class Runtime:
             # Reserving the slot above means any veneers created while relocating
             # are placed after this function, not on top of it.
             self._relocate(blob, addr, obj.relocs, table)
-            self._write_slot(page, offset, blob)
+            self._alloc.write(span, 0, blob)
             return addr
 
     def stage(self, obj: ObjectCode, name: str | None = None) -> int:
@@ -199,21 +349,43 @@ class Runtime:
         recursion), since every name is registered up front. Returns the
         reserved address."""
         with self._lock:
-            page, offset, addr = self._alloc_slot(len(obj.code))
+            span = self._alloc.alloc(len(obj.code))
             if name is not None:
-                self._symbols[name] = addr
-            self._pending.append((obj, page, offset, addr))
-            return addr
+                self._symbols[name] = span.rx
+            self._pending.append((obj, span))
+            return span.rx
 
     def link(self) -> None:
         """Relocate and write every staged function now that all names are
         registered. A no-op when nothing is staged."""
         with self._lock:
             pending, self._pending = self._pending, []
-            for obj, page, offset, addr in pending:
+            for obj, span in pending:
                 blob = bytearray(obj.code)
-                self._relocate(blob, addr, obj.relocs, self._symbols)
-                self._write_slot(page, offset, blob)
+                self._relocate(blob, span.rx, obj.relocs, self._symbols)
+                self._alloc.write(span, 0, blob)
+
+    def release(self, addr: int) -> None:
+        """Free a slot returned by add()/stage() so its space can be reused by a
+        later add(). The caller must ensure no thread is still executing (or
+        about to call) the released code — like asmjit's JitRuntime.release()."""
+        with self._lock:
+            self._alloc.release(addr)
+            # Drop code symbols that resolved to this address (keep externals).
+            for name in [n for n, a in self._symbols.items()
+                         if a == addr and n not in self._externals]:
+                del self._symbols[name]
+
+    def reset(self, hard: bool = False) -> None:
+        """Free everything add()/stage() allocated. A soft reset (default) keeps
+        the pages and rewinds them for reuse; a hard reset drops the pages so
+        their mappings are unmapped. define()d external symbols survive either
+        way; code symbols and veneers are cleared."""
+        with self._lock:
+            self._alloc.reset(hard)
+            self._symbols = dict(self._externals)
+            self._veneers.clear()
+            self._pending.clear()
 
     def _relocate(self, blob: bytearray, base: int, relocs: tuple[Reloc, ...],
                   table: dict[str, int]) -> None:
@@ -240,34 +412,7 @@ class Runtime:
         if target not in self._veneers:
             stub = (b"\x49\xbb" + target.to_bytes(8, "little")  # movabs r11, target
                     + b"\x41\xff\xe3")                          # jmp r11
-            self._veneers[target] = self._place(stub)
+            span = self._alloc.alloc(len(stub))
+            self._alloc.write(span, 0, stub)
+            self._veneers[target] = span.rx
         return self._veneers[target]
-
-    def _place(self, blob: bytes) -> int:
-        """Bump-allocate `blob` into an executable page and return its address."""
-        page, offset, addr = self._alloc_slot(len(blob))
-        self._write_slot(page, offset, blob)
-        return addr
-
-    def _alloc_slot(self, n: int) -> tuple[Page, int, int]:
-        page = self._page_with_room(n)
-        offset = page.cursor
-        page.cursor = (offset + n + self._align - 1) & ~(self._align - 1)
-        return page, offset, page.base + offset
-
-    def _write_slot(self, page: Page, offset: int, blob: bytes) -> None:
-        # Copy through the writable view; the change is immediately live in the
-        # aliased read+execute view. No protection flip, so other functions in
-        # the page never stop being executable.
-        ctypes.memmove(page.write_base + offset, bytes(blob), len(blob))
-
-    def _page_with_room(self, n: int) -> Page:
-        if self._active is not None and self._active.remaining() >= n:
-            return self._active
-        # Round up to whole pages so a larger-than-page function still fits.
-        pagesize = mmap.PAGESIZE
-        size = max(pagesize, ((n + pagesize - 1) // pagesize) * pagesize)
-        page = Page(size)
-        self._pages.append(page)
-        self._active = page
-        return page
