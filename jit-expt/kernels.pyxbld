@@ -1,0 +1,8 @@
+# Picked up automatically by pyximport for kernels.pyx. Pins the C optimization
+# level to -O3 explicitly (appended after the interpreter's default CFLAGS, so
+# the last -O wins) instead of relying on whatever level Python was built with.
+from setuptools import Extension
+
+
+def make_ext(modname, pyxfilename):
+    return Extension(modname, [pyxfilename], extra_compile_args=["-O3"])
