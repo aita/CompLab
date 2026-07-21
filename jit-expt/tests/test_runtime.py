@@ -11,7 +11,7 @@ import threading
 
 import pytest
 
-from jit import Assembler, JitAllocator, Runtime, RAX, RDI
+from jit import RAX, RDI, Assembler, JITAllocator, Runtime
 
 
 def _const_fn(value):
@@ -184,7 +184,7 @@ def test_define_survives_reset():
 
 
 def test_allocator_alloc_write_release_recycle():
-    alloc = JitAllocator()  # keep alive: owns the executable pages
+    alloc = JITAllocator()  # keep alive: owns the executable pages
     code = bytes(_const_fn(77).code)
     span = alloc.alloc(len(code))
     alloc.write(span, 0, code)

@@ -41,7 +41,7 @@ if sys.platform == "win32":
     _FILE_MAP_READ = 0x0004
     _FILE_MAP_EXECUTE = 0x0020
 
-    class Page:
+    class Page:  # pyright: ignore[reportRedeclaration]  (the else branch)
         """A pagefile-backed section mapped twice with MapViewOfFile: a writable
         view and an execute view aliasing the same physical pages."""
 
@@ -170,7 +170,7 @@ class Hole(NamedTuple):
     size: int
 
 
-class JitAllocator:
+class JITAllocator:
     """Owns executable memory only — it knows nothing about code content,
     symbols, or relocation (that is Runtime's job, mirroring asmjit's split
     between JitAllocator and JitRuntime).
@@ -200,7 +200,7 @@ class JitAllocator:
             page, offset, size = self._alloc_slot(n)
             return Span(page.base + offset, page.write_base + offset, size)
 
-    def write(self, span: Span, offset: int, data: bytes) -> None:
+    def write(self, span: Span, offset: int, data: bytes | bytearray) -> None:
         """Copy `data` into `span` through its writable alias; the change is
         immediately live in the aliased read+execute view with no protection
         flip. x86 keeps its icache coherent with these stores; on ARM this is
@@ -244,7 +244,8 @@ class JitAllocator:
                         holes[i] = Hole(hole.offset + needed, hole.size - needed)
                     else:
                         holes.pop(i)
-                    self._used[page.base + hole.offset] = Slot(page, hole.offset, needed)
+                    self._used[page.base + hole.offset] = Slot(
+                        page, hole.offset, needed)
                     return page, hole.offset, needed
         # Otherwise bump-allocate. `offset` is align-aligned and `needed` is a
         # multiple of align, so the new cursor stays aligned.
@@ -289,7 +290,7 @@ class JitAllocator:
 
 class Runtime:
     """Maps emitted code into executable memory and hands back function
-    addresses. Memory is owned by a JitAllocator; Runtime adds the linker on
+    addresses. Memory is owned by a JITAllocator; Runtime adds the linker on
     top: a symbol table, veneers for far calls, relocation, and staged linking.
 
     Small functions are packed into shared, dual-mapped pages (see Page): a
@@ -303,7 +304,7 @@ class Runtime:
     symbol/veneer tables. Executing already-added functions takes no lock."""
 
     def __init__(self, align: int = 16):
-        self._alloc = JitAllocator(align)
+        self._alloc = JITAllocator(align)
         self._lock = threading.Lock()      # guards the symbol/veneer/pending state
         self._symbols: dict[str, int] = {}  # name -> address
         self._externals: dict[str, int] = {}  # define()d addresses (survive reset)

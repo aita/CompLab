@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import functools
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from .operands import Mem, Reg, Xmm, RipRel
+from .operands import Mem, Reg, RipRel, Xmm
 
 
 @dataclass(frozen=True)
@@ -80,6 +82,27 @@ class Label:
         return f"Label({self.name or ''} {where})"
 
 
+# Anything an instruction method accepts: a register, a memory reference, an
+# immediate, or a branch/relocation target.
+Operand = Reg | Xmm | Mem | int | Label | Symbol
+
+
+@dataclass(frozen=True)
+class TraceInsn:
+    """One recorded instruction: the mnemonic and the operands it was called
+    with (`a.and_(RAX, 1)` records `TraceInsn("and", (RAX, 1))`)."""
+
+    mnemonic: str
+    operands: tuple[Operand, ...]
+
+
+@dataclass(frozen=True)
+class TraceLabel:
+    """A label bound at this point in the instruction stream."""
+
+    label: Label
+
+
 class Assembler:
     """Encodes a small subset of x86-64 instructions into a CodeBuffer."""
 
@@ -95,6 +118,8 @@ class Assembler:
         # target labels). Each 4-byte entry is a target's signed offset from the
         # table base, so an indirect jump through the table is position-free.
         self._jump_tables: list[tuple[Label, list[Label]]] = []
+        # Every instruction and label bind, in program order (see `trace`).
+        self._trace: list[TraceInsn | TraceLabel] = []
 
     def _emit_prefixes(self, bitsize: int, reg: Reg | None, rm: Reg | None,
                        index: Reg | None = None):
@@ -626,6 +651,8 @@ class Assembler:
         # follow the *destination* width; the opcode follows the source width.
         if not isinstance(dst, Reg):
             raise TypeError(f"movzx/movsx destination must be a register: {dst!r}")
+        base: Reg | None
+        index: Reg | None
         match src:
             case Reg():
                 src_bits, base, index = src.bitsize, src, None
@@ -897,6 +924,7 @@ class Assembler:
         if label.offset is not None:
             raise ValueError(f"label {label!r} is already bound")
         label.offset = len(self.code)
+        self._trace.append(TraceLabel(label))
         return label
 
     def data(self, blob: bytes, align: int = 1) -> Label:
@@ -1208,6 +1236,26 @@ class Assembler:
             self._fixups.append((at, target))
         self.code.emit_int(0, 4)
 
+    # --- Program record (for the ahead-of-time backend) ----------------------
+
+    @property
+    def trace(self) -> tuple[TraceInsn | TraceLabel, ...]:
+        """Every instruction and label bind of this program, in order. It is
+        what was *asked for* rather than what was encoded, so a second backend
+        can render the same program differently -- `jit.aot` turns it into
+        GNU-assembler text for an ahead-of-time build."""
+        return tuple(self._trace)
+
+    @property
+    def data_blobs(self) -> tuple[tuple[Label, bytes, int], ...]:
+        """The read-only blobs reserved by data(), as (label, bytes, align)."""
+        return tuple(self._data)
+
+    @property
+    def jump_tables(self) -> tuple[tuple[Label, list[Label]], ...]:
+        """The tables built by jump_table(), as (table label, targets)."""
+        return tuple(self._jump_tables)
+
     def finalize(self) -> ObjectCode:
         """Assemble the emitted instructions into machine code. Must be called
         explicitly, after all labels are bound, before running. Does not
@@ -1254,3 +1302,31 @@ class Assembler:
             if not (-(1 << 31) <= rel < (1 << 31)):
                 raise ValueError(f"jump displacement {rel} does not fit in rel32")
             buf.patch_int(at, rel, 4, signed=True)
+
+
+# --- Instruction recording ---------------------------------------------------
+#
+# Each public instruction method is wrapped so that, after encoding, it appends
+# a TraceInsn to the assembler's `trace`. Wrapping here rather than inside the
+# ~120 encoders keeps them free of bookkeeping, and recording *after* the call
+# means an operand combination that raises is never recorded. The trailing
+# underscore of the Python-keyword mnemonics (and_/or_/not_) is dropped, so the
+# recorded name is always the real one.
+
+_NOT_INSTRUCTIONS = frozenset({"label", "bind", "data", "jump_table", "finalize",
+                               "trace", "data_blobs", "jump_tables"})
+
+
+def _recording(mnemonic: str,
+               method: Callable[..., object]) -> Callable[..., None]:
+    @functools.wraps(method)
+    def wrapper(self: Assembler, *args: Operand) -> None:
+        method(self, *args)
+        self._trace.append(TraceInsn(mnemonic, args))
+    return wrapper
+
+
+for _name, _method in list(vars(Assembler).items()):
+    if (callable(_method) and not _name.startswith("_")
+            and _name not in _NOT_INSTRUCTIONS):
+        setattr(Assembler, _name, _recording(_name.rstrip("_"), _method))
