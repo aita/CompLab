@@ -4,7 +4,7 @@ import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .assembler import Label
+    from .assembler import Label, Symbol
 
 
 class Reg(int):
@@ -16,8 +16,15 @@ class Reg(int):
     `needs_rex` marks the 8-bit regs (SPL/BPL/SIL/DIL) that only exist when
     a REX prefix is present."""
 
+    # Declared here (rather than only assigned in __new__) so the attributes
+    # this class bolts onto int are visible to readers and type checkers.
+    name: str
+    bitsize: int
+    high: bool
+    needs_rex: bool
+
     def __new__(cls, value: int, name: str, bitsize: int,
-                high: bool = False, needs_rex: bool = False):
+                high: bool = False, needs_rex: bool = False) -> Reg:
         obj = super().__new__(cls, value)
         obj.name = name
         obj.bitsize = bitsize
@@ -28,10 +35,12 @@ class Reg(int):
     def __repr__(self) -> str:
         return self.name
 
-    def __mul__(self, scale: int) -> Index:
+    # int's arithmetic is deliberately repurposed to build memory operands
+    # (`RDI + 8`, `RCX * 4`), so these do not return ints like the base class.
+    def __mul__(self, scale: int) -> Index:  # type: ignore[override]
         return Index(self, scale)
 
-    def __add__(self, other: Index | Reg | int) -> Mem:
+    def __add__(self, other: Index | Reg | int) -> Mem:  # type: ignore[override]
         # base + disp / base + index / base + index*scale
         if isinstance(other, Index):
             return Mem(self, index=other.reg, scale=other.scale)
@@ -39,7 +48,7 @@ class Reg(int):
             return Mem(self, index=other)
         return Mem(self, disp=other)
 
-    def __sub__(self, disp: int) -> Mem:
+    def __sub__(self, disp: int) -> Mem:  # type: ignore[override]
         return Mem(self, disp=-disp)
 
 
@@ -50,7 +59,10 @@ class Xmm(int):
     int so its 0..15 encoding number is usable directly in REX/ModR/M bit math;
     XMM8..15 set REX.R/REX.B just like R8..15."""
 
-    def __new__(cls, value: int, name: str):
+    name: str
+    bitsize: int
+
+    def __new__(cls, value: int, name: str) -> Xmm:
         obj = super().__new__(cls, value)
         obj.name = name
         obj.bitsize = 128
@@ -125,7 +137,8 @@ class Mem:
 
 
 class RipRel(Mem):
-    """A RIP-relative reference to a Label, encoded as `[rip + disp32]`
+    """A RIP-relative reference to a Label (or an external Symbol, bound by the
+    loader instead of by finalize()), encoded as `[rip + disp32]`
     (ModR/M mod=00, rm=101, no SIB, no base). The disp32 is resolved to the
     label's final offset by the assembler's fixup machinery at finalize(),
     making the reference fully position-independent.
@@ -133,7 +146,8 @@ class RipRel(Mem):
     It subclasses Mem so the instruction encoders' `case Mem()` branches accept
     it; `base`/`index` are None so no base/index register is emitted."""
 
-    def __init__(self, label: Label, bitsize: int | None = None):
+    def __init__(self, label: Label | Symbol,
+                 bitsize: int | None = None):
         self.label = label
         self.base = None
         self.disp = 0
@@ -148,7 +162,7 @@ class RipRel(Mem):
         return f"[rip {self.label!r}]"
 
 
-def rip(label: Label) -> RipRel:
+def rip(label: Label | Symbol) -> RipRel:
     """Reference `label` RIP-relatively as a memory operand, e.g.
     `mov(RAX, rip(L))` / `lea(RAX, rip(L))`. Combine with byte/word/dword/qword
     when a store or immediate makes the access width ambiguous."""
@@ -234,6 +248,18 @@ else:
 FRET_REG = XMM0
 
 
+# Spelled out rather than unpacked from the register tables above, so that a
+# type checker can follow what this module re-exports through `jit` (and an
+# editor can complete `RAX`). tests/test_operands.py keeps the two in step.
 __all__ = ["Reg", "Xmm", "Mem", "rip", "byte", "word", "dword", "qword",
-           "ARG_REGS", "RET_REG", "FARG_REGS", "FRET_REG",
-           *_R64, *_R32, *_R16, *_R8, "AH", "CH", "DH", "BH", *_XMM]
+           "ARG_REGS", "RET_REG", "FARG_REGS", "FRET_REG", "RAX", "RCX",
+           "RDX", "RBX", "RSP", "RBP", "RSI", "RDI", "R8", "R9", "R10", "R11",
+           "R12", "R13", "R14", "R15", "EAX", "ECX", "EDX", "EBX", "ESP",
+           "EBP", "ESI", "EDI", "R8D", "R9D", "R10D", "R11D", "R12D", "R13D",
+           "R14D", "R15D", "AX", "CX", "DX", "BX", "SP", "BP", "SI", "DI",
+           "R8W", "R9W", "R10W", "R11W", "R12W", "R13W", "R14W", "R15W", "AL",
+           "CL", "DL", "BL", "SPL", "BPL", "SIL", "DIL", "R8B", "R9B", "R10B",
+           "R11B", "R12B", "R13B", "R14B", "R15B", "AH", "CH", "DH", "BH",
+           "XMM0", "XMM1", "XMM2", "XMM3", "XMM4", "XMM5", "XMM6", "XMM7",
+           "XMM8", "XMM9", "XMM10", "XMM11", "XMM12", "XMM13", "XMM14",
+           "XMM15"]

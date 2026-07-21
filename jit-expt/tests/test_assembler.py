@@ -18,13 +18,13 @@ from jit import (
     R10,
     R12,
     RAX,
+    RBP,
     RBX,
     RCX,
-    RDX,
     RDI,
+    RDX,
     RSI,
     RSP,
-    RBP,
     SPL,
     XMM0,
     XMM1,
@@ -584,6 +584,7 @@ def test_run_calls_c_function():
     sig = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)
     callback = sig(lambda x: x * 3)
     cb_addr = ctypes.cast(callback, ctypes.c_void_p).value
+    assert cb_addr is not None
 
     def build(a):
         a.push(RBP)
@@ -656,6 +657,7 @@ def test_run_calls_c_function_by_symbol():
     sig = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)
     callback = sig(lambda x: x + 100)
     cb_addr = ctypes.cast(callback, ctypes.c_void_p).value
+    assert cb_addr is not None
 
     a = Assembler()
     a.push(RBP)
@@ -816,13 +818,14 @@ def test_run_far_call_uses_veneer():
                           ctypes.c_int, ctypes.c_int, ctypes.c_long]
     MAP_FIXED_NOREPLACE = 0x100000
     flags = mmap.MAP_PRIVATE | mmap.MAP_ANONYMOUS | MAP_FIXED_NOREPLACE
-    far = None
+    far: int | None = None
     for hint in (0x40000000, 0x50000000, 0x60000000, 0x30000000):
         if libc.mmap(ctypes.c_void_p(hint), 4096, 1 | 2 | 4, flags, -1, 0) == hint:
             far = hint
             break
     if far is None:
         pytest.skip("could not map a far executable page")
+    assert far is not None  # narrows for type checkers; skip() already returned
     ctypes.memmove(far, bytes([0xB8, 99, 0, 0, 0, 0xC3]), 6)  # mov eax, 99; ret
 
     rt = Runtime()

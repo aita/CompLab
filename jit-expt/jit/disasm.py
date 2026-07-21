@@ -17,10 +17,9 @@ Public API:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple
+from typing import NamedTuple
 
-if TYPE_CHECKING:
-    from .assembler import ObjectCode
+from .assembler import ObjectCode
 
 
 class Insn(NamedTuple):
@@ -462,7 +461,8 @@ class Decoder:
         # -- scalar SSE ----------------------------------------------------
         return self._decode_sse(op, rex, has66, hasf2, hasf3)
 
-    def _decode_sse(self, op: int, rex: Rex, has66: bool, hasf2: bool, hasf3: bool) -> str | None:
+    def _decode_sse(self, op: int, rex: Rex, has66: bool, hasf2: bool,
+                    hasf3: bool) -> str | None:
         # movss/movsd load (10) and store (11)
         if op in (0x10, 0x11):
             if hasf2:
@@ -524,7 +524,7 @@ class Decoder:
 
         return None
 
-    def _rel32_target(self) -> int:
+    def _rel32_target(self) -> str:
         rel = self._i32()
         return f"0x{self.origin + self.pos + rel:x}"
 
@@ -540,7 +540,7 @@ def disassemble(code: ObjectCode | bytes, origin: int = 0,
     the instruction section ends (e.g. ``ObjectCode.code_size``); bytes past it
     are the read-only data section and are dumped as ``db`` rather than decoded
     as instructions. Defaults to the whole buffer."""
-    if hasattr(code, "code"):  # an ObjectCode
+    if isinstance(code, ObjectCode):
         if code_size is None:
             code_size = code.code_size
         code = code.code
@@ -579,7 +579,7 @@ def disasm(code: ObjectCode | bytes, origin: int = 0,
     `code` may be an ObjectCode (its ``.code`` bytes are used, and its
     ``.code_size`` marks where the data section starts) or a raw bytes buffer.
     """
-    if hasattr(code, "code"):  # an ObjectCode
+    if isinstance(code, ObjectCode):
         if code_size is None:
             code_size = code.code_size
         code = code.code

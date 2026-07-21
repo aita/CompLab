@@ -20,6 +20,20 @@ dev = [
     "setuptools>=83.0.0",
 ]
 
+# Point editor language servers (Zed's pyright/basedpyright, ...) at the uv
+# virtualenv, so the dev dependencies and the project itself resolve.
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+# basedpyright defaults to its stricter "recommended" mode; this project targets
+# the same bar as pyright/mypy defaults.
+typeCheckingMode = "standard"
+
+# pyximport ships no stubs and is an optional, benchmark-only import.
+[[tool.mypy.overrides]]
+module = "pyximport"
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]

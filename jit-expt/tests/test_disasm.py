@@ -2,12 +2,10 @@
 the real Assembler, then checks the decoded text mentions the right mnemonic
 and operands (without over-specifying spacing/formatting)."""
 
-from jit import (
-    Assembler, Label, Symbol,
-    RAX, RBX, RCX, RDI, RSI, EAX, R8, XMM0, XMM1, qword,
-)
+from jit import (EAX, R8, RAX, RBX, RCX, RDI, RSI, XMM0, XMM1, Assembler,
+                 Label, Symbol)
+from jit.disasm import disasm, disassemble
 from jit.operands import rip
-from jit.disasm import disassemble, disasm
 
 
 def asm(build):
