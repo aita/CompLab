@@ -1,12 +1,24 @@
+"""Collatz benchmark: the same scalar loop through every backend there is --
+pure Python, this library's JIT and AOT paths (naive and optimized), and Cython
+at a range of C optimization levels.
+
+    uv run python examples/collatz/bench.py
+"""
+
 import ctypes
 import time
+from collections.abc import Callable, Iterable, Mapping
 
-from jit import ARG_REGS, R8, R9, R10, R11, RAX, RCX, RDX, Assembler, Runtime, disasm
+from jit import (ARG_REGS, R8, R9, R10, R11, RAX, RCX, RDX, Assembler,
+                 ObjectCode, Runtime, aot, disasm, gas_source, have_toolchain)
+
+# One benchmark entry: how it was built, and the collatz function itself.
+Impl = tuple[str, Callable[[int], int]]
 
 ARG = ARG_REGS[0]  # the first integer argument register for this platform
 
 
-def collatz_py(n):
+def collatz_py(n: int) -> int:
     """Sum of the 3n+1 step counts for x = 1..n (pure Python baseline). A scalar
     loop with a branch and no calls -- it stresses loop/branch code generation,
     not call overhead."""
@@ -22,7 +34,8 @@ def collatz_py(n):
     return total
 
 
-def build_cython_variants(variants):
+def build_cython_variants(
+        variants: Iterable[tuple[str, list[str]]]) -> list[Impl]:
     """Compile kernels.pyx once per (label, cflags) variant, each into its own
     module, so several Cython optimization levels can be benchmarked side by
     side. Returns a list of (label, collatz_fn); empty if Cython is missing.
@@ -46,7 +59,7 @@ def build_cython_variants(variants):
     sys.path.insert(0, tmp)
     pyximport.install(language_level=3, build_dir=os.path.join(tmp, "build"))
 
-    out = []
+    out: list[Impl] = []
     for i, (label, cflags) in enumerate(variants):
         mod = f"kernels_v{i}"
         shutil.copy(src, os.path.join(tmp, f"{mod}.pyx"))
@@ -65,10 +78,30 @@ def build_cython_variants(variants):
     return out
 
 
-def bench(fn, n, repeat=3):
+# Every library loaded so far, kept alive with its temporary directory.
+_AOT_MODULES: list[aot.Module] = []
+
+
+def build_aot_variants(functions: Mapping[str, Assembler]) -> list[Impl]:
+    """Compile `functions` -- {name: Assembler} -- ahead of time instead of into
+    memory: the same programs are rendered as gas source, assembled by `as`,
+    linked into a shared library and dlopen'd. Returns a list of
+    (label, callable); empty if there is no toolchain to drive."""
+    if not have_toolchain():
+        print("(no assembler/C toolchain, skipping the AOT rows)\n")
+        return []
+    module = aot.load(functions)
+    _AOT_MODULES.append(module)  # the library must outlive its functions
+    return [(f"AOT{'-opt' if name.endswith('_opt') else ''}",
+             module.func(name, ctypes.c_int64, ctypes.c_int64))
+            for name in functions]
+
+
+def bench(fn: Callable[[int], int], n: int,
+          repeat: int = 3) -> tuple[int, float]:
     """Return (result, best-of-`repeat` milliseconds) for fn(n)."""
     best = float("inf")
-    result = None
+    result = 0
     for _ in range(repeat):
         t0 = time.perf_counter()
         result = fn(n)
@@ -76,7 +109,7 @@ def bench(fn, n, repeat=3):
     return result, best
 
 
-def run_bench(title, n, impls):
+def run_bench(title: str, n: int, impls: list[Impl]) -> None:
     """Run impls -- a list of (label, fn), the first being the baseline -- and
     print a table. Every implementation must return the same result."""
     base_label, base_fn = impls[0]
@@ -93,7 +126,7 @@ def run_bench(title, n, impls):
     print()
 
 
-def build_collatz(a):
+def build_collatz(a: Assembler) -> None:
     # long collatz_sum(long N): sum of 3n+1 step counts for x = 1..N.
     #
     # A pure loop with a branch and NO calls, so there is no prologue at all --
@@ -136,7 +169,7 @@ def build_collatz(a):
     a.ret()
 
 
-def build_collatz_opt(a):
+def build_collatz_opt(a: Assembler) -> None:
     # Same result as build_collatz, with the two optimizations gcc -O3 applies:
     #
     #   1. Branchless. The parity of y in a Collatz walk is essentially
@@ -179,28 +212,34 @@ def build_collatz_opt(a):
     a.ret()
 
 
-def main():
+def main() -> None:
     rt = Runtime()
     i64 = ctypes.CFUNCTYPE(ctypes.c_int64, ctypes.c_int64)
 
-    def jit_compile(builder, name):
+    def jit_compile(
+            builder: Callable[[Assembler], None], name: str
+    ) -> tuple[Assembler, ObjectCode, Callable[[int], int]]:
         asm = Assembler()
         builder(asm)
         obj = asm.finalize()
-        return obj, i64(rt.add(obj, name=name))
+        return asm, obj, i64(rt.add(obj, name=name))
 
-    obj, collatz_jit = jit_compile(build_collatz, "collatz")
-    obj_opt, collatz_jit_opt = jit_compile(build_collatz_opt, "collatz_opt")
+    asm, obj, collatz_jit = jit_compile(build_collatz, "collatz")
+    asm_opt, obj_opt, collatz_jit_opt = jit_compile(build_collatz_opt,
+                                                    "collatz_opt")
 
     print("naive JIT collatz:")
     print(disasm(obj))
     print("\noptimized JIT collatz (branchless cmov + step fusion):")
     print(disasm(obj_opt))
-    print()
+
+    print("\nthe same naive program rendered for the ahead-of-time backend:")
+    print(gas_source({"collatz": asm}))
 
     impls = [("Python", collatz_py),
              ("JIT", collatz_jit),
              ("JIT-opt", collatz_jit_opt)]
+    impls += build_aot_variants({"collatz": asm, "collatz_opt": asm_opt})
     impls += build_cython_variants([
         ("Cython -O0", ["-O0"]),
         ("Cython -O2", ["-O2"]),
