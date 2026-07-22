@@ -1,13 +1,17 @@
 """Collatz benchmark: the same scalar loop through every backend there is --
-pure Python, this library's JIT and AOT paths (naive and optimized), and Cython
-at a range of C optimization levels.
+pure Python, this library's JIT and AOT paths (naive and optimized), a
+standalone executable built from the AOT object, and Cython at a range of C
+optimization levels.
 
     uv run python examples/collatz/bench.py
 """
 
 import ctypes
+import subprocess
+import tempfile
 import time
 from collections.abc import Callable, Iterable, Mapping
+from pathlib import Path
 
 from jit import (ARG_REGS, R8, R9, R10, R11, RAX, RCX, RDX, Assembler,
                  ObjectCode, Runtime, aot, disasm, gas_source, have_toolchain)
@@ -47,7 +51,6 @@ def build_cython_variants(
         import os
         import shutil
         import sys
-        import tempfile
 
         import pyximport
     except Exception as exc:  # Cython/compiler missing -> just skip those rows
@@ -95,6 +98,53 @@ def build_aot_variants(functions: Mapping[str, Assembler]) -> list[Impl]:
     return [(f"AOT{'-opt' if name.endswith('_opt') else ''}",
              module.func(name, ctypes.c_int64, ctypes.c_int64))
             for name in functions]
+
+
+# A main() for the standalone build: it takes N on the command line, calls the
+# assembled kernel, and prints the result. ENTRY is the assembled function's
+# public name, substituted in below.
+_MAIN_C = """\
+#include <stdio.h>
+#include <stdlib.h>
+
+long ENTRY(long n);
+
+int main(int argc, char **argv) {
+    long n = argc > 1 ? atol(argv[1]) : 50000;
+    printf("%ld\\n", ENTRY(n));
+    return 0;
+}
+"""
+
+# Temporary directories holding the built executables, kept until exit.
+_AOT_EXE_DIRS: list[tempfile.TemporaryDirectory[str]] = []
+
+
+def build_aot_executable(functions: Mapping[str, Assembler],
+                         entry: str) -> list[Impl]:
+    """Link `functions` with a C main() into a standalone executable -- no
+    Python involved at run time -- and return a row that runs it as a
+    subprocess, parsing the number it prints.
+
+    This is the end of the ahead-of-time road: the kernel is an ordinary .o
+    that the C toolchain links like any other. Its row therefore also pays for
+    fork/exec and process startup, unlike the in-process rows."""
+    if not have_toolchain():
+        return []
+    tmp = tempfile.TemporaryDirectory(prefix="collatz_exe_")
+    _AOT_EXE_DIRS.append(tmp)
+    main_c = Path(tmp.name) / "main.c"
+    main_c.write_text(_MAIN_C.replace("ENTRY", entry))
+    exe = aot.build_executable(functions, Path(tmp.name) / "collatz",
+                               sources=[main_c])
+    print(f"AOT executable: {exe} ({exe.stat().st_size} bytes)\n")
+
+    def run(n: int) -> int:
+        done = subprocess.run([str(exe), str(n)], capture_output=True,
+                              check=True)
+        return int(done.stdout)
+
+    return [("AOT-exe", run)]
 
 
 def bench(fn: Callable[[int], int], n: int,
@@ -240,6 +290,7 @@ def main() -> None:
              ("JIT", collatz_jit),
              ("JIT-opt", collatz_jit_opt)]
     impls += build_aot_variants({"collatz": asm, "collatz_opt": asm_opt})
+    impls += build_aot_executable({"collatz_opt": asm_opt}, "collatz_opt")
     impls += build_cython_variants([
         ("Cython -O0", ["-O0"]),
         ("Cython -O2", ["-O2"]),
@@ -248,6 +299,10 @@ def main() -> None:
         ("Cython -Ofast+native", ["-Ofast", "-march=native", "-funroll-loops"]),
     ])
     run_bench("collatz", 50_000, impls)
+    if any(label == "AOT-exe" for label, _ in impls):
+        print("AOT-exe runs the same kernel as AOT-opt, but as a separate "
+              "process:\nits extra ~1 ms is fork/exec and program startup, "
+              "not the loop.\n")
 
 
 if __name__ == "__main__":
