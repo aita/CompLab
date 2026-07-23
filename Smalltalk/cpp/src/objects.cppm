@@ -1,0 +1,259 @@
+// Object model partition — every value type of the interpreter.
+//
+// Immediate values (nil / Boolean / SmallInteger / Float) live inline in
+// `Value`; everything else is a GC-managed `Object*` owned by the Heap (see the
+// :heap partition). Activations (`Context`) and closures (`Block`) are objects
+// too, so a captured frame stays alive as long as a closure references it —
+// no shared_ptr, no reference counting.
+module;
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+#include <variant>
+#include <vector>
+
+export module st:objects;
+
+import :bytecode;
+
+export namespace st {
+
+class VM;  // forward: primitives take a VM&
+
+struct Object;
+
+struct Nil {
+    bool operator==(const Nil&) const = default;
+};
+
+// A Smalltalk value.
+using Value = std::variant<Nil, bool, std::int64_t, double, Object*>;
+
+constexpr Value nil() { return Nil{}; }
+inline Value ref(Object* o) { return Value{o}; }
+
+// --- immediate accessors ---
+inline bool is_obj(const Value& v) { return std::holds_alternative<Object*>(v); }
+inline Object* as_obj(const Value& v) {
+    auto* p = std::get_if<Object*>(&v);
+    return p ? *p : nullptr;
+}
+inline bool is_int(const Value& v) { return std::holds_alternative<std::int64_t>(v); }
+inline bool is_float(const Value& v) { return std::holds_alternative<double>(v); }
+inline bool is_bool(const Value& v) { return std::holds_alternative<bool>(v); }
+inline bool is_nil(const Value& v) { return std::holds_alternative<Nil>(v); }
+
+enum class Tag {
+    String,
+    Symbol,
+    Array,
+    Class,
+    Instance,
+    CompiledMethod,
+    CompiledBlock,
+    Block,
+    Context,
+};
+
+struct Object {
+    Tag tag;
+    bool marked = false;
+    Object* gc_next = nullptr;
+    explicit Object(Tag t) : tag(t) {}
+    Object(const Object&) = delete;
+    Object& operator=(const Object&) = delete;
+    virtual ~Object() = default;
+};
+
+// Downcast a Value to a specific object type, or nullptr.
+template <class T>
+T* as(const Value& v) {
+    Object* o = as_obj(v);
+    return (o != nullptr && o->tag == T::TAG) ? static_cast<T*>(o) : nullptr;
+}
+
+struct String : Object {
+    static constexpr Tag TAG = Tag::String;
+    std::string data;
+    explicit String(std::string s) : Object(TAG), data(std::move(s)) {}
+};
+
+struct Symbol : Object {
+    static constexpr Tag TAG = Tag::Symbol;
+    std::string data;
+    explicit Symbol(std::string s) : Object(TAG), data(std::move(s)) {}
+};
+
+struct Array : Object {
+    static constexpr Tag TAG = Tag::Array;
+    std::vector<Value> items;
+    Array() : Object(TAG) {}
+};
+
+struct CompiledMethod;
+
+// A method is a C++ primitive or a compiled bytecode method.
+using PrimFn = Value (*)(VM&, const Value&, std::vector<Value>&);
+
+struct Method {
+    PrimFn prim = nullptr;
+    CompiledMethod* compiled = nullptr;
+    bool is_primitive() const { return prim != nullptr; }
+    bool present() const { return prim != nullptr || compiled != nullptr; }
+};
+
+struct Class : Object {
+    static constexpr Tag TAG = Tag::Class;
+    std::string name;
+    Class* superclass = nullptr;
+    std::vector<std::string> ivar_names;
+    std::unordered_map<std::string, Method> methods;
+    std::unordered_map<std::string, Method> class_methods;
+
+    explicit Class(std::string n) : Object(TAG), name(std::move(n)) {}
+
+    Method* lookup(const std::string& sel) {
+        for (Class* c = this; c != nullptr; c = c->superclass) {
+            auto it = c->methods.find(sel);
+            if (it != c->methods.end()) return &it->second;
+        }
+        return nullptr;
+    }
+    Method* lookup_class(const std::string& sel) {
+        for (Class* c = this; c != nullptr; c = c->superclass) {
+            auto it = c->class_methods.find(sel);
+            if (it != c->class_methods.end()) return &it->second;
+        }
+        return nullptr;
+    }
+    bool is_kind_of(Class* other) {
+        for (Class* c = this; c != nullptr; c = c->superclass) {
+            if (c == other) return true;
+        }
+        return false;
+    }
+    std::vector<std::string> all_ivars() {
+        std::vector<Class*> chain;
+        for (Class* c = this; c != nullptr; c = c->superclass) chain.push_back(c);
+        std::vector<std::string> out;
+        for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
+            for (const auto& n : (*it)->ivar_names) out.push_back(n);
+        }
+        return out;
+    }
+};
+
+struct Instance : Object {
+    static constexpr Tag TAG = Tag::Instance;
+    Class* st_class;
+    std::unordered_map<std::string, Value> ivars;
+    explicit Instance(Class* c) : Object(TAG), st_class(c) {}
+};
+
+struct CompiledMethod : Object {
+    static constexpr Tag TAG = Tag::CompiledMethod;
+    std::string selector;
+    std::vector<std::string> params;
+    std::vector<std::string> local_names;
+    std::vector<Instr> code;
+    std::vector<Value> literals;
+    std::string source;
+    Class* defined_in = nullptr;
+    CompiledMethod() : Object(TAG) {}
+    int num_args() const { return static_cast<int>(params.size()); }
+};
+
+struct CompiledBlock : Object {
+    static constexpr Tag TAG = Tag::CompiledBlock;
+    std::vector<std::string> params;
+    std::vector<std::string> local_names;
+    std::vector<Instr> code;
+    std::vector<Value> literals;
+    CompiledBlock() : Object(TAG) {}
+    int num_args() const { return static_cast<int>(params.size()); }
+};
+
+struct Context;
+
+struct Block : Object {
+    static constexpr Tag TAG = Tag::Block;
+    CompiledBlock* tmpl;
+    Context* outer;
+    Context* home;
+    Block(CompiledBlock* t, Context* o, Context* h)
+        : Object(TAG), tmpl(t), outer(o), home(h) {}
+    int num_args() const { return tmpl->num_args(); }
+};
+
+// A method or block activation, reified as an object so closures keep it alive.
+struct Context : Object {
+    static constexpr Tag TAG = Tag::Context;
+    Value receiver = nil();
+    Object* method = nullptr;  // CompiledMethod* or CompiledBlock*
+    std::vector<Value> locals;
+    std::vector<Value> stack;
+    Context* outer = nullptr;
+    Context* sender = nullptr;
+    Context* home = nullptr;
+    int ip = 0;
+    bool is_block = false;
+    Context() : Object(TAG) {}
+};
+
+inline std::vector<Instr>& code_of(Object* method) {
+    return method->tag == Tag::CompiledMethod
+               ? static_cast<CompiledMethod*>(method)->code
+               : static_cast<CompiledBlock*>(method)->code;
+}
+inline std::vector<Value>& literals_of(Object* method) {
+    return method->tag == Tag::CompiledMethod
+               ? static_cast<CompiledMethod*>(method)->literals
+               : static_cast<CompiledBlock*>(method)->literals;
+}
+
+// --- printing ---
+
+std::string print_string(const Value& v);
+
+inline std::string print_object(Object* o) {
+    switch (o->tag) {
+        case Tag::String:
+            return "'" + static_cast<String*>(o)->data + "'";
+        case Tag::Symbol:
+            return "#" + static_cast<Symbol*>(o)->data;
+        case Tag::Array: {
+            std::string s = "(";
+            for (const auto& e : static_cast<Array*>(o)->items)
+                s += print_string(e) + " ";
+            return s + ")";
+        }
+        case Tag::Class:
+            return static_cast<Class*>(o)->name;
+        case Tag::Instance: {
+            const std::string& n = static_cast<Instance*>(o)->st_class->name;
+            bool vowel = !n.empty() &&
+                         std::string("AEIOU").find(n[0]) != std::string::npos;
+            return (vowel ? "an " : "a ") + n;
+        }
+        case Tag::Block:
+            return "a BlockClosure";
+        default:
+            return "an Object";
+    }
+}
+
+inline std::string print_string(const Value& v) {
+    if (is_nil(v)) return "nil";
+    if (auto* b = std::get_if<bool>(&v)) return *b ? "true" : "false";
+    if (auto* i = std::get_if<std::int64_t>(&v)) return std::to_string(*i);
+    if (auto* d = std::get_if<double>(&v)) return std::to_string(*d);
+    return print_object(as_obj(v));
+}
+
+inline std::string display_string(const Value& v) {
+    if (auto* s = as<String>(v)) return s->data;
+    if (auto* y = as<Symbol>(v)) return y->data;
+    return print_string(v);
+}
+
+}  // namespace st

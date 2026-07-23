@@ -1,0 +1,74 @@
+# small Smalltalk — C++
+
+A C++23 port of the [Python implementation](../python/README.md), built with
+**C++20 modules**. Same language subset and VM design; different constraints:
+
+- **No `shared_ptr` / reference counting.** Heap objects are owned by a `Heap`
+  and reclaimed by a **mark-and-sweep** garbage collector over raw pointers
+  (`src/heap.cppm`). Activations (`Context`) and closures (`Block`) are objects
+  too, so a captured frame stays alive as long as a closure references it.
+- **Restricted exceptions.** Builds with `-fno-exceptions -fno-rtti`. Errors are
+  reported by return values / a VM error flag, numbers are parsed with
+  `std::from_chars`, and control flow (`^`, doesNotUnderstand) uses the VM's
+  explicit activation stack — never C++ exceptions.
+
+## Pipeline
+
+```
+source → lexer → parser → AST → compiler → bytecode → VM → value
+```
+
+One module `st`, split into partitions mirroring the Python `st/` package:
+
+| file | module | role |
+|------|--------|------|
+| `src/bytecode.cppm` | `st:bytecode` | opcodes + `Instr` |
+| `src/objects.cppm`  | `st:objects`  | `Value` + all heap object types |
+| `src/heap.cppm`     | `st:heap`     | mark-and-sweep GC (traces every type) |
+| `src/lexer.cppm`    | `st:lexer`    | tokenizer |
+| `src/ast.cppm`      | `st:ast`      | AST (owned by `unique_ptr`) |
+| `src/parser.cppm`   | `st:parser`   | recursive descent |
+| `src/compiler.cppm` | `st:compiler` | AST → bytecode; inlining + lexical addressing |
+| `src/vm.cppm`       | `st:vm`       | non-recursive stack machine + closures + `^` |
+| `src/kernel.cppm`   | `st:kernel`   | base classes and primitives |
+| `src/system.cppm`   | `st:system`   | facade: eval / define_class / define_method |
+| `src/st.cppm`       | `st`          | primary interface, re-exports partitions |
+
+The compiler inlines `ifTrue:` / `whileTrue:` / `and:` / `or:` **and**
+`to:do:` / `timesRepeat:` (their loop variable is bound to a local slot), so a
+primitive never has to re-enter the VM to run a block — which is what keeps the
+loop non-recursive and exception-free.
+
+## What works
+
+`3 + 4 factorial`, temps and workspace globals, cascades, blocks and closures
+(`value` family), inlined control flow and loops, `super`, non-local return
+`^`, and user classes with instance variables:
+
+```smalltalk
+"defined via the System API (see main.cpp)"
+Counter >> init       count := 0
+Counter >> increment  count := count + 1
+Counter >> count      ^count
+```
+
+Not yet ported from the Python side: the full collection protocol
+(`OrderedCollection` / `Dictionary` / `do:` / `collect:`), `Character`,
+metaclasses, and the IDE.
+
+## Build & run
+
+Needs CMake ≥ 3.28, Ninja, and a modules-capable compiler.
+
+```sh
+cmake -S . -B build -G Ninja
+cmake --build build
+./build/smalltalk        # demo + a small REPL
+ctest --test-dir build   # unit tests
+```
+
+> **Compiler note.** Use **Clang** (developed with Clang 22). GCC 16's C++20
+> modules currently fail to read this project's `st:vm` module ("Bad file
+> data"); the `CMakeLists.txt` therefore prefers `clang++` for a fresh build
+> tree. Override with `-DCMAKE_CXX_COMPILER=...`. BMIs are compiler-specific and
+> not portable — pick one compiler per build tree.
