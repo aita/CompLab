@@ -8,7 +8,10 @@ export import :ast;
 export import :parser;
 export import :compiler;
 export import :vm;
+export import :regalloc;
 export import :jit;
+export import :method;
+export import :tiered;
 
 export namespace minpython {
 constexpr const char* version = "0.1.0";

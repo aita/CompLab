@@ -155,6 +155,194 @@ int main() {
     check("jit typeguard deopted", j.type_deopt >= 1 ? "y" : "n", "y");
   }
 
+  // -- method JIT: recursive int functions ---------------------------------
+  struct MethodRun {
+    std::string out;
+    int compiled, native, aborted;
+  };
+  auto run_method = [](const std::string& src, int threshold) -> MethodRun {
+    std::string err;
+    auto prog = compile_module(src, err);
+    VM vm;
+    MethodJIT mj(vm, threshold);
+    if (prog) vm.run_code(prog->module);
+    return {vm.output(), mj.n_compiled, mj.n_calls_native, mj.n_aborted};
+  };
+  {
+    std::string src =
+        "def fact(n):\n    if n <= 1:\n        return 1\n"
+        "    return n * fact(n - 1)\nprint(fact(12))";
+    MethodRun m = run_method(src, 2);
+    check("method fact matches", m.out, run(src));
+    check("method fact compiled", m.compiled >= 1 ? "y" : "n", "y");
+    check("method fact native", m.native >= 1 ? "y" : "n", "y");
+  }
+  {
+    std::string src =
+        "def fib(n):\n    if n < 2:\n        return n\n"
+        "    return fib(n - 1) + fib(n - 2)\nprint(fib(25))";
+    MethodRun m = run_method(src, 2);
+    check("method fib matches", m.out, run(src));
+  }
+  {  // spills: many live locals + shifts / bitops force stack slots
+    std::string src =
+        "def f(n, a, b, c, d, e):\n"
+        "    if n == 0:\n        return a + b * 2 + c - d + (e & 7) + (n << 1)\n"
+        "    return f(n - 1, a + 1, b + 1, c + 1, d + 1, e + 1)\n"
+        "print(f(50, 1, 2, 3, 4, 5))";
+    MethodRun m = run_method(src, 2);
+    check("method spill matches", m.out, run(src));
+    check("method spill compiled", m.compiled >= 1 ? "y" : "n", "y");
+  }
+  {  // object-capable method JIT: recursion + list subscript
+    std::string src =
+        "def sumlist(xs, i):\n    if i < 0:\n        return 0\n"
+        "    return xs[i] + sumlist(xs, i - 1)\n"
+        "print(sumlist([1, 2, 3, 4, 5, 6, 7, 8], 7))";
+    MethodRun m = run_method(src, 2);
+    check("mixed-method recursion", m.out, run(src));
+  }
+  {  // calls go through the VM, so *mutual* recursion works here too
+    std::string src =
+        "def ev(xs, n):\n    if n == 0:\n        return 0\n"
+        "    return xs[0] + od(xs, n - 1)\n"
+        "def od(xs, n):\n    if n == 0:\n        return 1\n"
+        "    return xs[1] + ev(xs, n - 1)\n"
+        "print(ev([10, 20], 6))";
+    MethodRun m = run_method(src, 2);
+    check("mixed-method mutual", m.out, run(src));
+  }
+  {  // str concat fails the inline int guard -> bails to the interpreter mid
+     // function and finishes there; must still be exact
+    std::string src =
+        "def cat(s, n):\n    if n == 0:\n        return s\n"
+        "    return cat(s + 'x', n - 1)\nprint(cat('a', 12))";
+    MethodRun m = run_method(src, 2);
+    check("mixed-method bail", m.out, run(src));
+  }
+  {  // len() inside a method-JIT'd function
+    std::string src =
+        "def pick(xs, i):\n    if i < len(xs):\n        return xs[i]\n"
+        "    return 0\nprint(pick([9, 8, 7], 1))\nprint(pick([9, 8, 7], 5))";
+    MethodRun m = run_method(src, 2);
+    check("mixed-method len", m.out, run(src));
+  }
+  {  // mutual recursion is NOT self-recursion -> not method-JIT'd, still exact
+    std::string src =
+        "def ev(n):\n    if n == 0:\n        return 1\n    return od(n - 1)\n"
+        "def od(n):\n    if n == 0:\n        return 0\n    return ev(n - 1)\n"
+        "print(ev(100))\nprint(od(100))";
+    MethodRun m = run_method(src, 2);
+    check("method mutual matches", m.out, run(src));
+    check("method mutual aborted", m.aborted >= 1 ? "y" : "n", "y");
+  }
+
+  // -- str/list in traces: helper calls + per-op native type guards ---------
+  {  // list subscript + len now compile instead of aborting
+    std::string src =
+        "def s(xs, reps):\n    t = 0\n    n = 0\n"
+        "    while n < reps:\n        i = 0\n"
+        "        while i < len(xs):\n            t = t + xs[i]\n"
+        "            i = i + 1\n        n = n + 1\n    return t\n"
+        "print(s([1, 2, 3, 4, 5, 6, 7, 8], 500))";
+    JitRun j = run_jit(src, 4);
+    check("jit list-sum matches", j.out, run(src));
+    check("jit list-sum compiled", j.compiled >= 1 ? "y" : "n", "y");
+  }
+  {  // len() on a str inside a traced loop
+    std::string src =
+        "def cnt(s, reps):\n    t = 0\n    n = 0\n"
+        "    while n < reps:\n        i = 0\n"
+        "        while i < len(s):\n            t = t + 1\n"
+        "            i = i + 1\n        n = n + 1\n    return t\n"
+        "print(cnt('hello', 500))";
+    JitRun j = run_jit(src, 4);
+    check("jit str-len matches", j.out, run(src));
+    check("jit str-len compiled", j.compiled >= 1 ? "y" : "n", "y");
+  }
+  {  // regression: a type guard that fires *after* a local was written this
+     // iteration must resume after the guarded op, not restart the loop header
+     // (restarting double-applied `i = i + 1` and lost elements).
+    std::string src =
+        "def s(xs, reps):\n    t = 0\n    n = 0\n"
+        "    while n < reps:\n        i = 0\n"
+        "        while i < 8:\n            i = i + 1\n"
+        "            t = t + xs[i - 1]\n        n = n + 1\n    return t\n"
+        "print(s([1, 2, True, 4, 5, 6, 7, 8], 300))";
+    JitRun j = run_jit(src, 4);
+    check("jit typeguard resume", j.out, run(src));
+    check("jit typeguard fired", j.type_deopt >= 1 ? "y" : "n", "y");
+  }
+  {  // heterogeneous list: the per-op type guard must deopt, still exact
+    std::string src =
+        "def s(xs, reps):\n    t = 0\n    n = 0\n"
+        "    while n < reps:\n        i = 0\n"
+        "        while i < len(xs):\n            t = t + xs[i]\n"
+        "            i = i + 1\n        n = n + 1\n    return t\n"
+        "print(s([1, True, 3], 500))";
+    JitRun j = run_jit(src, 4);
+    check("jit het-list matches", j.out, run(src));
+    check("jit het-list deopted", j.type_deopt >= 1 ? "y" : "n", "y");
+  }
+
+  // -- tiered (background) method JIT: exact under async compilation --------
+  {
+    std::string src =
+        "def fib(n):\n    if n < 2:\n        return n\n"
+        "    return fib(n - 1) + fib(n - 2)\nprint(fib(25))";
+    std::string err;
+    auto prog = compile_module(src, err);
+    VM vm;
+    TieredJIT tj(vm, 2);
+    if (prog) vm.run_code(prog->module);
+    check("tiered fib matches", vm.output(), run(src));
+    // 240k calls: the background compile finishes and native code runs.
+    check("tiered fib native", tj.n_calls_native > 0 ? "y" : "n", "y");
+  }
+
+  // -- GC firing *inside* a JIT-compiled str/list trace ---------------------
+  // The subscr helper allocates a 1-char string every iteration, so a collection
+  // happens while native code is on the stack. Everything the trace touches lives
+  // in the register array (a GC root), so nothing may be lost.
+  {
+    std::string src =
+        "def scan(s, reps):\n    n = 0\n    t = 0\n"
+        "    while n < reps:\n        i = 0\n"
+        "        while i < len(s):\n            c = s[i]\n"
+        "            t = t + 1\n            i = i + 1\n"
+        "        n = n + 1\n    return t\n"
+        "print(scan('hello world', 3000))";
+    std::string err;
+    auto prog = compile_module(src, err);
+    VM vm;
+    vm.gc_threshold = 500;  // force collections during the trace
+    TracingJIT jit(vm, 4);
+    if (prog) vm.run_code(prog->module);
+    check("gc-in-trace output", vm.output(), run(src));
+    check("gc-in-trace collected", vm.n_gc > 0 ? "y" : "n", "y");
+    check("gc-in-trace compiled", jit.n_compiled >= 1 ? "y" : "n", "y");
+  }
+
+  // -- GC: allocation-heavy loop stays bounded and exact --------------------
+  {
+    std::string src =
+        "i = 0\nt = 0\n"
+        "while i < 100000:\n"
+        "    xs = [i, i + 1, i + 2]\n"
+        "    t = t + xs[1]\n"
+        "    i = i + 1\n"
+        "print(t)";
+    std::string err;
+    auto prog = compile_module(src, err);
+    VM vm;
+    vm.gc_threshold = 1000;  // force frequent collection
+    if (prog) vm.run_code(prog->module);
+    check("gc output", vm.output(), "5000050000");
+    check("gc ran", vm.n_gc > 0 ? "y" : "n", "y");
+    // 100k lists were allocated; GC must have reclaimed the garbage.
+    check("gc bounded", vm.live_objects() < 3000 ? "y" : "n", "y");
+  }
+
   std::cout << passes << " passed, " << fails << " failed\n";
   return fails ? 1 : 0;
 }

@@ -87,6 +87,7 @@ inline constexpr int kPayloadOffset = 8;
 struct Object {
   enum class Kind { Str, List, Func };
   Kind kind;
+  bool marked = false;      // mark-sweep GC bit
   std::string str;          // Str
   std::vector<Value> list;  // List
   const CodeObject* code;   // Func

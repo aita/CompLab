@@ -47,7 +47,10 @@ target_sources(mp
       src/parser.cppm
       src/compiler.cppm
       src/vm.cppm
+      src/regalloc.cppm
       src/jit.cppm
+      src/method.cppm
+      src/tiered.cppm
       src/minpython.cppm
 )
 target_include_directories(mp PUBLIC third_party)

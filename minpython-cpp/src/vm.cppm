@@ -88,14 +88,87 @@ class VM {
 
   // Back-edge hook: (code, target pc, regs, globals) -> resume pc, or <0 to keep
   // interpreting from the target. The seam a tracing JIT overrides.
-  std::function<long(CodeObject*, int, std::vector<Value>&, Globals&)>
-      on_backedge;
+  std::function<long(CodeObject*, int, Value*, Globals&)> on_backedge;
+
+  // Call hook: (callee, regs, arg_base, argc, out) -> handled. If it returns
+  // true it ran native code for the whole call and `out` is the result; else the
+  // VM interprets normally. The seam a method JIT overrides.
+  std::function<bool(const Value&, Value*, int, int, Value&)> on_call;
 
   std::unordered_map<std::int64_t, long> loop_counts;  // keyed by code_ptr ^ target
 
+  int n_gc = 0;
+  std::size_t gc_threshold = 1 << 16;  // collect after this many allocations
+  std::size_t live_objects() const { return arena_.size(); }
+
   Object* new_object() {
+    // Collect before allocating, at a safe point: every live object is reachable
+    // from a root (globals or an interpreter frame), and the new object does not
+    // exist yet, so nothing live is missed.
+    if (++alloc_since_gc_ >= gc_threshold) {
+      gc();
+      alloc_since_gc_ = 0;
+    }
     arena_.push_back(std::make_unique<Object>());
     return arena_.back().get();
+  }
+
+  // A contiguous frame stack for JIT-compiled activations. Bumping `vtop` is a
+  // frame allocation, so a call costs no heap traffic, and the whole live region
+  // [0, vtop) is one GC root -- no per-frame registration.
+  std::vector<Value> vstack = std::vector<Value>(1 << 18);
+  std::size_t vtop = 0;
+
+  // Reserve `n` slots; returns the base index, or npos when the stack is full.
+  std::size_t frame_alloc(int n) {
+    if (vtop + (std::size_t)n > vstack.size()) return (std::size_t)-1;
+    std::size_t base = vtop;
+    vtop += n;
+    // Fresh frames read as None, and clearing also stops the collector from
+    // following a stale pointer left by an earlier, already-freed frame.
+    for (int k = 0; k < n; ++k) vstack[base + k] = Value::none();
+    return base;
+  }
+  void frame_free(std::size_t base) { vtop = base; }
+
+  // Mark-sweep GC. Roots: module globals, every live interpreter frame, and the
+  // JIT frame stack's live region. Only arena objects are swept; compile-time
+  // string constants live in the Program and are never freed.
+  void gc() {
+    for (auto& [k, v] : globals) mark(v);
+    for (auto* fr : frames_)
+      for (auto& v : *fr) mark(v);
+    for (std::size_t k = 0; k < vtop; ++k) mark(vstack[k]);
+    std::vector<std::unique_ptr<Object>> keep;
+    keep.reserve(arena_.size());
+    for (auto& o : arena_) {
+      if (o->marked) {
+        o->marked = false;
+        keep.push_back(std::move(o));
+      }
+    }
+    arena_ = std::move(keep);
+    n_gc++;
+  }
+
+  // Object ops the JIT calls back into for str/list work (it can't inline heap
+  // allocation or std::string/vector). Public so a JIT helper can reach them.
+  Value op_subscr(const Value& obj, const Value& idx) { return subscr(obj, idx); }
+  Value op_length(const Value& v) { return length(v); }
+  // Full VM call (may re-enter native code through on_call) on a raw frame.
+  bool op_call(Value* regs, int dst, int func_reg, int argc) {
+    regs[dst] = do_call(regs[func_reg], regs, func_reg + 1, argc);
+    return !diag.failed;
+  }
+  bool op_loadglobal(Globals* glb, Value* regs, const CodeObject* code, int a,
+                     int b) {
+    auto it = glb->find(code->names[b]);
+    if (it == glb->end()) {
+      diag.fail(std::format("name '{}' is not defined", code->names[b]));
+      return false;
+    }
+    regs[a] = it->second;
+    return true;
   }
 
   Value run_code(CodeObject* code, std::vector<Value> args = {}) {
@@ -104,9 +177,29 @@ class VM {
     return run_frame(code, regs, globals);
   }
 
-  Value run_frame(CodeObject* code, std::vector<Value>& regs, Globals& glb) {
+  // Register/unregister a frame as a GC root. The JIT entry helper uses these
+  // around native execution, which owns its frame but is not `run_frame`.
+  void gc_push_frame(std::vector<Value>* f) { frames_.push_back(f); }
+  void gc_pop_frame() { frames_.pop_back(); }
+
+  // `start_pc` lets a JIT bail out mid-function: the frame array already holds
+  // the state, so the interpreter just picks up where the native code stopped.
+  Value run_frame(CodeObject* code, std::vector<Value>& regs, Globals& glb,
+                  int start_pc = 0) {
+    frames_.push_back(&regs);  // this frame's registers are GC roots
+    struct FrameGuard {
+      std::vector<std::vector<Value>*>& f;
+      ~FrameGuard() { f.pop_back(); }
+    } frame_guard{frames_};
+    return run_frame_raw(code, regs.data(), glb, start_pc);
+  }
+
+  // The dispatch loop on a raw frame. The caller must have the frame rooted
+  // (either via run_frame's guard or by living in the value stack).
+  Value run_frame_raw(CodeObject* code, Value* regs, Globals& glb,
+                      int start_pc = 0) {
     const std::vector<Instr>& ins = code->code;
-    int pc = 0;
+    int pc = start_pc;
     while (true) {
       if (diag.failed) return Value::none();
       const Instr& x = ins[pc];
@@ -174,7 +267,7 @@ class VM {
         case Op::MakeList: {
           Object* o = new_object();
           o->kind = Object::Kind::List;
-          o->list.assign(regs.begin() + b, regs.begin() + b + c);
+          o->list.assign(regs + b, regs + b + c);
           regs[a] = Value::object(Tag::List, o);
           break;
         }
@@ -316,8 +409,7 @@ class VM {
     return Value::none();
   }
 
-  Value do_call(const Value& callee, std::vector<Value>& regs, int arg_base,
-                int argc) {
+  Value do_call(const Value& callee, Value* regs, int arg_base, int argc) {
     if (callee.tag != Tag::Func) {
       diag.fail("object is not callable");
       return Value::none();
@@ -328,12 +420,16 @@ class VM {
                             code->params.size(), argc));
       return Value::none();
     }
+    if (on_call) {
+      Value out;
+      if (on_call(callee, regs, arg_base, argc, out)) return out;
+    }
     std::vector<Value> frame(code->n_regs);
     for (int i = 0; i < argc; ++i) frame[i] = regs[arg_base + i];
     return run_frame(const_cast<CodeObject*>(code), frame, *callee.obj->globals);
   }
 
-  void do_print(std::vector<Value>& regs, int base, int argc) {
+  void do_print(Value* regs, int base, int argc) {
     std::string line;
     for (int i = 0; i < argc; ++i)
       line += (i ? " " : "") + to_display(regs[base + i]);
@@ -341,7 +437,17 @@ class VM {
     std::println("{}", line);
   }
 
+  void mark(const Value& v) {
+    if (v.tag != Tag::Str && v.tag != Tag::List && v.tag != Tag::Func) return;
+    if (v.obj->marked) return;
+    v.obj->marked = true;
+    if (v.tag == Tag::List)
+      for (auto& e : v.obj->list) mark(e);
+  }
+
   std::vector<std::unique_ptr<Object>> arena_;
+  std::vector<std::vector<Value>*> frames_;  // live interpreter frames (GC roots)
+  std::size_t alloc_since_gc_ = 0;
   std::vector<std::string> out_;
 };
 
