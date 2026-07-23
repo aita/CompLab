@@ -55,6 +55,7 @@ public:
     // filled at).
     void flush_caches() {
         ++method_version_;
+        for (auto& [name, c] : classes_) c->ivar_count_ = -1;  // ivar layout
     }
 
     // Disable the inline integer fast path if an arithmetic selector is
@@ -199,30 +200,16 @@ private:
         return nullptr;
     }
 
-    Value read_var(Context* ctx, const std::string& name) {
-        if (Instance* inst = as<Instance>(ctx->receiver)) {
-            for (const auto& iv : inst->st_class->all_ivars()) {
-                if (iv == name) {
-                    auto it = inst->ivars.find(name);
-                    return it == inst->ivars.end() ? nil() : it->second;
-                }
-            }
-        }
+    // Instance variables are resolved to slots at compile time (PushIvar /
+    // StoreIvar); PushVar / StoreVar only reach globals.
+    Value read_var(const std::string& name) {
         auto g = globals_.find(name);
         if (g != globals_.end()) return g->second;
         fail("undeclared variable " + name);
         return nil();
     }
 
-    void write_var(Context* ctx, const std::string& name, const Value& v) {
-        if (Instance* inst = as<Instance>(ctx->receiver)) {
-            for (const auto& iv : inst->st_class->all_ivars()) {
-                if (iv == name) {
-                    inst->ivars[name] = v;
-                    return;
-                }
-            }
-        }
+    void write_var(const std::string& name, const Value& v) {
         globals_[name] = v;  // auto-declare a workspace global
     }
 
@@ -275,11 +262,17 @@ private:
                     f->locals[ins.arg2] = stk->back();
                     break;
                 }
+                case Op::PushIvar:
+                    stk->push_back(static_cast<Instance*>(as_obj(ctx->receiver))->slots[ins.arg]);
+                    break;
+                case Op::StoreIvar:
+                    static_cast<Instance*>(as_obj(ctx->receiver))->slots[ins.arg] = stk->back();
+                    break;
                 case Op::PushVar:
-                    stk->push_back(read_var(ctx, ins.name));
+                    stk->push_back(read_var(ins.name));
                     if (errored_) return nil();
                     break;
-                case Op::StoreVar: write_var(ctx, ins.name, stk->back()); break;
+                case Op::StoreVar: write_var(ins.name, stk->back()); break;
                 case Op::Pop: stk->pop_back(); break;
                 case Op::Dup: stk->push_back(stk->back()); break;
                 case Op::MakeArray: {
@@ -372,14 +365,26 @@ private:
                     bool class_recv = is_obj(receiver) && as_obj(receiver)->tag == Tag::Class;
                     if (ins.op == Op::Send && !class_recv) {
                         Class* rc = class_of(receiver);
-                        if (ins.ic_class == static_cast<void*>(rc) &&
-                            ins.ic_version == method_version_) {
+                        void* key = static_cast<void*>(rc);
+                        if (ins.ic_version != method_version_) {
+                            // stale: reset the 2-way cache and resolve
+                            m = lookup(receiver, static_cast<Symbol*>(ins.sel), nullptr);
+                            ins.ic_class = key;
+                            ins.ic_method = m;
+                            ins.ic_class2 = nullptr;
+                            ins.ic_method2 = nullptr;
+                            ins.ic_version = method_version_;
+                        } else if (ins.ic_class == key) {
                             m = static_cast<Method*>(ins.ic_method);
+                        } else if (ins.ic_class2 == key) {
+                            m = static_cast<Method*>(ins.ic_method2);
                         } else {
                             m = lookup(receiver, static_cast<Symbol*>(ins.sel), nullptr);
-                            ins.ic_class = rc;
+                            // insert as MRU; demote the old first entry
+                            ins.ic_class2 = ins.ic_class;
+                            ins.ic_method2 = ins.ic_method;
+                            ins.ic_class = key;
                             ins.ic_method = m;
-                            ins.ic_version = method_version_;
                         }
                     } else {
                         Class* super_start =

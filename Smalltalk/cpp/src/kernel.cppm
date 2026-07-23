@@ -34,10 +34,10 @@ inline Value int_result(VM& vm, std::int64_t r) {
     return Value{r};
 }
 
+// OrderedCollection's only instance variable `items` is at slot 0.
 inline Array* oc_items(const Value& r) {
     Instance* inst = as<Instance>(r);
-    auto it = inst->ivars.find("items");
-    return it == inst->ivars.end() ? nullptr : as<Array>(it->second);
+    return inst->slots.empty() ? nullptr : as<Array>(inst->slots[0]);
 }
 
 inline bool identical(const Value& a, const Value& b) {
@@ -373,7 +373,7 @@ void build_kernel(VM& vm) {
     // --- OrderedCollection (an Instance whose `items` ivar holds an Array) ---
     cdef(OrderedCollection, "new", [](VM& vm, const Value& r, std::span<Value>) -> Value {
         Instance* oc = vm.heap().new_instance(as<Class>(r));
-        oc->ivars["items"] = ref(vm.heap().new_array());
+        oc->slots[0] = ref(vm.heap().new_array());
         return ref(oc);
     });
     def(OrderedCollection, "add:", [](VM&, const Value& r, std::span<Value> a) -> Value {

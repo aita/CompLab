@@ -68,9 +68,12 @@ re-enters the VM, no exceptions.
 Performance: a per-class method-lookup cache; an inline SmallInteger arithmetic
 fast path keyed by a **precomputed special-selector id** (the compiler tags each
 `Send` so the VM switches on an int instead of comparing selector strings);
-and a **monomorphic inline cache** on every `Send` instruction (remembers the
-last receiver class → method, so a repeated call site skips lookup entirely).
-Both caches are invalidated by a version counter bumped on any (re)definition.
+and a **2-way inline cache** on every `Send` instruction (remembers two recent
+receiver-class → method pairs, so a site that alternates between two classes
+doesn't thrash). The caches are invalidated by a version counter bumped on any
+(re)definition. Instance variables are resolved to **slot indices at compile
+time** (`PushIvar`/`StoreIvar`) and stored in a flat per-object vector — no
+per-object hash map — which roughly halves object-creation cost.
 The opcode `switch` is already a jump table, so no dispatch reordering is needed.
 
 Primitives receive their arguments as a `std::span` over the operand stack, so

@@ -57,9 +57,11 @@ class Compiler {
 public:
     explicit Compiler(Heap& heap) : heap_(heap) {}
 
-    CompiledMethod* compile_method(const MethodNode& node, std::string source = "") {
+    CompiledMethod* compile_method(const MethodNode& node, std::string source = "",
+                                   Class* cls = nullptr) {
         Scope root(nullptr);
         begin(&root);
+        cls_ = cls;  // enables compile-time instance-variable slot resolution
         for (const auto& p : node.params) root.declare(p);
         for (const auto& t : node.body.temps) root.declare(t);
         sequence_value(node.body, true);
@@ -96,12 +98,14 @@ private:
     std::vector<Instr> code_;
     std::vector<Value> literals_;
     Scope* scope_ = nullptr;
+    Class* cls_ = nullptr;  // defining class, for instance-variable resolution
     int gensym_ = 0;
 
     void begin(Scope* s) {
         code_.clear();
         literals_.clear();
         scope_ = s;
+        cls_ = nullptr;
         gensym_ = 0;
     }
 
@@ -239,7 +243,9 @@ private:
         }
         int depth = 0, idx = 0;
         if (!scope_->resolve(name, depth, idx)) {
-            emit(Op::PushVar, 0, 0, name);
+            int slot = cls_ != nullptr ? cls_->ivar_slot(name) : -1;
+            if (slot >= 0) emit(Op::PushIvar, slot);
+            else emit(Op::PushVar, 0, 0, name);
         } else if (depth == 0) {
             emit(Op::PushLocal, idx);
         } else {
@@ -250,7 +256,9 @@ private:
     void store(const std::string& name) {
         int depth = 0, idx = 0;
         if (!scope_->resolve(name, depth, idx)) {
-            emit(Op::StoreVar, 0, 0, name);
+            int slot = cls_ != nullptr ? cls_->ivar_slot(name) : -1;
+            if (slot >= 0) emit(Op::StoreIvar, slot);
+            else emit(Op::StoreVar, 0, 0, name);
         } else if (depth == 0) {
             emit(Op::StoreLocal, idx);
         } else {
@@ -481,6 +489,7 @@ private:
 
         Compiler sub(heap_);
         sub.begin(&block_scope);
+        sub.cls_ = cls_;  // blocks reach the home method's instance variables
         sub.sequence_value(node->body, false);
         sub.emit(Op::BlockReturn);
 

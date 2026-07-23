@@ -249,12 +249,34 @@ struct Class : Object {
         }
         return out;
     }
+
+    // Flattened instance-variable layout (superclass ivars first, so slot
+    // indices are stable across subclasses). Cached; cleared by the VM when the
+    // hierarchy changes.
+    int ivar_count_ = -1;
+    std::unordered_map<std::string, int> ivar_index_;
+    void ensure_layout() {
+        if (ivar_count_ >= 0) return;
+        std::vector<std::string> names = all_ivars();
+        ivar_index_.clear();
+        for (int i = 0; i < static_cast<int>(names.size()); ++i) ivar_index_[names[i]] = i;
+        ivar_count_ = static_cast<int>(names.size());
+    }
+    int ivar_count() {
+        ensure_layout();
+        return ivar_count_;
+    }
+    int ivar_slot(const std::string& name) {
+        ensure_layout();
+        auto it = ivar_index_.find(name);
+        return it == ivar_index_.end() ? -1 : it->second;
+    }
 };
 
 struct Instance : Object {
     static constexpr Tag TAG = Tag::Instance;
     Class* st_class;
-    std::unordered_map<std::string, Value> ivars;
+    std::vector<Value> slots;  // instance variables, addressed by slot index
     explicit Instance(Class* c) : Object(TAG), st_class(c) {}
 };
 
@@ -350,9 +372,8 @@ inline std::string print_object(Object* o) {
             const std::string& n = inst->st_class->name;
             if (n == "OrderedCollection") {
                 std::string s = "OrderedCollection (";
-                auto it = inst->ivars.find("items");
-                if (it != inst->ivars.end())
-                    if (auto* arr = as<Array>(it->second))
+                if (!inst->slots.empty())
+                    if (auto* arr = as<Array>(inst->slots[0]))
                         for (const auto& e : arr->items) s += print_string(e) + " ";
                 return s + ")";
             }

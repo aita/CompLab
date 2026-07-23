@@ -48,7 +48,11 @@ public:
     Array* new_array() { return make<Array>(); }
     Dict* new_dict() { return make<Dict>(); }
     Class* new_class(std::string name) { return make<Class>(std::move(name)); }
-    Instance* new_instance(Class* c) { return make<Instance>(c); }
+    Instance* new_instance(Class* c) {
+        Instance* inst = make<Instance>(c);
+        inst->slots.assign(c->ivar_count(), nil());
+        return inst;
+    }
     CompiledMethod* new_method() { return make<CompiledMethod>(); }
     CompiledBlock* new_block_template() { return make<CompiledBlock>(); }
     Block* new_block(CompiledBlock* t, Context* outer, Context* home) {
@@ -137,7 +141,7 @@ private:
             case Tag::Instance: {
                 auto* inst = static_cast<Instance*>(o);
                 push(work, inst->st_class);
-                for (auto& [name, v] : inst->ivars) push_value(work, v);
+                for (const Value& v : inst->slots) push_value(work, v);
                 break;
             }
             case Tag::CompiledMethod: {

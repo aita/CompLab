@@ -18,8 +18,10 @@ enum class Op {
     StoreLocal,    // arg = slot (peeks TOS)
     PushOuter,     // arg = depth, arg2 = slot
     StoreOuter,    // arg = depth, arg2 = slot
-    PushVar,       // name = ivar/global name
-    StoreVar,      // name = ivar/global name (peeks TOS)
+    PushIvar,      // arg = instance-variable slot in the receiver
+    StoreIvar,     // arg = slot (peeks TOS)
+    PushVar,       // name = global name
+    StoreVar,      // name = global name (peeks TOS)
     Pop,
     Dup,
     Send,          // name = selector, arg = argc
@@ -43,8 +45,12 @@ struct Instr {
     // so this partition stays free of the object model; the VM casts them to
     // Class* / Method*. Validity is gated by ic_version vs the VM's method
     // version, so a class/method (re)definition invalidates every site at once.
+    // A 2-way (dimorphic) inline cache: two (class -> method) entries, so a
+    // call site that alternates between two receiver classes doesn't thrash.
     void* ic_class = nullptr;
     void* ic_method = nullptr;
+    void* ic_class2 = nullptr;
+    void* ic_method2 = nullptr;
     std::uint64_t ic_version = 0;
 
     // Interned selector (Symbol*) for Send/SendSuper — the method-dictionary

@@ -81,7 +81,7 @@ public:
             return nullptr;
         }
         Compiler comp(heap_);
-        CompiledMethod* m = comp.compile_method(p.value, std::string(src));
+        CompiledMethod* m = comp.compile_method(p.value, std::string(src), c);
         m->defined_in = c;
         c->methods[heap_.intern_symbol(m->selector)] = Method{nullptr, m};
         vm_.note_override(c, m->selector);
