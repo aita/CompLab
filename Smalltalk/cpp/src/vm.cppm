@@ -131,6 +131,7 @@ public:
         Context* ctx = heap_.new_context();
         ctx->receiver = recv;
         ctx->method = m;
+        ctx->stack.reserve(8);
         ctx->locals.assign(m->local_names.size(), nil());
         for (std::size_t i = 0; i < args.size(); ++i) ctx->locals[i] = args[i];
         return ctx;
@@ -311,36 +312,44 @@ private:
                 case Op::Send:
                 case Op::SendSuper: {
                     int argc = ins.arg;
+
+                    // inline fast path: SmallInteger arithmetic/compare, keyed
+                    // by a precomputed special-selector id. Operands are read in
+                    // place (no args vector, no allocation) and the result
+                    // replaces them on the stack.
+                    if (ins.op == Op::Send && optimize_arithmetic_ && ins.arg2 != 0 &&
+                        argc == 1) {
+                        Value& rv = *(stk->end() - 2);
+                        Value& av = stk->back();
+                        if (is_int(rv) && is_int(av)) {
+                            std::int64_t x = as_int(rv), y = as_int(av);
+                            if (ins.arg2 >= 4) {  // comparisons
+                                bool res = ins.arg2 == 4   ? x < y
+                                           : ins.arg2 == 5 ? x > y
+                                           : ins.arg2 == 6 ? x <= y
+                                           : ins.arg2 == 7 ? x >= y
+                                                           : x == y;
+                                stk->pop_back();
+                                stk->back() = Value{res};
+                                break;
+                            }
+                            std::int64_t r = 0;
+                            bool ov = ins.arg2 == 3 ? __builtin_mul_overflow(x, y, &r)
+                                      : (r = ins.arg2 == 1 ? x + y : x - y, false);
+                            if (ov || !fits_smallint(r)) {
+                                fail("SmallInteger overflow");
+                                return nil();
+                            }
+                            stk->pop_back();
+                            stk->back() = Value{r};
+                            break;
+                        }
+                    }
+
                     std::vector<Value> args(stk->end() - argc, stk->end());
                     stk->erase(stk->end() - argc, stk->end());
                     Value receiver = stk->back();
                     stk->pop_back();
-
-                    // inline fast path: SmallInteger arithmetic/compare, keyed
-                    // by a precomputed special-selector id (no string compares)
-                    if (ins.op == Op::Send && optimize_arithmetic_ && ins.arg2 != 0 &&
-                        argc == 1 && is_int(receiver) && is_int(args[0])) {
-                        std::int64_t x = as_int(receiver);
-                        std::int64_t y = as_int(args[0]);
-                        if (ins.arg2 >= 4) {  // comparisons
-                            bool res = ins.arg2 == 4   ? x < y
-                                       : ins.arg2 == 5 ? x > y
-                                       : ins.arg2 == 6 ? x <= y
-                                       : ins.arg2 == 7 ? x >= y
-                                                       : x == y;
-                            stk->push_back(Value{res});
-                            break;
-                        }
-                        std::int64_t r = 0;
-                        bool ov = ins.arg2 == 3 ? __builtin_mul_overflow(x, y, &r)
-                                  : (r = ins.arg2 == 1 ? x + y : x - y, false);
-                        if (ov || !fits_smallint(r)) {
-                            fail("SmallInteger overflow");
-                            return nil();
-                        }
-                        stk->push_back(Value{r});
-                        break;
-                    }
 
                     if (ins.op == Op::Send) {
                         if (Block* blk = as<Block>(receiver)) {
