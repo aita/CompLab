@@ -38,3 +38,28 @@ def test_non_literal_block_falls_back_to_send():
 def test_block_literal_becomes_push_block():
     o = ops("[:x | x + 1]")
     assert Op.PUSH_BLOCK in o
+
+
+def test_temps_compile_to_local_slots():
+    # `| a b | a := 1. b := 2. a + b`  → all locals addressed by slot
+    o = ops("| a b | a := 1. b := 2. a + b")
+    assert Op.STORE_LOCAL in o
+    assert Op.PUSH_LOCAL in o
+    assert Op.PUSH_VAR not in o and Op.STORE_VAR not in o
+
+
+def test_globals_stay_name_based():
+    # `Transcript` is not a local → name-based PUSH_VAR
+    o = ops("Transcript")
+    assert Op.PUSH_VAR in o
+    assert Op.PUSH_LOCAL not in o
+
+
+def test_closure_uses_push_outer():
+    from st.bytecode import CompiledBlock
+
+    cm = compile_doit(parse_sequence("| n | n := 1. [:x | x + n]"))
+    inner = next(lit for lit in cm.literals if isinstance(lit, CompiledBlock))
+    inner_ops = [ins.op for ins in inner.code]
+    assert Op.PUSH_LOCAL in inner_ops  # x (this block's arg)
+    assert Op.PUSH_OUTER in inner_ops  # n (enclosing doit's temp)

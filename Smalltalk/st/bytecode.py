@@ -23,7 +23,11 @@ class Op(IntEnum):
     PUSH_TRUE = auto()
     PUSH_FALSE = auto()
     PUSH_CONTEXT = auto()  # push the current activation (thisContext)
-    PUSH_VAR = auto()  # arg: variable name (str)
+    PUSH_LOCAL = auto()  # arg: slot index in this activation's locals
+    STORE_LOCAL = auto()  # arg: slot index; peeks TOS (assignment is an expr)
+    PUSH_OUTER = auto()  # arg: (depth, index) into an enclosing activation
+    STORE_OUTER = auto()  # arg: (depth, index); peeks TOS
+    PUSH_VAR = auto()  # arg: variable name (str) — instance var / global
     STORE_VAR = auto()  # arg: variable name; peeks TOS (assignment is an expr)
     POP = auto()
     DUP = auto()

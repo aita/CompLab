@@ -202,13 +202,14 @@ class STObject:
 class STBlock:
     """A block closure ``[:a | ... ]``.
 
-    Captures the defining lexical environment and the home method context so
-    that a non-local return ``^`` inside the block returns from the home
-    method."""
+    Captures the enclosing activation (``outer``) so that references to the
+    block's free variables reach the right slots, and the home method context
+    so that a non-local return ``^`` returns from the home method.
+    """
 
-    node: Any  # ast.BlockNode
-    home_env: Any  # interpreter.Environment
-    home_context: Any  # interpreter.MethodContext | None
+    node: Any  # bytecode.CompiledBlock
+    outer: Any  # vm.Frame — the activation that created the block
+    home_context: Any  # vm.Frame (MethodContext) | None
 
     @property
     def num_args(self) -> int:

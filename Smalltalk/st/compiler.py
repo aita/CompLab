@@ -5,6 +5,12 @@ Two entry points mirror the parser:
   compile_method(MethodNode, source)   -> CompiledMethod
   compile_doit(SequenceNode, source)   -> CompiledMethod   (a 0-arg "DoIt")
 
+Variable references are resolved at compile time (lexical addressing): a name
+that names an argument/temp of the current activation compiles to a slot index
+(``PUSH_LOCAL``), one in an enclosing block/method to a ``(depth, index)`` pair
+(``PUSH_OUTER``), and anything else — instance variables and globals — stays
+name-based (``PUSH_VAR``) and is resolved at run time.
+
 The control-flow selectors below are compiled inline into conditional jumps
 when *all* of their block arguments are written as literal zero-argument
 blocks. Otherwise the send is compiled normally and the blocks become real
@@ -21,15 +27,48 @@ class CompileError(Exception):
     pass
 
 
+class Scope:
+    """The lexical scope of one activation (a method, or a non-inlined block).
+
+    Slots are assigned in declaration order: arguments first, then temporaries,
+    then any temporaries hoisted from inlined blocks. Inlined blocks do *not*
+    create a scope — their temps are declared into the enclosing scope — so the
+    compiler's scope nesting matches the run-time frame chain exactly.
+    """
+
+    def __init__(self, parent: "Scope | None"):
+        self.parent = parent
+        self.names: list[str] = []
+        self.index: dict[str, int] = {}
+
+    def declare(self, name: str) -> int:
+        slot = self.index.get(name)
+        if slot is None:
+            slot = len(self.names)
+            self.index[name] = slot
+            self.names.append(name)
+        return slot
+
+    def resolve(self, name: str) -> tuple[int, int] | None:
+        """Return ``(depth, index)`` for a local of this or an enclosing scope,
+        or ``None`` if it is not a local (instance variable / global)."""
+        scope: Scope | None = self
+        depth = 0
+        while scope is not None:
+            slot = scope.index.get(name)
+            if slot is not None:
+                return depth, slot
+            scope = scope.parent
+            depth += 1
+        return None
+
+
 class _CodeGen:
     """Accumulates instructions and a literal pool for one method/block."""
 
     def __init__(self) -> None:
         self.code: list[Instr] = []
         self.literals: list[object] = []
-        # temps discovered in inlined blocks get hoisted into the enclosing
-        # method frame; collected here and merged into local_names.
-        self.hoisted: list[str] = []
 
     def emit(self, op: Op, arg: object = None) -> int:
         self.code.append(Instr(op, arg))
@@ -60,22 +99,27 @@ _LOOP = {"whileTrue:", "whileFalse:", "whileTrue", "whileFalse", "repeat"}
 
 
 class Compiler:
-    def __init__(self) -> None:
+    def __init__(self, scope: Scope | None = None) -> None:
         self.g = _CodeGen()
+        self.scope: Scope = scope if scope is not None else Scope(None)
 
     # --- public API ---
 
     def compile_method(self, node: ast.MethodNode, source: str = "") -> CompiledMethod:
         self.g = _CodeGen()
+        self.scope = Scope(None)
+        for name in node.params:
+            self.scope.declare(name)
+        for name in node.body.temps:
+            self.scope.declare(name)
         self._sequence_value(node.body, is_method_body=True)
         # implicit ^self
         self.g.emit(Op.PUSH_SELF)
         self.g.emit(Op.RETURN)
-        locals_ = list(node.params) + list(node.body.temps) + self.g.hoisted
         return CompiledMethod(
             selector=node.selector,
             params=list(node.params),
-            local_names=_dedup(locals_),
+            local_names=list(self.scope.names),
             code=self.g.code,
             literals=self.g.literals,
             source=source,
@@ -83,17 +127,19 @@ class Compiler:
 
     def compile_doit(self, seq: ast.SequenceNode, source: str = "") -> CompiledMethod:
         self.g = _CodeGen()
+        self.scope = Scope(None)
+        for name in seq.temps:
+            self.scope.declare(name)
         self._sequence_value(seq, is_method_body=True)
         # A DoIt yields the value of its last statement (already on the stack);
         # if there were no statements, yield nil.
         if not seq.statements:
             self.g.emit(Op.PUSH_NIL)
         self.g.emit(Op.RETURN)
-        locals_ = list(seq.temps) + self.g.hoisted
         return CompiledMethod(
             selector="DoIt",
             params=[],
-            local_names=_dedup(locals_),
+            local_names=list(self.scope.names),
             code=self.g.code,
             literals=self.g.literals,
             source=source,
@@ -133,10 +179,10 @@ class Compiler:
             case ast.LiteralNode(value=value):
                 self._literal(value)
             case ast.VariableNode(name=name):
-                self._variable(name)
+                self._load(name)
             case ast.AssignmentNode(name=name, value=value):
                 self._expr(value)
-                self.g.emit(Op.STORE_VAR, name)
+                self._store(name)
             case ast.MessageNode():
                 self._message(node)
             case ast.CascadeNode():
@@ -162,14 +208,29 @@ class Compiler:
             case _:
                 self.g.emit(Op.PUSH_LITERAL, self.g.literal(value))
 
-    def _variable(self, name: str) -> None:
+    def _load(self, name: str) -> None:
         match name:
             case "self" | "super":
                 self.g.emit(Op.PUSH_SELF)
             case "thisContext":
                 self.g.emit(Op.PUSH_CONTEXT)
             case _:
-                self.g.emit(Op.PUSH_VAR, name)
+                loc = self.scope.resolve(name)
+                if loc is None:
+                    self.g.emit(Op.PUSH_VAR, name)  # instance var / global
+                elif loc[0] == 0:
+                    self.g.emit(Op.PUSH_LOCAL, loc[1])
+                else:
+                    self.g.emit(Op.PUSH_OUTER, loc)
+
+    def _store(self, name: str) -> None:
+        loc = self.scope.resolve(name)
+        if loc is None:
+            self.g.emit(Op.STORE_VAR, name)  # instance var / global
+        elif loc[0] == 0:
+            self.g.emit(Op.STORE_LOCAL, loc[1])
+        else:
+            self.g.emit(Op.STORE_OUTER, loc)
 
     def _cascade(self, node: ast.CascadeNode) -> None:
         self._expr(node.receiver)
@@ -226,8 +287,9 @@ class Compiler:
         return None
 
     def _inline_block_body(self, block: ast.BlockNode) -> None:
-        # temps declared in an inlined block are hoisted into the method frame
-        self.g.hoisted.extend(block.temps)
+        # temps declared in an inlined block share the enclosing activation
+        for name in block.temps:
+            self.scope.declare(name)
         self._sequence_value(block.body, is_method_body=False)
 
     def _inline_cond(self, node: ast.MessageNode) -> bool:
@@ -238,30 +300,27 @@ class Compiler:
         g = self.g
         # Normalise to (true_block, false_block or None)
         if sel == "ifTrue:":
-            true_b, false_b, negate = blocks[0], None, False
+            true_b, false_b = blocks[0], None
         elif sel == "ifFalse:":
-            true_b, false_b, negate = None, blocks[0], False
+            true_b, false_b = None, blocks[0]
         elif sel == "ifTrue:ifFalse:":
-            true_b, false_b, negate = blocks[0], blocks[1], False
+            true_b, false_b = blocks[0], blocks[1]
         else:  # ifFalse:ifTrue:
-            true_b, false_b, negate = blocks[1], blocks[0], False
+            true_b, false_b = blocks[1], blocks[0]
 
         self._expr(node.receiver)
         j_false = g.emit(Op.JUMP_FALSE, None)
-        # true branch
         if true_b is not None:
             self._inline_block_body(true_b)
         else:
             g.emit(Op.PUSH_NIL)
         j_end = g.emit(Op.JUMP, None)
         g.code[j_false].arg = g.here()
-        # false branch
         if false_b is not None:
             self._inline_block_body(false_b)
         else:
             g.emit(Op.PUSH_NIL)
         g.code[j_end].arg = g.here()
-        _ = negate
         return True
 
     def _inline_logic(self, node: ast.MessageNode) -> bool:
@@ -333,27 +392,20 @@ class Compiler:
     # --- non-inlined blocks become closures ---
 
     def _block_literal(self, node: ast.BlockNode) -> None:
-        sub = Compiler()
-        sub.g = _CodeGen()
+        sub = Compiler(scope=Scope(self.scope))
+        for name in node.params:
+            sub.scope.declare(name)
+        for name in node.temps:
+            sub.scope.declare(name)
         sub._sequence_value(node.body, is_method_body=False)
         sub.g.emit(Op.BLOCK_RETURN)
         block = CompiledBlock(
             params=list(node.params),
-            local_names=_dedup(list(node.params) + list(node.temps) + sub.g.hoisted),
+            local_names=list(sub.scope.names),
             code=sub.g.code,
             literals=sub.g.literals,
         )
         self.g.emit(Op.PUSH_BLOCK, self.g.literal(block))
-
-
-def _dedup(names: list[str]) -> list[str]:
-    seen: set[str] = set()
-    out: list[str] = []
-    for n in names:
-        if n not in seen:
-            seen.add(n)
-            out.append(n)
-    return out
 
 
 def compile_method(node: ast.MethodNode, source: str = "") -> CompiledMethod:

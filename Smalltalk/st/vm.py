@@ -50,37 +50,22 @@ class NonLocalReturn(Exception):
         self.value = value
 
 
-class Environment:
-    """A lexical scope: a name→value map with a link to the enclosing scope."""
-
-    __slots__ = ("vars", "parent")
-
-    def __init__(self, parent: "Environment | None" = None):
-        self.vars: dict[str, Any] = {}
-        self.parent = parent
-
-    def find(self, name: str) -> "Environment | None":
-        env: Environment | None = self
-        while env is not None:
-            if name in env.vars:
-                return env
-            env = env.parent
-        return None
-
-
 class Frame:
     """A single method or block activation.
 
-    Frames are reified: they are the Smalltalk ``MethodContext`` /
-    ``BlockContext`` objects. ``sender`` links each activation to the one that
-    invoked it, so the VM's ``active_context`` chain *is* the call stack and is
-    walkable from Smalltalk via ``thisContext``.
+    Locals (arguments + temporaries) live in a flat ``locals`` list addressed
+    by slot index; ``outer`` links to the lexically enclosing activation so a
+    block can reach its captured variables. Frames are reified: they are the
+    Smalltalk ``MethodContext`` / ``BlockContext`` objects, and ``sender``
+    links each activation to its caller, so the VM's ``active_context`` chain
+    *is* the call stack (walkable from Smalltalk via ``thisContext``).
     """
 
     __slots__ = (
         "receiver",
         "method",
-        "env",
+        "locals",
+        "outer",
         "stack",
         "ip",
         "is_block",
@@ -93,8 +78,9 @@ class Frame:
         self,
         receiver: Any,
         method: CompiledMethod | CompiledBlock,
-        env: Environment,
+        locals_: list[Any],
         *,
+        outer: "Frame | None",
         is_block: bool,
         home: "Frame | None",
         sender: "Frame | None" = None,
@@ -102,7 +88,8 @@ class Frame:
     ):
         self.receiver = receiver
         self.method = method
-        self.env = env
+        self.locals = locals_
+        self.outer = outer
         self.stack: list[Any] = []
         self.ip = 0
         self.is_block = is_block
@@ -253,14 +240,13 @@ class VM:
                 f"#{method.selector} expects {method.num_args} args, "
                 f"got {len(args)}"
             )
-        env = Environment()
-        env.vars = dict.fromkeys(method.local_names, nil)
-        if method.params:
-            env.vars.update(zip(method.params, args))
+        locals_ = [nil] * len(method.local_names)
+        locals_[: len(args)] = args  # arguments occupy the first slots
         return Frame(
             receiver,
             method,
-            env,
+            locals_,
+            outer=None,
             is_block=False,
             home=None,
             sender=self.active_context,
@@ -273,16 +259,15 @@ class VM:
             raise STError(
                 f"block expects {tmpl.num_args} args, got {len(args)}"
             )
-        env = Environment(block.home_env)
-        env.vars = dict.fromkeys(tmpl.local_names, nil)
-        if tmpl.params:
-            env.vars.update(zip(tmpl.params, args))
+        locals_ = [nil] * len(tmpl.local_names)
+        locals_[: len(args)] = args  # block arguments occupy the first slots
         home: Frame | None = block.home_context
         receiver = home.receiver if home is not None else nil
         return Frame(
             receiver,
             tmpl,
-            env,
+            locals_,
+            outer=block.outer,
             is_block=True,
             home=home,
             sender=self.active_context,
@@ -338,26 +323,19 @@ class VM:
             ctx = ctx.sender
         return False
 
-    # --- variable access ---
+    # --- instance-variable / global access (locals are addressed by slot) ---
 
     def _read_var(self, frame: Frame, name: str) -> Any:
-        env = frame.env.find(name)
-        if env is not None:
-            return env.vars[name]
         recv = frame.receiver
-        if isinstance(recv, STObject) and name in recv.st_class.all_instance_variables():
+        if type(recv) is STObject and name in recv.st_class.all_instance_variables():
             return recv.ivars.get(name, nil)
         if name in self.globals:
             return self.globals[name]
         raise STError(f"undeclared variable {name!r}")
 
     def _write_var(self, frame: Frame, name: str, value: Any) -> None:
-        env = frame.env.find(name)
-        if env is not None:
-            env.vars[name] = value
-            return
         recv = frame.receiver
-        if isinstance(recv, STObject) and name in recv.st_class.all_instance_variables():
+        if type(recv) is STObject and name in recv.st_class.all_instance_variables():
             recv.ivars[name] = value
             return
         # auto-declare into the global/workspace namespace
@@ -383,27 +361,10 @@ class VM:
             ins = code[ctx.ip]
             ctx.ip += 1
 
+            # Cases are ordered hottest-first: `match` on an enum value compiles
+            # to sequential comparisons in CPython, so the common opcodes (send,
+            # local access, return, literal push, branch) are checked first.
             match ins.op:
-                case Op.PUSH_LITERAL:
-                    stack.append(literals[ins.arg])
-                case Op.PUSH_SELF:
-                    stack.append(ctx.receiver)
-                case Op.PUSH_CONTEXT:
-                    stack.append(ctx)
-                case Op.PUSH_NIL:
-                    stack.append(nil)
-                case Op.PUSH_TRUE:
-                    stack.append(True)
-                case Op.PUSH_FALSE:
-                    stack.append(False)
-                case Op.PUSH_VAR:
-                    stack.append(self._read_var(ctx, ins.arg))
-                case Op.STORE_VAR:
-                    self._write_var(ctx, ins.arg, stack[-1])
-                case Op.POP:
-                    stack.pop()
-                case Op.DUP:
-                    stack.append(stack[-1])
                 case Op.SEND | Op.SEND_SUPER:
                     selector, argc = ins.arg
                     n = len(stack) - argc
@@ -440,33 +401,8 @@ class VM:
                         code = ctx.method.code
                         literals = ctx.method.literals
                         stack = ctx.stack
-                case Op.PUSH_BLOCK:
-                    tmpl = literals[ins.arg]
-                    home = ctx if not ctx.is_block else ctx.home
-                    stack.append(STBlock(tmpl, ctx.env, home))
-                case Op.MAKE_ARRAY:
-                    n = len(stack) - ins.arg
-                    items = stack[n:]
-                    del stack[n:]
-                    stack.append(list(items))
-                case Op.JUMP:
-                    ctx.ip = ins.arg
-                case Op.JUMP_TRUE:
-                    match stack.pop():
-                        case True:
-                            ctx.ip = ins.arg
-                        case False:
-                            pass
-                        case _:
-                            raise STError("condition must be a Boolean")
-                case Op.JUMP_FALSE:
-                    match stack.pop():
-                        case False:
-                            ctx.ip = ins.arg
-                        case True:
-                            pass
-                        case _:
-                            raise STError("condition must be a Boolean")
+                case Op.PUSH_LOCAL:
+                    stack.append(ctx.locals[ins.arg])
                 case Op.RETURN | Op.BLOCK_RETURN:
                     value = stack.pop()
                     if ins.op is Op.RETURN and ctx.is_block:
@@ -483,5 +419,66 @@ class VM:
                     code = ctx.method.code
                     literals = ctx.method.literals
                     stack = ctx.stack
+                case Op.PUSH_LITERAL:
+                    stack.append(literals[ins.arg])
+                case Op.STORE_LOCAL:
+                    ctx.locals[ins.arg] = stack[-1]
+                case Op.JUMP_FALSE:
+                    match stack.pop():
+                        case False:
+                            ctx.ip = ins.arg
+                        case True:
+                            pass
+                        case _:
+                            raise STError("condition must be a Boolean")
+                case Op.POP:
+                    stack.pop()
+                case Op.JUMP:
+                    ctx.ip = ins.arg
+                case Op.PUSH_SELF:
+                    stack.append(ctx.receiver)
+                case Op.DUP:
+                    stack.append(stack[-1])
+                case Op.PUSH_BLOCK:
+                    tmpl = literals[ins.arg]
+                    home = ctx if not ctx.is_block else ctx.home
+                    stack.append(STBlock(tmpl, ctx, home))
+                case Op.PUSH_OUTER:
+                    depth, index = ins.arg
+                    f = ctx.outer
+                    for _ in range(depth - 1):
+                        f = f.outer
+                    stack.append(f.locals[index])
+                case Op.STORE_OUTER:
+                    depth, index = ins.arg
+                    f = ctx.outer
+                    for _ in range(depth - 1):
+                        f = f.outer
+                    f.locals[index] = stack[-1]
+                case Op.PUSH_NIL:
+                    stack.append(nil)
+                case Op.PUSH_TRUE:
+                    stack.append(True)
+                case Op.PUSH_FALSE:
+                    stack.append(False)
+                case Op.PUSH_CONTEXT:
+                    stack.append(ctx)
+                case Op.PUSH_VAR:
+                    stack.append(self._read_var(ctx, ins.arg))
+                case Op.STORE_VAR:
+                    self._write_var(ctx, ins.arg, stack[-1])
+                case Op.MAKE_ARRAY:
+                    n = len(stack) - ins.arg
+                    items = stack[n:]
+                    del stack[n:]
+                    stack.append(list(items))
+                case Op.JUMP_TRUE:
+                    match stack.pop():
+                        case True:
+                            ctx.ip = ins.arg
+                        case False:
+                            pass
+                        case _:
+                            raise STError("condition must be a Boolean")
                 case _:  # pragma: no cover
                     raise STError(f"unknown opcode {ins.op!r}")
