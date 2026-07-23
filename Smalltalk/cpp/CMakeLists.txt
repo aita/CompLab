@@ -51,6 +51,9 @@ target_sources(st
 add_executable(smalltalk src/main.cpp)
 target_link_libraries(smalltalk PRIVATE st)
 
+add_executable(st_bench bench/bench.cpp)
+target_link_libraries(st_bench PRIVATE st)
+
 enable_testing()
 add_executable(st_tests tests/test_lexer.cpp)
 target_link_libraries(st_tests PRIVATE st)
