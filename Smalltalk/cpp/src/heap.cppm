@@ -9,6 +9,7 @@ module;
 #include <cstddef>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -56,11 +57,10 @@ public:
     Context* new_context() { return make<Context>(); }
 
     Symbol* intern_symbol(const std::string& s) {
-        for (Symbol* sym : symbols_) {
-            if (sym->data == s) return sym;
-        }
-        auto* obj = make<Symbol>(s);
-        symbols_.push_back(obj);
+        auto it = interned_.find(s);
+        if (it != interned_.end()) return it->second;
+        Symbol* obj = make<Symbol>(s);
+        interned_.emplace(s, obj);
         return obj;
     }
 
@@ -70,7 +70,7 @@ public:
     void collect(std::span<const Value> roots) {
         std::vector<Object*> work;
         for (const Value& v : roots) push(work, as_obj(v));
-        for (Symbol* sym : symbols_) push(work, sym);
+        for (auto& [text, sym] : interned_) push(work, sym);
 
         while (!work.empty()) {
             Object* o = work.back();
@@ -99,7 +99,7 @@ private:
     Object* head_ = nullptr;
     std::size_t count_ = 0;
     std::size_t since_gc_ = 0;
-    std::vector<Symbol*> symbols_;
+    std::unordered_map<std::string, Symbol*> interned_;
 
     static void push(std::vector<Object*>& work, Object* o) {
         if (o != nullptr && !o->marked) {

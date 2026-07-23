@@ -10,6 +10,7 @@
 module;
 #include <cstdint>
 #include <print>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -53,7 +54,6 @@ public:
     // per-call-site inline cache at once (they store the version they were
     // filled at).
     void flush_caches() {
-        for (auto& [name, c] : classes_) c->mcache.clear();
         ++method_version_;
     }
 
@@ -102,7 +102,7 @@ public:
                 return run(ctx);
             }
         }
-        Method* m = lookup(recv, sel, nullptr);
+        Method* m = lookup(recv, heap_.intern_symbol(sel), nullptr);
         if (m == nullptr || !m->present()) {
             dnu(recv, sel);
             return nil();
@@ -123,7 +123,7 @@ public:
     }
 
     Context* make_method_frame(CompiledMethod* m, const Value& recv,
-                               std::vector<Value>& args) {
+                               std::span<Value> args) {
         if (static_cast<int>(args.size()) != m->num_args()) {
             fail("#" + m->selector + " wrong argument count");
             return nullptr;
@@ -137,7 +137,7 @@ public:
         return ctx;
     }
 
-    Context* make_block_frame(Block* b, std::vector<Value>& args) {
+    Context* make_block_frame(Block* b, std::span<Value> args) {
         CompiledBlock* tmpl = b->tmpl;
         if (static_cast<int>(args.size()) != tmpl->num_args()) {
             fail("block wrong argument count");
@@ -174,7 +174,7 @@ private:
         }
     }
 
-    Method* lookup(const Value& recv, const std::string& sel, Class* super_start) {
+    Method* lookup(const Value& recv, Symbol* sel, Class* super_start) {
         if (super_start != nullptr) return super_start->lookup(sel);
         if (Class* cls = as<Class>(recv)) {
             Method* m = cls->lookup_class(sel);
@@ -346,16 +346,19 @@ private:
                         }
                     }
 
-                    std::vector<Value> args(stk->end() - argc, stk->end());
-                    stk->erase(stk->end() - argc, stk->end());
-                    Value receiver = stk->back();
-                    stk->pop_back();
+                    // args are a span over the stack; the receiver sits just
+                    // below them. Nothing is popped until the callee/primitive
+                    // has consumed the span (frames copy it into their locals).
+                    std::size_t sp_base = stk->size() - argc;
+                    std::span<Value> args(stk->data() + sp_base, argc);
+                    Value receiver = (*stk)[sp_base - 1];
 
                     if (ins.op == Op::Send) {
                         if (Block* blk = as<Block>(receiver)) {
                             if (is_value_selector(ins.name, argc)) {
                                 Context* nc = make_block_frame(blk, args);
                                 if (errored_) return nil();
+                                stk->resize(sp_base - 1);
                                 nc->sender = ctx;
                                 load_ctx(nc);
                                 break;
@@ -373,7 +376,7 @@ private:
                             ins.ic_version == method_version_) {
                             m = static_cast<Method*>(ins.ic_method);
                         } else {
-                            m = lookup(receiver, ins.name, nullptr);
+                            m = lookup(receiver, static_cast<Symbol*>(ins.sel), nullptr);
                             ins.ic_class = rc;
                             ins.ic_method = m;
                             ins.ic_version = method_version_;
@@ -385,7 +388,7 @@ private:
                                        ? defining_class(ctx)->superclass
                                        : nullptr)
                                 : nullptr;
-                        m = lookup(receiver, ins.name, super_start);
+                        m = lookup(receiver, static_cast<Symbol*>(ins.sel), super_start);
                     }
                     if (m == nullptr || !m->present()) {
                         dnu(receiver, ins.name);
@@ -394,10 +397,12 @@ private:
                     if (m->is_primitive()) {
                         Value r = m->prim(*this, receiver, args);
                         if (errored_) return nil();
+                        stk->resize(sp_base - 1);
                         stk->push_back(r);
                     } else {
                         Context* nc = make_method_frame(m->compiled, receiver, args);
                         if (errored_) return nil();
+                        stk->resize(sp_base - 1);
                         nc->sender = ctx;
                         load_ctx(nc);
                     }

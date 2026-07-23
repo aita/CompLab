@@ -124,7 +124,8 @@ private:
         return 0;
     }
     void emit_send(const std::string& sel, int argc) {
-        emit(Op::Send, argc, special_sel(sel), sel);
+        int i = emit(Op::Send, argc, special_sel(sel), sel);
+        code_[i].sel = heap_.intern_symbol(sel);
     }
     int here() const { return static_cast<int>(code_.size()); }
     int gentemp() { return scope_->declare("__t" + std::to_string(gensym_++)); }
@@ -276,7 +277,11 @@ private:
             static_cast<VariableExpr*>(node->receiver.get())->name == "super") {
             emit(Op::PushSelf);
             for (auto& a : node->args) expr(a.get());
-            emit(Op::SendSuper, static_cast<int>(node->args.size()), 0, node->selector);
+            {
+                int i = emit(Op::SendSuper, static_cast<int>(node->args.size()), 0,
+                             node->selector);
+                code_[i].sel = heap_.intern_symbol(node->selector);
+            }
             return;
         }
         expr(node->receiver.get());

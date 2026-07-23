@@ -46,6 +46,11 @@ struct Instr {
     void* ic_class = nullptr;
     void* ic_method = nullptr;
     std::uint64_t ic_version = 0;
+
+    // Interned selector (Symbol*) for Send/SendSuper — the method-dictionary
+    // key, precomputed by the compiler. void* to keep this partition free of
+    // the object model.
+    void* sel = nullptr;
 };
 
 }  // namespace st

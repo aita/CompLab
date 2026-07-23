@@ -83,7 +83,7 @@ public:
         Compiler comp(heap_);
         CompiledMethod* m = comp.compile_method(p.value, std::string(src));
         m->defined_in = c;
-        c->methods[m->selector] = Method{nullptr, m};
+        c->methods[heap_.intern_symbol(m->selector)] = Method{nullptr, m};
         vm_.note_override(c, m->selector);
         vm_.flush_caches();
         return m;

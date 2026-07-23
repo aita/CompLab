@@ -73,8 +73,11 @@ last receiver class → method, so a repeated call site skips lookup entirely).
 Both caches are invalidated by a version counter bumped on any (re)definition.
 The opcode `switch` is already a jump table, so no dispatch reordering is needed.
 
-The arithmetic fast path reads its operands in place and writes the result back
-onto the stack — no per-send argument vector is allocated.
+Primitives receive their arguments as a `std::span` over the operand stack, so
+no per-send argument vector is allocated; the arithmetic fast path goes further
+and reads/writes operands in place. Method dictionaries are keyed by interned
+`Symbol` identity (pointer), so a lookup on an inline-cache miss hashes a
+pointer rather than a string.
 
 Build optimized (the default — see below). At `-O3`, a 3 M-iteration arithmetic
 loop runs in ~0.18 s and building + summing a 400 k `OrderedCollection` in

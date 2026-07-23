@@ -9,6 +9,7 @@ module;
 #include <cstdint>
 #include <cstring>
 #include <functional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -195,8 +196,9 @@ struct Dict : Object {
 
 struct CompiledMethod;
 
-// A method is a C++ primitive or a compiled bytecode method.
-using PrimFn = Value (*)(VM&, const Value&, std::vector<Value>&);
+// A method is a C++ primitive or a compiled bytecode method. Arguments are a
+// span over the caller's operand stack — no per-send vector is allocated.
+using PrimFn = Value (*)(VM&, const Value&, std::span<Value>);
 
 struct Method {
     PrimFn prim = nullptr;
@@ -210,30 +212,22 @@ struct Class : Object {
     std::string name;
     Class* superclass = nullptr;
     std::vector<std::string> ivar_names;
-    std::unordered_map<std::string, Method> methods;
-    std::unordered_map<std::string, Method> class_methods;
-    // Resolved-lookup cache (selector -> method, nullptr = cached miss).
-    // Node pointers into `methods` stay valid across inserts; cleared by
-    // VM::flush_caches when any method dictionary or the hierarchy changes.
-    std::unordered_map<std::string, Method*> mcache;
+    // Method dictionaries are keyed by interned Symbol identity (pointer), so
+    // lookup hashes a pointer, not a string. The VM's per-call-site inline
+    // cache sits on top of this for the hot path.
+    std::unordered_map<Symbol*, Method> methods;
+    std::unordered_map<Symbol*, Method> class_methods;
 
     explicit Class(std::string n) : Object(TAG), name(std::move(n)) {}
 
-    Method* lookup(const std::string& sel) {
-        auto hit = mcache.find(sel);
-        if (hit != mcache.end()) return hit->second;
-        Method* found = nullptr;
+    Method* lookup(Symbol* sel) {
         for (Class* c = this; c != nullptr; c = c->superclass) {
             auto it = c->methods.find(sel);
-            if (it != c->methods.end()) {
-                found = &it->second;
-                break;
-            }
+            if (it != c->methods.end()) return &it->second;
         }
-        mcache[sel] = found;
-        return found;
+        return nullptr;
     }
-    Method* lookup_class(const std::string& sel) {
+    Method* lookup_class(Symbol* sel) {
         for (Class* c = this; c != nullptr; c = c->superclass) {
             auto it = c->class_methods.find(sel);
             if (it != c->class_methods.end()) return &it->second;
