@@ -109,6 +109,23 @@ private:
         code_.push_back(Instr{op, arg, arg2, std::move(name)});
         return static_cast<int>(code_.size()) - 1;
     }
+
+    // Precompute a special-selector id so the VM's arithmetic fast path can
+    // switch on an int instead of comparing selector strings each send.
+    static int special_sel(const std::string& s) {
+        if (s == "+") return 1;
+        if (s == "-") return 2;
+        if (s == "*") return 3;
+        if (s == "<") return 4;
+        if (s == ">") return 5;
+        if (s == "<=") return 6;
+        if (s == ">=") return 7;
+        if (s == "=") return 8;
+        return 0;
+    }
+    void emit_send(const std::string& sel, int argc) {
+        emit(Op::Send, argc, special_sel(sel), sel);
+    }
     int here() const { return static_cast<int>(code_.size()); }
     int gentemp() { return scope_->declare("__t" + std::to_string(gensym_++)); }
 
@@ -247,7 +264,7 @@ private:
             CascadeMsg& msg = node->messages[i];
             if (!last) emit(Op::Dup);
             for (auto& a : msg.args) expr(a.get());
-            emit(Op::Send, static_cast<int>(msg.args.size()), 0, msg.selector);
+            emit_send(msg.selector, static_cast<int>(msg.args.size()));
             if (!last) emit(Op::Pop);
         }
     }
@@ -264,7 +281,7 @@ private:
         }
         expr(node->receiver.get());
         for (auto& a : node->args) expr(a.get());
-        emit(Op::Send, static_cast<int>(node->args.size()), 0, node->selector);
+        emit_send(node->selector, static_cast<int>(node->args.size()));
     }
 
     // --- inlined control flow ---
@@ -406,12 +423,12 @@ private:
         int start = here();
         emit(Op::PushLocal, i_slot);
         emit(Op::PushLocal, limit_slot);
-        emit(Op::Send, 1, 0, "<=");
+        emit_send("<=", 1);
         int jexit = emit(Op::JumpFalse);
         inline_effect(body);
         emit(Op::PushLocal, i_slot);
         push_int(1);
-        emit(Op::Send, 1, 0, "+");
+        emit_send("+", 1);
         emit(Op::StoreLocal, i_slot);
         emit(Op::Pop);
         int j = emit(Op::Jump);
@@ -435,12 +452,12 @@ private:
         int start = here();
         emit(Op::PushLocal, i_slot);
         emit(Op::PushLocal, limit_slot);
-        emit(Op::Send, 1, 0, "<");
+        emit_send("<", 1);
         int jexit = emit(Op::JumpFalse);
         inline_effect(body);
         emit(Op::PushLocal, i_slot);
         push_int(1);
-        emit(Op::Send, 1, 0, "+");
+        emit_send("+", 1);
         emit(Op::StoreLocal, i_slot);
         emit(Op::Pop);
         int j = emit(Op::Jump);

@@ -161,6 +161,23 @@ void test_nan_boxing() {
     check(ev(sys, "1000000 * 100000000") == "100000000000000", "in-range * (1e14)");
 }
 
+void test_inline_cache_invalidation() {
+    st::System sys;
+    sys.define_class("A", "Object", {});
+    sys.define_method("A", "foo ^1");
+    // callFoo's compiled code holds an inline cache at the `self foo` send
+    sys.define_method("A", "callFoo ^self foo");
+    check(ev(sys, "A new callFoo") == "1", "inline cache fills");
+    sys.define_method("A", "foo ^2");  // redefinition bumps the method version
+    check(ev(sys, "A new callFoo") == "2", "redefinition invalidates the inline cache");
+    // polymorphic: same call site, different receiver classes
+    sys.define_class("B", "A", {});
+    sys.define_method("B", "foo ^3");
+    check(ev(sys, "| r | r := OrderedCollection new. r add: A new; add: B new. "
+                  "(r collect: [:o | o callFoo]) printString") == "'(2 3 )'",
+          "call site sees both A and B correctly");
+}
+
 void test_string_iteration() {
     st::System sys;
     check(ev(sys, "| n | n := 0. 'hello' do: [:c | n := n + 1]. n") == "5",
@@ -190,6 +207,7 @@ int main() {
     test_dictionary();
     test_arithmetic_fast_path();
     test_nan_boxing();
+    test_inline_cache_invalidation();
     test_string_iteration();
     test_gc_survives_computation();
     if (failures == 0) std::println("all tests passed");

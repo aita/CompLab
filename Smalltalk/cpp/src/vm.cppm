@@ -49,9 +49,12 @@ public:
     }
 
     // Invalidate all method-lookup caches. Call after any change to a method
-    // dictionary or the class hierarchy.
+    // dictionary or the class hierarchy. Bumping the version invalidates every
+    // per-call-site inline cache at once (they store the version they were
+    // filled at).
     void flush_caches() {
         for (auto& [name, c] : classes_) c->mcache.clear();
+        ++method_version_;
     }
 
     // Disable the inline integer fast path if an arithmetic selector is
@@ -157,6 +160,7 @@ private:
     Context* active_context_ = nullptr;
     bool errored_ = false;
     bool optimize_arithmetic_ = true;
+    std::uint64_t method_version_ = 1;  // bumped on any (re)definition
     std::string error_;
 
     static bool is_value_selector(const std::string& s, int argc) {
@@ -248,7 +252,7 @@ private:
 
         while (true) {
             if (heap_.should_collect()) gc();
-            const Instr& ins = (*code)[ctx->ip++];
+            Instr& ins = (*code)[ctx->ip++];  // non-const: inline cache is mutated
             switch (ins.op) {
                 case Op::PushLiteral: stk->push_back((*lits)[ins.arg]); break;
                 case Op::PushSelf: stk->push_back(ctx->receiver); break;
@@ -312,34 +316,30 @@ private:
                     Value receiver = stk->back();
                     stk->pop_back();
 
-                    // inline fast path: SmallInteger binary arithmetic/compare
-                    if (ins.op == Op::Send && optimize_arithmetic_ && argc == 1 &&
-                        is_int(receiver) && is_int(args[0])) {
+                    // inline fast path: SmallInteger arithmetic/compare, keyed
+                    // by a precomputed special-selector id (no string compares)
+                    if (ins.op == Op::Send && optimize_arithmetic_ && ins.arg2 != 0 &&
+                        argc == 1 && is_int(receiver) && is_int(args[0])) {
                         std::int64_t x = as_int(receiver);
                         std::int64_t y = as_int(args[0]);
-                        const std::string& s = ins.name;
-                        bool cmp = true, res = false;
-                        if (s == "<") res = x < y;
-                        else if (s == ">") res = x > y;
-                        else if (s == "<=") res = x <= y;
-                        else if (s == ">=") res = x >= y;
-                        else if (s == "=") res = x == y;
-                        else cmp = false;
-                        if (cmp) { stk->push_back(Value{res}); break; }
-                        std::int64_t r = 0;
-                        bool arith = true, ov = false;
-                        if (s == "+") r = x + y;
-                        else if (s == "-") r = x - y;
-                        else if (s == "*") ov = __builtin_mul_overflow(x, y, &r);
-                        else arith = false;
-                        if (arith) {
-                            if (ov || !fits_smallint(r)) {
-                                fail("SmallInteger overflow");
-                                return nil();
-                            }
-                            stk->push_back(Value{r});
+                        if (ins.arg2 >= 4) {  // comparisons
+                            bool res = ins.arg2 == 4   ? x < y
+                                       : ins.arg2 == 5 ? x > y
+                                       : ins.arg2 == 6 ? x <= y
+                                       : ins.arg2 == 7 ? x >= y
+                                                       : x == y;
+                            stk->push_back(Value{res});
                             break;
                         }
+                        std::int64_t r = 0;
+                        bool ov = ins.arg2 == 3 ? __builtin_mul_overflow(x, y, &r)
+                                  : (r = ins.arg2 == 1 ? x + y : x - y, false);
+                        if (ov || !fits_smallint(r)) {
+                            fail("SmallInteger overflow");
+                            return nil();
+                        }
+                        stk->push_back(Value{r});
+                        break;
                     }
 
                     if (ins.op == Op::Send) {
@@ -353,13 +353,31 @@ private:
                             }
                         }
                     }
-                    Class* super_start =
-                        ins.op == Op::SendSuper
-                            ? (defining_class(ctx) != nullptr
-                                   ? defining_class(ctx)->superclass
-                                   : nullptr)
-                            : nullptr;
-                    Method* m = lookup(receiver, ins.name, super_start);
+
+                    // resolve the method, with a monomorphic inline cache for
+                    // ordinary (non-super, non-class-receiver) sends
+                    Method* m = nullptr;
+                    bool class_recv = is_obj(receiver) && as_obj(receiver)->tag == Tag::Class;
+                    if (ins.op == Op::Send && !class_recv) {
+                        Class* rc = class_of(receiver);
+                        if (ins.ic_class == static_cast<void*>(rc) &&
+                            ins.ic_version == method_version_) {
+                            m = static_cast<Method*>(ins.ic_method);
+                        } else {
+                            m = lookup(receiver, ins.name, nullptr);
+                            ins.ic_class = rc;
+                            ins.ic_method = m;
+                            ins.ic_version = method_version_;
+                        }
+                    } else {
+                        Class* super_start =
+                            ins.op == Op::SendSuper
+                                ? (defining_class(ctx) != nullptr
+                                       ? defining_class(ctx)->superclass
+                                       : nullptr)
+                                : nullptr;
+                        m = lookup(receiver, ins.name, super_start);
+                    }
                     if (m == nullptr || !m->present()) {
                         dnu(receiver, ins.name);
                         return nil();

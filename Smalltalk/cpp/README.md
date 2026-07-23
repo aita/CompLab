@@ -65,10 +65,17 @@ prelude in `system.cppm`) on top of `at:` / `size` / `whileTrue:` / `value:`, so
 block sends and `^` flow through the one non-recursive loop — no primitive
 re-enters the VM, no exceptions.
 
-Performance mirrors the Python port: a per-class method-lookup cache (flushed on
-any method/hierarchy change) and an inline SmallInteger arithmetic fast path in
-the VM loop (auto-disabled if a numeric class overrides an operator). The opcode
-`switch` is already a jump table, so no dispatch reordering is needed.
+Performance: a per-class method-lookup cache; an inline SmallInteger arithmetic
+fast path keyed by a **precomputed special-selector id** (the compiler tags each
+`Send` so the VM switches on an int instead of comparing selector strings);
+and a **monomorphic inline cache** on every `Send` instruction (remembers the
+last receiver class → method, so a repeated call site skips lookup entirely).
+Both caches are invalidated by a version counter bumped on any (re)definition.
+The opcode `switch` is already a jump table, so no dispatch reordering is needed.
+
+Rough effect: a 3 M-iteration arithmetic loop dropped ~4.2 s → ~3.2 s with the
+selector ids; the inline cache speeds up method-send-heavy code (collection
+iteration, user-method calls).
 
 Not yet ported from the Python side: metaclasses and the IDE.
 

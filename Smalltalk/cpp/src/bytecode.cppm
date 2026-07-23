@@ -36,8 +36,16 @@ enum class Op {
 struct Instr {
     Op op;
     int arg = 0;
-    int arg2 = 0;
+    int arg2 = 0;      // Send: special-selector id (0 = none); *Outer: slot
     std::string name;  // selector for Send*, variable name for *Var
+
+    // Monomorphic inline cache, filled by the VM at run time. Kept as void*
+    // so this partition stays free of the object model; the VM casts them to
+    // Class* / Method*. Validity is gated by ic_version vs the VM's method
+    // version, so a class/method (re)definition invalidates every site at once.
+    void* ic_class = nullptr;
+    void* ic_method = nullptr;
+    std::uint64_t ic_version = 0;
 };
 
 }  // namespace st
