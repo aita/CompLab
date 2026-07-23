@@ -91,33 +91,37 @@ class VM:
 
     def class_of(self, value: Any) -> STClass:
         c = self.classes
-        if value is nil:
-            return c["UndefinedObject"]
-        if value is True:
-            return c["True"]
-        if value is False:
-            return c["False"]
-        if isinstance(value, STSymbol):
-            return c["Symbol"]
-        if isinstance(value, str):
-            return c["String"]
-        if isinstance(value, STChar):
-            return c["Character"]
-        if isinstance(value, bool):  # unreachable (handled above), kept explicit
-            return c["Boolean"]
-        if isinstance(value, int):
-            return c["SmallInteger"]
-        if isinstance(value, float):
-            return c["Float"]
-        if isinstance(value, list):
-            return c["Array"]
-        if isinstance(value, STBlock):
-            return c["BlockClosure"]
-        if isinstance(value, STClass):
-            return c["Class"]
-        if isinstance(value, STObject):
-            return value.st_class
-        raise STError(f"no Smalltalk class for host value {value!r}")
+        match value:
+            case _ if value is nil:
+                return c["UndefinedObject"]
+            case True:
+                return c["True"]
+            case False:
+                return c["False"]
+            case STSymbol():  # before str: STSymbol is a str subclass
+                return c["Symbol"]
+            case str():
+                return c["String"]
+            case STChar():
+                return c["Character"]
+            case bool():  # unreachable (True/False handled above), kept explicit
+                return c["Boolean"]
+            case int():  # after bool: bool is an int subclass
+                return c["SmallInteger"]
+            case float():
+                return c["Float"]
+            case list():
+                return c["Array"]
+            case STBlock():
+                return c["BlockClosure"]
+            case STClass():
+                return c["Class"]
+            case STObject():
+                return value.st_class
+            case _:
+                raise STError(
+                    f"no Smalltalk class for host value {value!r}"
+                )
 
     # --- message send ---
 
