@@ -7,10 +7,10 @@
 // no shared_ptr, no reference counting.
 module;
 #include <cstdint>
+#include <cstring>
 #include <functional>
 #include <string>
 #include <unordered_map>
-#include <variant>
 #include <vector>
 
 export module st:objects;
@@ -23,26 +23,84 @@ class VM;  // forward: primitives take a VM&
 
 struct Object;
 
-struct Nil {
-    bool operator==(const Nil&) const = default;
+// A Smalltalk value, NaN-boxed into 8 bytes. A real double is stored directly;
+// everything else is encoded in the payload of a quiet NaN. We require *two*
+// high mantissa bits (bits 50-51) set to mark a boxed value, so ordinary
+// hardware NaNs / infinities (only bit 51) still read back as doubles.
+//
+//   double   : (bits & QNAN) != QNAN
+//   object   : sign + QNAN, payload = 48-bit pointer
+//   int      : QNAN + INT_TAG, payload = 49-bit signed (SmallInteger range)
+//   nil/bool : QNAN + a small constant
+//
+// SmallInteger is therefore ~48-bit; arithmetic that would exceed it raises a
+// Smalltalk error rather than silently wrapping.
+inline constexpr std::uint64_t kQNaN = 0x7ffc000000000000ULL;
+inline constexpr std::uint64_t kSign = 0x8000000000000000ULL;
+inline constexpr std::uint64_t kIntTag = 0x0002000000000000ULL;      // bit 49
+inline constexpr std::uint64_t kIntPayload = 0x0001ffffffffffffULL;  // bits 0-48
+inline constexpr std::uint64_t kPtrMask = 0x0000ffffffffffffULL;     // bits 0-47
+inline constexpr std::uint64_t kNilBits = kQNaN | 1;
+inline constexpr std::uint64_t kFalseBits = kQNaN | 2;
+inline constexpr std::uint64_t kTrueBits = kQNaN | 3;
+
+inline constexpr std::int64_t kSmallIntMax = (1LL << 48) - 1;
+inline constexpr std::int64_t kSmallIntMin = -(1LL << 48);
+inline constexpr bool fits_smallint(std::int64_t v) {
+    return v >= kSmallIntMin && v <= kSmallIntMax;
+}
+
+class Value {
+public:
+    constexpr Value() : bits_(kNilBits) {}
+    Value(bool b) : bits_(b ? kTrueBits : kFalseBits) {}
+    Value(std::int64_t v)
+        : bits_(kQNaN | kIntTag | (static_cast<std::uint64_t>(v) & kIntPayload)) {}
+    Value(double d) { std::memcpy(&bits_, &d, sizeof(bits_)); }
+    Value(Object* o)
+        : bits_(kSign | kQNaN | (reinterpret_cast<std::uint64_t>(o) & kPtrMask)) {}
+
+    static constexpr Value from_bits(std::uint64_t b) { return Value(b, Raw{}); }
+    std::uint64_t bits() const { return bits_; }
+    bool operator==(const Value& o) const { return bits_ == o.bits_; }
+
+private:
+    struct Raw {};
+    constexpr Value(std::uint64_t b, Raw) : bits_(b) {}
+    std::uint64_t bits_;
 };
 
-// A Smalltalk value.
-using Value = std::variant<Nil, bool, std::int64_t, double, Object*>;
-
-constexpr Value nil() { return Nil{}; }
+constexpr Value nil() { return Value::from_bits(kNilBits); }
 inline Value ref(Object* o) { return Value{o}; }
 
 // --- immediate accessors ---
-inline bool is_obj(const Value& v) { return std::holds_alternative<Object*>(v); }
-inline Object* as_obj(const Value& v) {
-    auto* p = std::get_if<Object*>(&v);
-    return p ? *p : nullptr;
+inline bool is_double(const Value& v) { return (v.bits() & kQNaN) != kQNaN; }
+inline bool is_obj(const Value& v) {
+    return (v.bits() & (kSign | kQNaN)) == (kSign | kQNaN);
 }
-inline bool is_int(const Value& v) { return std::holds_alternative<std::int64_t>(v); }
-inline bool is_float(const Value& v) { return std::holds_alternative<double>(v); }
-inline bool is_bool(const Value& v) { return std::holds_alternative<bool>(v); }
-inline bool is_nil(const Value& v) { return std::holds_alternative<Nil>(v); }
+inline Object* as_obj(const Value& v) {
+    return is_obj(v) ? reinterpret_cast<Object*>(v.bits() & kPtrMask) : nullptr;
+}
+inline bool is_int(const Value& v) {
+    return (v.bits() & (kSign | kQNaN | kIntTag)) == (kQNaN | kIntTag);
+}
+inline bool is_float(const Value& v) { return is_double(v); }
+inline bool is_bool(const Value& v) {
+    return v.bits() == kTrueBits || v.bits() == kFalseBits;
+}
+inline bool is_nil(const Value& v) { return v.bits() == kNilBits; }
+
+inline bool as_bool(const Value& v) { return v.bits() == kTrueBits; }
+inline std::int64_t as_int(const Value& v) {
+    std::uint64_t p = v.bits() & kIntPayload;  // 49-bit, sign at bit 48
+    return static_cast<std::int64_t>(p << 15) >> 15;
+}
+inline double as_double(const Value& v) {
+    double d;
+    std::uint64_t b = v.bits();
+    std::memcpy(&d, &b, sizeof(d));
+    return d;
+}
 
 enum class Tag {
     String,
@@ -104,23 +162,19 @@ struct Array : Object {
 // identity. Keys of different immediate kinds never compare equal.
 struct ValueHash {
     std::size_t operator()(const Value& v) const {
-        if (is_nil(v)) return 0;
-        if (auto* b = std::get_if<bool>(&v)) return *b ? 1 : 2;
-        if (auto* i = std::get_if<std::int64_t>(&v)) return std::hash<std::int64_t>{}(*i);
-        if (auto* d = std::get_if<double>(&v)) return std::hash<double>{}(*d);
-        Object* o = std::get<Object*>(v);
-        if (o->tag == Tag::String) return std::hash<std::string>{}(static_cast<String*>(o)->data);
-        if (o->tag == Tag::Symbol) return std::hash<std::string>{}(static_cast<Symbol*>(o)->data);
-        if (o->tag == Tag::Character) return std::hash<char>{}(static_cast<Character*>(o)->value);
-        return std::hash<void*>{}(o);
+        if (Object* o = as_obj(v)) {
+            if (o->tag == Tag::String) return std::hash<std::string>{}(static_cast<String*>(o)->data);
+            if (o->tag == Tag::Character) return std::hash<char>{}(static_cast<Character*>(o)->value);
+            return std::hash<std::uint64_t>{}(v.bits());  // symbol/other: identity
+        }
+        return std::hash<std::uint64_t>{}(v.bits());  // nil/bool/int/double
     }
 };
 struct ValueEq {
     bool operator()(const Value& a, const Value& b) const {
-        if (a.index() != b.index()) return false;
-        if (auto* pa = std::get_if<Object*>(&a)) {
-            Object* oa = *pa;
-            Object* ob = std::get<Object*>(b);
+        Object* oa = as_obj(a);
+        Object* ob = as_obj(b);
+        if (oa != nullptr && ob != nullptr) {
             if (oa->tag != ob->tag) return false;
             if (oa->tag == Tag::String)
                 return static_cast<String*>(oa)->data == static_cast<String*>(ob)->data;
@@ -128,7 +182,8 @@ struct ValueEq {
                 return static_cast<Character*>(oa)->value == static_cast<Character*>(ob)->value;
             return oa == ob;  // symbols (interned) and other objects: identity
         }
-        return a == b;  // nil / bool / int / double
+        if (oa != nullptr || ob != nullptr) return false;
+        return a.bits() == b.bits();  // both immediates: nil/bool/int/double
     }
 };
 
@@ -320,9 +375,9 @@ inline std::string print_object(Object* o) {
 
 inline std::string print_string(const Value& v) {
     if (is_nil(v)) return "nil";
-    if (auto* b = std::get_if<bool>(&v)) return *b ? "true" : "false";
-    if (auto* i = std::get_if<std::int64_t>(&v)) return std::to_string(*i);
-    if (auto* d = std::get_if<double>(&v)) return std::to_string(*d);
+    if (is_bool(v)) return as_bool(v) ? "true" : "false";
+    if (is_int(v)) return std::to_string(as_int(v));
+    if (is_double(v)) return std::to_string(as_double(v));
     return print_object(as_obj(v));
 }
 

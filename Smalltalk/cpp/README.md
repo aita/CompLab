@@ -7,6 +7,11 @@ A C++23 port of the [Python implementation](../python/README.md), built with
   and reclaimed by a **mark-and-sweep** garbage collector over raw pointers
   (`src/heap.cppm`). Activations (`Context`) and closures (`Block`) are objects
   too, so a captured frame stays alive as long as a closure references it.
+- **`Value` is NaN-boxed to 8 bytes** (`src/objects.cppm`): a real double is
+  stored directly, and nil / Boolean / SmallInteger / `Object*` live in the
+  payload of a quiet NaN. The tradeoff is a ~48-bit SmallInteger — arithmetic
+  that would exceed it raises a Smalltalk error rather than silently wrapping
+  (the Python port uses arbitrary-precision ints instead).
 - **Restricted exceptions.** Builds with `-fno-exceptions -fno-rtti`. Errors are
   reported by return values / a VM error flag, numbers are parsed with
   `std::from_chars`, and control flow (`^`, doesNotUnderstand) uses the VM's

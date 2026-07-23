@@ -145,6 +145,22 @@ void test_arithmetic_fast_path() {
     check(ev(sys, "3 + 4") == "7", "other operators still correct");
 }
 
+void test_nan_boxing() {
+    check(sizeof(st::Value) == 8, "Value is NaN-boxed to 8 bytes");
+    st::System sys;
+    // immediates round-trip through the boxed representation
+    check(ev(sys, "3.14 + 0.5") == "3.640000", "float round-trips");
+    check(ev(sys, "5 negated") == "-5", "negative int round-trips");
+    check(ev(sys, "0 - 300000000000") == "-300000000000", "large negative in range");
+    check(ev(sys, "$A asInteger") == "65", "character");
+    check(ev(sys, "nil isNil") == "true", "nil identity");
+    // SmallInteger overflow raises instead of silently wrapping
+    check(ev(sys, "100 factorial") == "ERR:SmallInteger overflow", "factorial overflow");
+    check(ev(sys, "1000000000 * 1000000000") == "ERR:SmallInteger overflow", "* overflow");
+    // in-range large arithmetic still works
+    check(ev(sys, "1000000 * 100000000") == "100000000000000", "in-range * (1e14)");
+}
+
 void test_string_iteration() {
     st::System sys;
     check(ev(sys, "| n | n := 0. 'hello' do: [:c | n := n + 1]. n") == "5",
@@ -173,6 +189,7 @@ int main() {
     test_collections();
     test_dictionary();
     test_arithmetic_fast_path();
+    test_nan_boxing();
     test_string_iteration();
     test_gc_survives_computation();
     if (failures == 0) std::println("all tests passed");

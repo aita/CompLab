@@ -21,11 +21,17 @@ export namespace st {
 namespace kdetail {
 
 inline bool as_num(const Value& v, double& out) {
-    if (auto* i = std::get_if<std::int64_t>(&v)) { out = static_cast<double>(*i); return true; }
-    if (auto* d = std::get_if<double>(&v)) { out = *d; return true; }
+    if (is_int(v)) { out = static_cast<double>(as_int(v)); return true; }
+    if (is_double(v)) { out = as_double(v); return true; }
     return false;
 }
-inline std::int64_t as_i(const Value& v) { return std::get<std::int64_t>(v); }
+inline std::int64_t as_i(const Value& v) { return as_int(v); }
+
+// Box an integer arithmetic result, or raise on SmallInteger overflow.
+inline Value int_result(VM& vm, std::int64_t r) {
+    if (!fits_smallint(r)) { vm.fail("SmallInteger overflow"); return nil(); }
+    return Value{r};
+}
 
 inline Array* oc_items(const Value& r) {
     Instance* inst = as<Instance>(r);
@@ -151,13 +157,13 @@ void build_kernel(VM& vm) {
 
     // --- Boolean ---
     def(Boolean, "not", [](VM&, const Value& r, std::vector<Value>&) -> Value {
-        return Value{!std::get<bool>(r)};
+        return Value{!as_bool(r)};
     });
     def(Boolean, "&", [](VM&, const Value& r, std::vector<Value>& a) -> Value {
-        return Value{std::get<bool>(r) && std::get<bool>(a[0])};
+        return Value{as_bool(r) && as_bool(a[0])};
     });
     def(Boolean, "|", [](VM&, const Value& r, std::vector<Value>& a) -> Value {
-        return Value{std::get<bool>(r) || std::get<bool>(a[0])};
+        return Value{as_bool(r) || as_bool(a[0])};
     });
     def(True, "printString", [](VM& vm, const Value&, std::vector<Value>&) -> Value {
         return ref(vm.heap().new_string("true"));
@@ -168,17 +174,23 @@ void build_kernel(VM& vm) {
 
     // --- Number / Integer ---
     def(Number, "+", [](VM& vm, const Value& r, std::vector<Value>& a) -> Value {
-        if (is_int(r) && is_int(a[0])) return Value{as_i(r) + as_i(a[0])};
+        if (is_int(r) && is_int(a[0])) return int_result(vm, as_i(r) + as_i(a[0]));
         double x, y; if (as_num(r, x) && as_num(a[0], y)) return Value{x + y};
         vm.fail("+ expects a Number"); return nil();
     });
     def(Number, "-", [](VM& vm, const Value& r, std::vector<Value>& a) -> Value {
-        if (is_int(r) && is_int(a[0])) return Value{as_i(r) - as_i(a[0])};
+        if (is_int(r) && is_int(a[0])) return int_result(vm, as_i(r) - as_i(a[0]));
         double x, y; if (as_num(r, x) && as_num(a[0], y)) return Value{x - y};
         vm.fail("- expects a Number"); return nil();
     });
     def(Number, "*", [](VM& vm, const Value& r, std::vector<Value>& a) -> Value {
-        if (is_int(r) && is_int(a[0])) return Value{as_i(r) * as_i(a[0])};
+        if (is_int(r) && is_int(a[0])) {
+            std::int64_t rr;
+            if (__builtin_mul_overflow(as_i(r), as_i(a[0]), &rr)) {
+                vm.fail("SmallInteger overflow"); return nil();
+            }
+            return int_result(vm, rr);
+        }
         double x, y; if (as_num(r, x) && as_num(a[0], y)) return Value{x * y};
         vm.fail("* expects a Number"); return nil();
     });
@@ -226,7 +238,11 @@ void build_kernel(VM& vm) {
     def(Integer, "factorial", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
         if (!is_int(r)) { vm.fail("factorial expects an Integer"); return nil(); }
         std::int64_t n = as_i(r), f = 1;
-        for (std::int64_t i = 2; i <= n; ++i) f *= i;
+        for (std::int64_t i = 2; i <= n; ++i) {
+            if (__builtin_mul_overflow(f, i, &f) || !fits_smallint(f)) {
+                vm.fail("SmallInteger overflow"); return nil();
+            }
+        }
         return Value{f};
     });
     def(Integer, "//", [](VM& vm, const Value& r, std::vector<Value>& a) -> Value {

@@ -71,7 +71,7 @@ public:
 
     Class* class_of(const Value& v) {
         if (is_nil(v)) return classes_["UndefinedObject"];
-        if (auto* b = std::get_if<bool>(&v)) return classes_[*b ? "True" : "False"];
+        if (is_bool(v)) return classes_[as_bool(v) ? "True" : "False"];
         if (is_int(v)) return classes_["SmallInteger"];
         if (is_float(v)) return classes_["Float"];
         Object* o = as_obj(v);
@@ -296,13 +296,12 @@ private:
                 case Op::JumpFalse: {
                     Value c = stk->back();
                     stk->pop_back();
-                    auto* b = std::get_if<bool>(&c);
-                    if (b == nullptr) {
+                    if (!is_bool(c)) {
                         fail("condition must be a Boolean");
                         return nil();
                     }
                     bool want = ins.op == Op::JumpTrue;
-                    if (*b == want) ctx->ip = ins.arg;
+                    if (as_bool(c) == want) ctx->ip = ins.arg;
                     break;
                 }
                 case Op::Send:
@@ -315,22 +314,32 @@ private:
 
                     // inline fast path: SmallInteger binary arithmetic/compare
                     if (ins.op == Op::Send && optimize_arithmetic_ && argc == 1 &&
-                        std::holds_alternative<std::int64_t>(receiver) &&
-                        std::holds_alternative<std::int64_t>(args[0])) {
-                        std::int64_t x = std::get<std::int64_t>(receiver);
-                        std::int64_t y = std::get<std::int64_t>(args[0]);
+                        is_int(receiver) && is_int(args[0])) {
+                        std::int64_t x = as_int(receiver);
+                        std::int64_t y = as_int(args[0]);
                         const std::string& s = ins.name;
-                        bool done = true;
-                        if (s == "+") stk->push_back(Value{x + y});
-                        else if (s == "-") stk->push_back(Value{x - y});
-                        else if (s == "*") stk->push_back(Value{x * y});
-                        else if (s == "<") stk->push_back(Value{x < y});
-                        else if (s == ">") stk->push_back(Value{x > y});
-                        else if (s == "<=") stk->push_back(Value{x <= y});
-                        else if (s == ">=") stk->push_back(Value{x >= y});
-                        else if (s == "=") stk->push_back(Value{x == y});
-                        else done = false;
-                        if (done) break;
+                        bool cmp = true, res = false;
+                        if (s == "<") res = x < y;
+                        else if (s == ">") res = x > y;
+                        else if (s == "<=") res = x <= y;
+                        else if (s == ">=") res = x >= y;
+                        else if (s == "=") res = x == y;
+                        else cmp = false;
+                        if (cmp) { stk->push_back(Value{res}); break; }
+                        std::int64_t r = 0;
+                        bool arith = true, ov = false;
+                        if (s == "+") r = x + y;
+                        else if (s == "-") r = x - y;
+                        else if (s == "*") ov = __builtin_mul_overflow(x, y, &r);
+                        else arith = false;
+                        if (arith) {
+                            if (ov || !fits_smallint(r)) {
+                                fail("SmallInteger overflow");
+                                return nil();
+                            }
+                            stk->push_back(Value{r});
+                            break;
+                        }
                     }
 
                     if (ins.op == Op::Send) {
