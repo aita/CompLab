@@ -3,6 +3,9 @@
 A small Smalltalk implementation in Python: a **bytecode virtual machine**
 plus a **PySide6 IDE** (System Browser + Workspace + Transcript).
 
+Deep dives live in [`docs/`](docs/README.md): [syntax](docs/syntax.md),
+[object model](docs/objects.md), [bytecode](docs/bytecode.md).
+
 ## Pipeline
 
 ```
