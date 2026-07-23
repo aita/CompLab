@@ -1,0 +1,13 @@
+# Point clangd (Zed's C++ language server) at the CMake compile database and
+# ensure C++23 as a fallback, so `import` / `export module` / `std::print`
+# resolve. Build the project once (`cmake -S . -B build -G Ninja`) so
+# build/compile_commands.json exists.
+#
+# Note: clangd's support for C++20 *named modules* is still experimental — some
+# `import :partition;` lines may remain underlined even when the CMake/Ninja
+# build is clean. The build is the source of truth.
+CompileFlags:
+  CompilationDatabase: build
+  Add:
+    - -std=c++23
+    - -Wno-unknown-warning-option

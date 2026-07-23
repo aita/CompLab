@@ -83,3 +83,13 @@ ctest --test-dir build   # unit tests
 > data"); the `CMakeLists.txt` therefore prefers `clang++` for a fresh build
 > tree. Override with `-DCMAKE_CXX_COMPILER=...`. BMIs are compiler-specific and
 > not portable — pick one compiler per build tree.
+
+### Editor / clangd (Zed, VS Code)
+
+The build emits `build/compile_commands.json`, and `.clangd` points clangd at
+it — so `import` / `export module` / `std::print` resolve. **Build once first**
+(clangd reads the module `.pcm` files the build produced), then restart the
+language server. Without this, clangd falls back to bad flags and reports
+spurious errors. clangd's named-modules support is still experimental, so an
+occasional `import :partition;` may stay underlined even though the build is
+clean — the CMake/Ninja build is authoritative.

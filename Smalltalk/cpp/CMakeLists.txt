@@ -16,6 +16,9 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Emit build/compile_commands.json so clangd (Zed / VS Code) knows the flags.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Constraints for this implementation: no reference counting and restricted
 # exception use. Build without exceptions/RTTI so the constraint is enforced.
 add_compile_options(-fno-exceptions -fno-rtti)
