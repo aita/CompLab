@@ -53,9 +53,25 @@ class Environment:
 
 
 class Frame:
-    """A single method or block activation."""
+    """A single method or block activation.
 
-    __slots__ = ("receiver", "method", "env", "stack", "ip", "is_block", "home")
+    Frames are reified: they are the Smalltalk ``MethodContext`` /
+    ``BlockContext`` objects. ``sender`` links each activation to the one that
+    invoked it, so the VM's ``active_context`` chain *is* the call stack and is
+    walkable from Smalltalk via ``thisContext``.
+    """
+
+    __slots__ = (
+        "receiver",
+        "method",
+        "env",
+        "stack",
+        "ip",
+        "is_block",
+        "home",
+        "sender",
+        "st_class",
+    )
 
     def __init__(
         self,
@@ -65,6 +81,8 @@ class Frame:
         *,
         is_block: bool,
         home: "Frame | None",
+        sender: "Frame | None" = None,
+        st_class: STClass | None = None,
     ):
         self.receiver = receiver
         self.method = method
@@ -73,12 +91,17 @@ class Frame:
         self.ip = 0
         self.is_block = is_block
         self.home = home
+        self.sender = sender
+        self.st_class = st_class
 
 
 class VM:
     def __init__(self) -> None:
         self.classes: dict[str, STClass] = {}
         self.globals: dict[str, Any] = {}
+        # The currently executing activation; the top of the reified call
+        # stack. thisContext reads it and sender links walk it.
+        self.active_context: Frame | None = None
         # Where Transcript output goes; the IDE overrides this to capture it.
         # Resolve sys.stdout lazily so test capture / redirection still works.
         self.output: Callable[[str], None] = lambda s: sys.stdout.write(s)
@@ -116,6 +139,8 @@ class VM:
                 return c["BlockClosure"]
             case STClass():
                 return c["Class"]
+            case Frame():
+                return value.st_class or c["Context"]
             case STObject():
                 return value.st_class
             case _:
@@ -175,13 +200,24 @@ class VM:
             env.vars[name] = nil
         for name, value in zip(method.params, args):
             env.vars[name] = value
-        frame = Frame(receiver, method, env, is_block=False, home=None)
+        frame = Frame(
+            receiver,
+            method,
+            env,
+            is_block=False,
+            home=None,
+            sender=self.active_context,
+            st_class=self.classes.get("MethodContext"),
+        )
+        self.active_context = frame
         try:
             return self.interpret(frame)
         except NonLocalReturn as nlr:
             if nlr.home is frame:
                 return nlr.value
             raise
+        finally:
+            self.active_context = frame.sender
 
     def run_block(self, block: STBlock, args: list[Any]) -> Any:
         tmpl: CompiledBlock = block.node
@@ -196,8 +232,20 @@ class VM:
             env.vars[name] = value
         home: Frame | None = block.home_context
         receiver = home.receiver if home is not None else nil
-        frame = Frame(receiver, tmpl, env, is_block=True, home=home)
-        return self.interpret(frame)
+        frame = Frame(
+            receiver,
+            tmpl,
+            env,
+            is_block=True,
+            home=home,
+            sender=self.active_context,
+            st_class=self.classes.get("BlockContext"),
+        )
+        self.active_context = frame
+        try:
+            return self.interpret(frame)
+        finally:
+            self.active_context = frame.sender
 
     # --- variable access ---
 
@@ -239,6 +287,8 @@ class VM:
                     stack.append(literals[ins.arg])
                 case Op.PUSH_SELF:
                     stack.append(frame.receiver)
+                case Op.PUSH_CONTEXT:
+                    stack.append(frame)
                 case Op.PUSH_NIL:
                     stack.append(nil)
                 case Op.PUSH_TRUE:

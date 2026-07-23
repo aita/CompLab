@@ -167,7 +167,7 @@ class Compiler:
             case "self" | "super":
                 self.g.emit(Op.PUSH_SELF)
             case "thisContext":
-                self.g.emit(Op.PUSH_NIL)  # not modelled yet
+                self.g.emit(Op.PUSH_CONTEXT)
             case _:
                 self.g.emit(Op.PUSH_VAR, name)
 

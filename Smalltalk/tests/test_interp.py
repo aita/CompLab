@@ -185,6 +185,36 @@ def test_does_not_understand(st):
         st.eval("3 flootberg")
 
 
+# --- reified contexts (thisContext) ---
+
+
+def test_this_context_is_a_method_context(st):
+    assert ev(st, "thisContext isBlockContext") == "false"
+    assert ev(st, "thisContext selector") == "#DoIt"
+    assert ev(st, "thisContext class name") == "'MethodContext'"
+
+
+def test_this_context_receiver(st):
+    st.define_class("Widget", "Object", [])
+    st.define_method("Widget", "whoAmI ^thisContext receiver")
+    assert ev(st, "Widget new whoAmI class name") == "'Widget'"
+
+
+def test_block_context(st):
+    assert ev(st, "[thisContext isBlockContext] value") == "true"
+
+
+def test_sender_chain(st):
+    st.define_class("Probe", "Object", [])
+    # the caller of #callerSelector is the DoIt, so sender selector is #DoIt
+    st.define_method("Probe", "callerSelector ^thisContext sender selector")
+    assert ev(st, "Probe new callerSelector") == "#DoIt"
+
+
+def test_top_level_sender_is_nil(st):
+    assert ev(st, "thisContext sender") == "nil"
+
+
 def test_polymorphism(st):
     st.define_class("Shape", "Object", [])
     st.define_method("Shape", "area ^0")

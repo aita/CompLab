@@ -202,6 +202,9 @@ def build_kernel(vm: VM) -> None:
     b.cls("BlockClosure", Object)
     b.cls("Transcript", Object)
     b.cls("Error", Object, ivars=["messageText"])
+    Context = b.cls("Context", Object)
+    b.cls("MethodContext", Context)
+    b.cls("BlockContext", Context)
 
     _install_object(b, Object)
     _install_undefined(b)
@@ -214,6 +217,7 @@ def build_kernel(vm: VM) -> None:
     _install_point(b)
     _install_transcript(b)
     _install_error(b)
+    _install_context(b)
 
     # Transcript is a unique global instance.
     vm.globals["Transcript"] = _new_instance(vm, vm.classes["Transcript"])
@@ -1056,3 +1060,33 @@ def _install_error(b: _Builder) -> None:
     b.prim(E, "signal", lambda vm, r, a: _raise_error(r.ivars.get("messageText", "Error")))
     b.prim(E, "signal:", lambda vm, r, a: _raise_error(a[0]))
     b.cprim(E, "signal:", lambda vm, r, a: _raise_error(a[0]))
+
+
+# --- Context (reified activations: thisContext) ---------------------------
+
+
+def _ctx_selector(frame: Any) -> Any:
+    selector = getattr(frame.method, "selector", None)
+    return STSymbol(selector) if selector is not None else nil
+
+
+def _ctx_print(frame: Any) -> str:
+    if frame.is_block:
+        return "a BlockContext"
+    method = frame.method
+    selector = getattr(method, "selector", None) or "?"
+    home_class = getattr(method, "defined_in", None)
+    prefix = f"{home_class.name}>>" if home_class is not None else ""
+    return f"a MethodContext ({prefix}{selector})"
+
+
+def _install_context(b: _Builder) -> None:
+    C = b.vm.classes["Context"]
+    b.prim(C, "receiver", lambda vm, r, a: r.receiver)
+    b.prim(C, "sender", lambda vm, r, a: r.sender if r.sender is not None else nil)
+    b.prim(C, "home", lambda vm, r, a: r.home if r.home is not None else r)
+    b.prim(C, "selector", lambda vm, r, a: _ctx_selector(r))
+    b.prim(C, "pc", lambda vm, r, a: r.ip)
+    b.prim(C, "isBlockContext", lambda vm, r, a: r.is_block)
+    b.prim(C, "isDead", lambda vm, r, a: False)
+    b.prim(C, "printString", lambda vm, r, a: _ctx_print(r))

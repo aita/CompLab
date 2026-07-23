@@ -22,6 +22,7 @@ class Op(IntEnum):
     PUSH_NIL = auto()
     PUSH_TRUE = auto()
     PUSH_FALSE = auto()
+    PUSH_CONTEXT = auto()  # push the current activation (thisContext)
     PUSH_VAR = auto()  # arg: variable name (str)
     STORE_VAR = auto()  # arg: variable name; peeks TOS (assignment is an expr)
     POP = auto()

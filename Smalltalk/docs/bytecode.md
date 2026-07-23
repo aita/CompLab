@@ -37,6 +37,7 @@ VMは**スタックマシン**です。式は「値をオペランドスタッ�
 |---|---|---|
 | `PUSH_LITERAL` | 添字 | `literals[arg]` を積む |
 | `PUSH_SELF` | — | レシーバ（`self`）を積む |
+| `PUSH_CONTEXT` | — | 現在の活性化フレームを積む（`thisContext`） |
 | `PUSH_NIL` / `PUSH_TRUE` / `PUSH_FALSE` | — | `nil` / `true` / `false` を積む |
 | `PUSH_VAR` | 変数名 | 変数を解決して積む |
 | `STORE_VAR` | 変数名 | スタックトップを**覗いて**（pop しない）変数に格納 |
@@ -58,8 +59,13 @@ VMは**スタックマシン**です。式は「値をオペランドスタッ�
 
 `VM.interpret(frame)` が1つの活性化 (`Frame`) の命令列を先頭から実行するディスパッチループです。
 
-- `Frame` … レシーバ・コード・環境 (`Environment`)・オペランドスタック・命令ポインタ `ip`・ブロックか否か・ホームフレーム
+- `Frame` … レシーバ・コード・環境 (`Environment`)・オペランドスタック・命令ポインタ `ip`・ブロックか否か・ホームフレーム・`sender`
 - メソッド送信で**コンパイル済みメソッド**に解決すると、新しい `Frame` を作って `interpret` を**再帰呼び出し**します（プリミティブなら Python 関数を直接呼ぶ）。
+
+オペランドスタックは各 `Frame` が持ちます（VM 自体は持ちません）。フレームは
+[reify されたコンテキスト](objects.md#コンテキストthiscontext)でもあり、VM の
+`active_context` と `sender` リンクが**コールスタックそのもの**として `thisContext`
+から辿れます。呼び出しの入れ子はホスト（Python）の再帰に対応します。
 
 各文列は「最後の式の値をスタックに1つ残す」不変条件でコンパイルされます。メソッド末尾には暗黙の `^self`（`PUSH_SELF; RETURN`）が付きます。
 

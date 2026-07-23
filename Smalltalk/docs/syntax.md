@@ -38,8 +38,9 @@
 
 ### 真偽・nil（擬似変数）
 
-`true` / `false` / `nil`。`self` / `super` / `thisContext` も擬似変数
-（`thisContext` は未モデル化で `nil`）。
+`true` / `false` / `nil`。`self` / `super` / `thisContext` も擬似変数。
+`thisContext` は現在の活性化（[reify されたコンテキスト](objects.md#コンテキストthiscontext)）
+を返します。
 
 ### リテラル配列 `#(...)`
 
@@ -203,7 +204,7 @@ st.define_method("Counter", "increment  count := count + 1")
 - `!`-chunk 形式のソースファイル読み込み
 - `#[...]`（バイト配列）、`ScaledDecimal`、`Fraction`
 - 可変な `String`（`at:put:`）
-- `thisContext`、メタクラス階層
+- メタクラス階層、コンテキストの再開・巻き戻し（`thisContext` は参照のみ可）
 - 例外の再開（resumable exception）
 
 実行時に利用できるセレクタの一覧は `st/kernel.py` を参照してください。

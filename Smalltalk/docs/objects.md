@@ -109,6 +109,7 @@ Object
 │  └─ Dictionary            (map)
 ├─ Point                     (x, y)
 ├─ BlockClosure
+├─ Context ─ MethodContext / BlockContext
 ├─ Transcript
 └─ Error                     (messageText)
 ```
@@ -155,11 +156,33 @@ Smalltalk レベルの失敗（`doesNotUnderstand`、`self error:`、範囲外�
 `[...] ensure: [...]` は後始末を保証します。例外の再開（resumable）や `signal`
 階層の細かなマッチングは未実装です。
 
+## コンテキスト（thisContext）
+
+メソッド/ブロックの活性化 (`Frame`) は**第一級オブジェクトとして reify** されて
+います。`thisContext` で現在の活性化（`MethodContext` / `BlockContext`）が得られ、
+`sender` リンクで呼び出し元を辿れます。VM は現在の活性化 `active_context` を保持し、
+その `sender` 連鎖が**コールスタックそのもの**です。
+
+```smalltalk
+"sender 連鎖を辿ってバックトレースを作る"
+backtrace
+    | ctx names |
+    names := OrderedCollection new.
+    ctx := thisContext.
+    [ctx notNil] whileTrue: [names add: ctx selector. ctx := ctx sender].
+    ^names asArray            "=> (#backtrace #inner #outer #DoIt )"
+```
+
+`Context` のプロトコル: `receiver` / `sender` / `home` / `selector` / `pc` /
+`isBlockContext` / `printString`。ただし現状は**ホスト（Python）の再帰**の上に
+reify しているだけで、コンテキストを保存して後で再開する・スタックを書き換える
+といった完全な操作（継続、`Process` スケジューリング、再開可能例外）は未対応です。
+
 ## 制限
 
 - **メタクラス階層なし**（クラス側メソッドは `class_methods` 辞書）。
 - **String は不変**（Python `str`）。`String>>at:put:` は未対応。
 - `Fraction` / `ScaledDecimal` なし（`/` は割り切れれば整数、でなければ浮動小数）。
-- `thisContext` は未モデル化（`nil` を返す）。
+- コンテキストは reify 済みだが**再開・巻き戻しは不可**（ホスト再帰の上に構築）。
 
 数値・コレクション等の具体的なセレクタは `st/kernel.py` を参照してください。
