@@ -36,7 +36,7 @@ class Scope:
     compiler's scope nesting matches the run-time frame chain exactly.
     """
 
-    def __init__(self, parent: "Scope | None"):
+    def __init__(self, parent: Scope | None):
         self.parent = parent
         self.names: list[str] = []
         self.index: dict[str, int] = {}

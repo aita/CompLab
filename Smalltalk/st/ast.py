@@ -27,7 +27,7 @@ class VariableNode:
 @dataclass
 class AssignmentNode:
     name: str
-    value: "ExprNode"
+    value: ExprNode
 
 
 @dataclass
@@ -35,9 +35,9 @@ class MessageNode:
     """A message send. ``selector`` is the full selector (e.g. ``at:put:``);
     ``args`` matches its keyword/argument count (empty for unary sends)."""
 
-    receiver: "ExprNode"
+    receiver: ExprNode
     selector: str
-    args: list["ExprNode"] = field(default_factory=list)
+    args: list[ExprNode] = field(default_factory=list)
 
 
 @dataclass
@@ -45,28 +45,28 @@ class CascadeNode:
     """``receiver msg1; msg2; msg3`` — the messages share one receiver and the
     whole cascade evaluates to the last message's result."""
 
-    receiver: "ExprNode"
-    messages: list["CascadeMessage"] = field(default_factory=list)
+    receiver: ExprNode
+    messages: list[CascadeMessage] = field(default_factory=list)
 
 
 @dataclass
 class CascadeMessage:
     selector: str
-    args: list["ExprNode"] = field(default_factory=list)
+    args: list[ExprNode] = field(default_factory=list)
 
 
 @dataclass
 class BlockNode:
     params: list[str]
     temps: list[str]
-    body: "SequenceNode"
+    body: SequenceNode
 
 
 @dataclass
 class ReturnNode:
     """``^expr`` — a method return."""
 
-    value: "ExprNode"
+    value: ExprNode
 
 
 @dataclass
@@ -74,7 +74,7 @@ class SequenceNode:
     """A ``.``-separated statement sequence with optional leading ``| temps |``."""
 
     temps: list[str] = field(default_factory=list)
-    statements: list["ExprNode"] = field(default_factory=list)
+    statements: list[ExprNode] = field(default_factory=list)
 
 
 @dataclass

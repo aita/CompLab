@@ -27,9 +27,9 @@ if TYPE_CHECKING:
 class _Nil:
     """The unique ``nil`` object."""
 
-    _instance: "_Nil | None" = None
+    _instance: _Nil | None = None
 
-    def __new__(cls) -> "_Nil":
+    def __new__(cls) -> _Nil:
         if cls._instance is None:
             cls._instance = super().__new__(cls)
         return cls._instance
@@ -45,9 +45,9 @@ class STSymbol(str):
     """A Smalltalk symbol, e.g. ``#foo``. Distinct Python type so it dispatches
     to the Symbol class rather than String, but interns like a str."""
 
-    _interned: dict[str, "STSymbol"] = {}
+    _interned: dict[str, STSymbol] = {}
 
-    def __new__(cls, value: str) -> "STSymbol":
+    def __new__(cls, value: str) -> STSymbol:
         existing = cls._interned.get(value)
         if existing is not None:
             return existing
@@ -82,7 +82,7 @@ class PrimitiveMethod:
     """
 
     name: str
-    fn: Callable[["VM", Any, list[Any]], Any]
+    fn: Callable[[VM, Any, list[Any]], Any]
 
     def __repr__(self) -> str:
         return f"<primitive {self.name}>"
@@ -109,7 +109,7 @@ class STClass:
     """
 
     name: str
-    superclass: "STClass | None" = None
+    superclass: STClass | None = None
     instance_variables: list[str] = field(default_factory=list)
     methods: dict[str, Method] = field(default_factory=dict)
     class_methods: dict[str, Method] = field(default_factory=dict)
@@ -124,7 +124,7 @@ class STClass:
     class_method_cache: dict[str, Any] = field(
         default_factory=dict, compare=False, repr=False
     )
-    _ivars_cache: "list[str] | None" = field(
+    _ivars_cache: list[str] | None = field(
         default=None, compare=False, repr=False
     )
 
@@ -175,7 +175,7 @@ class STClass:
         cache[selector] = None
         return None
 
-    def is_kind_of(self, other: "STClass") -> bool:
+    def is_kind_of(self, other: STClass) -> bool:
         cls: STClass | None = self
         while cls is not None:
             if cls is other:

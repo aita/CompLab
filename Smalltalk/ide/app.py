@@ -55,7 +55,7 @@ def _mono() -> QFont:
 
 
 class Workspace(QWidget):
-    def __init__(self, window: "MainWindow"):
+    def __init__(self, window: MainWindow):
         super().__init__()
         self.window = window
         layout = QVBoxLayout(self)
@@ -109,7 +109,7 @@ class Workspace(QWidget):
 
 
 class SystemBrowser(QWidget):
-    def __init__(self, window: "MainWindow"):
+    def __init__(self, window: MainWindow):
         super().__init__()
         self.window = window
         layout = QVBoxLayout(self)

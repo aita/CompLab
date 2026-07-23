@@ -44,7 +44,7 @@ ARITHMETIC_SELECTORS = frozenset(_ARITH)
 class NonLocalReturn(Exception):
     """Carries a ``^`` value out of a block up to its home activation."""
 
-    def __init__(self, home: "Frame", value: Any):
+    def __init__(self, home: Frame, value: Any):
         super().__init__("non-local return")
         self.home = home
         self.value = value
@@ -80,10 +80,10 @@ class Frame:
         method: CompiledMethod | CompiledBlock,
         locals_: list[Any],
         *,
-        outer: "Frame | None",
+        outer: Frame | None,
         is_block: bool,
-        home: "Frame | None",
-        sender: "Frame | None" = None,
+        home: Frame | None,
+        sender: Frame | None = None,
         st_class: STClass | None = None,
     ):
         self.receiver = receiver
