@@ -815,7 +815,7 @@ class TracingJIT {
   explicit TracingJIT(VM& vm, int threshold = 50)
       : vm_(vm), threshold_(threshold) {
     vm_.on_backedge = [this](CodeObject* code, int target, Value* regs,
-                             Globals&) -> long {
+                             Globals&, Value&) -> long {
       return on_backedge(code, target, regs);
     };
   }

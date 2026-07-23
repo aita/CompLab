@@ -227,14 +227,26 @@ int main() {
     MethodRun m = run_method(src, 2);
     check("mixed-method len", m.out, run(src));
   }
-  {  // mutual recursion is NOT self-recursion -> not method-JIT'd, still exact
+  {  // mutual recursion isn't self-recursion, so the int compiler rejects it --
+     // the object-capable compiler takes it and routes the calls through the VM
     std::string src =
         "def ev(n):\n    if n == 0:\n        return 1\n    return od(n - 1)\n"
         "def od(n):\n    if n == 0:\n        return 0\n    return ev(n - 1)\n"
         "print(ev(100))\nprint(od(100))";
     MethodRun m = run_method(src, 2);
     check("method mutual matches", m.out, run(src));
-    check("method mutual aborted", m.aborted >= 1 ? "y" : "n", "y");
+    check("method mutual native", m.native >= 1 ? "y" : "n", "y");
+  }
+  {  // a function containing a loop is now compiled too (it used to be left to
+     // the tracing JIT); called often enough, its loop runs natively
+    std::string src =
+        "def s(n):\n    i = 0\n    t = 0\n"
+        "    while i < n:\n        t = t + i * i - i\n        i = i + 1\n"
+        "    return t\n"
+        "k = 0\nr = 0\nwhile k < 60:\n    r = r + s(300)\n    k = k + 1\nprint(r)";
+    MethodRun m = run_method(src, 2);
+    check("method loop matches", m.out, run(src));
+    check("method loop native", m.native >= 1 ? "y" : "n", "y");
   }
 
   // -- str/list in traces: helper calls + per-op native type guards ---------

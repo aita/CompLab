@@ -193,8 +193,10 @@ inline std::unordered_map<int, std::pair<int, int>> live_ranges(
 }
 
 // Gate for the *object-capable* compiler: like `feasible`, but values may be any
-// type, calls may be to anything (they go through the VM), and constants may be
-// str/None. Loops still go to the tracing JIT.
+// type, calls may be to anything (they go through the VM), constants may be
+// str/None, and loops are allowed -- the codegen binds a label per reachable pc,
+// so a back-edge is just another jump, and the must-analysis is a fixpoint that
+// already converges over cycles.
 inline std::optional<std::unordered_set<int>> mixed_feasible(
     const CodeObject& code) {
   std::unordered_set<int> reach = reachable(code);
@@ -208,16 +210,8 @@ inline std::optional<std::unordered_set<int>> mixed_feasible(
            op == Op::Subscr || op == Op::Jump || op == Op::JumpIfFalse ||
            op == Op::JumpIfTrue || op == Op::Call || op == Op::Return;
   };
-  bool has_object_work = false;
-  for (int pc : reach) {
-    const Instr& ins = code.code[pc];
-    if (!supported(ins.op)) return std::nullopt;
-    if (ins.op == Op::Jump && ins.a <= pc) return std::nullopt;  // loop
-    if (ins.op == Op::Len || ins.op == Op::Subscr) has_object_work = true;
-    if (ins.op == Op::LoadConst && !code.consts[ins.b].is_int_like())
-      has_object_work = true;
-  }
-  if (!has_object_work) return std::nullopt;  // the int compiler handles it
+  for (int pc : reach)
+    if (!supported(code.code[pc].op)) return std::nullopt;
   return reach;
 }
 
@@ -631,6 +625,13 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     ready();
   }
   void* entry_addr() { return (void*)getCode(); }
+  // Entry for on-stack replacement: same ABI plus a start pc in the 4th
+  // argument. Null when the function has no loop to re-enter.
+  void* osr_addr() {
+    return osr_targets_.empty() ? nullptr : (void*)(getCode() + osr_off_);
+  }
+  bool has_osr() const { return !osr_targets_.empty(); }
+  int frame_size() const { return n_regs_ + 1; }
 
  private:
   Xbyak::Address tg(int slot) {
@@ -922,6 +923,28 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
       mov(rax, pc);
       ret();
     }
+
+    // On-stack replacement entry. `long f(Value*, VM*, Globals*, long pc)`:
+    // set up exactly like the normal entry, then jump to the requested loop
+    // header. Only back-edge targets are reachable this way.
+    for (int pc : reach) {
+      const Instr& ins = code.code[pc];
+      if (ins.op == Op::Jump && ins.a <= pc) osr_targets_.insert(ins.a);
+    }
+    if (!osr_targets_.empty()) {
+      osr_off_ = (int)getSize();
+      push(rbx); push(r12); push(r13); push(r14); push(r15);
+      mov(r12, rdi);
+      mov(rbx, rsi);
+      mov(r13, rdx);
+      std::vector<int> targets(osr_targets_.begin(), osr_targets_.end());
+      std::sort(targets.begin(), targets.end());
+      for (int t : targets) {
+        cmp(ecx, t);
+        je(labels[t], T_NEAR);
+      }
+      jmp(labels[0], T_NEAR);  // unknown pc: start from the top
+    }
   }
 
   // A direct self-recursive call made natively: guard that the callee is still
@@ -1001,6 +1024,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   bool inline_lists_ = list_layout().ok;
   int list_off_ = (int)list_layout().list_off;
   int n_regs_ = 0;
+  int osr_off_ = 0;
+  std::unordered_set<int> osr_targets_;
   Xbyak::Label entry_;
   VM* vm_ = nullptr;
   const Object* self_obj_ = nullptr;
@@ -1042,6 +1067,14 @@ class MethodJIT {
   explicit MethodJIT(VM& vm, int threshold = 10)
       : vm_(vm), threshold_(threshold) {
     vm_.collect_feedback = true;
+    // Take the back-edge hook too, unless a tracing JIT already owns it: a hot
+    // loop in a function that is only *called* once never reaches the call
+    // threshold, so the only way in is on-stack replacement.
+    if (!vm_.on_backedge)
+      vm_.on_backedge = [this](CodeObject* code, int target, Value* regs,
+                               Globals& glb, Value& out) -> long {
+        return on_backedge(code, target, regs, glb, out);
+      };
     vm_.on_call = [this](const Value& callee, Value* regs,
                          int arg_base, int argc, Value& out) -> bool {
       return on_call(callee, regs, arg_base, argc, out);
@@ -1052,6 +1085,7 @@ class MethodJIT {
   int n_mixed = 0;  // object-capable compilations
   int n_aborted = 0;
   int n_calls_native = 0;
+  int n_osr = 0;
 
  private:
   struct MixedEntry {
@@ -1079,6 +1113,55 @@ class MethodJIT {
     vm_.frame_free(base);
     n_calls_native++;
     return true;
+  }
+
+  // On-stack replacement: a loop got hot inside a frame the interpreter owns.
+  // Copy that frame into a value-stack frame of the compiled function's size,
+  // enter native code at the loop header, and either return the function's
+  // value or copy the frame back and hand the interpreter a resume pc.
+  long on_backedge(CodeObject* code, int target, Value* regs, Globals& glb,
+                   Value& out) {
+    const void* key = code;
+    auto it = mixed_.find(key);
+    if (it == mixed_.end()) {
+      if (blacklist_.count(key) || osr_tried_.count(key)) return -1;
+      if (++osr_counts_[key] < osr_threshold_) return -1;
+      osr_tried_.insert(key);
+      auto reach = mdetail::mixed_feasible(*code);
+      if (!reach) { blacklist_.insert(key); n_aborted++; return -1; }
+      auto me = std::make_unique<MixedEntry>();
+      me->code = std::make_unique<MixedMethodCode>(*code, *reach, &vm_, nullptr);
+      if (Xbyak::GetError()) {
+        Xbyak::ClearError();
+        blacklist_.insert(key);
+        n_aborted++;
+        return -1;
+      }
+      me->fn = me->code->entry_addr();
+      it = mixed_.emplace(key, std::move(me)).first;
+      n_mixed++;
+    }
+    MixedMethodCode* mc = it->second->code.get();
+    void* osr = mc->osr_addr();
+    if (!osr) return -1;  // no loop to re-enter
+
+    int fsize = mc->frame_size();
+    std::size_t base = vm_.frame_alloc(fsize);
+    if (base == (std::size_t)-1) return -1;
+    Value* frame = vm_.vstack.data() + base;
+    for (int k = 0; k < code->n_regs; ++k) frame[k] = regs[k];
+
+    using Fn = long (*)(void*, void*, void*, long);
+    long r = ((Fn)osr)(frame, &vm_, &glb, target);
+    n_osr++;
+    if (r < 0) {                       // ran the function to completion
+      out = frame[code->n_regs];
+      vm_.frame_free(base);
+      return VM::kBackedgeDone;
+    }
+    for (int k = 0; k < code->n_regs; ++k) regs[k] = frame[k];  // bailed
+    vm_.frame_free(base);
+    return r;
   }
 
   bool on_call(const Value& callee, Value* regs, int arg_base,
@@ -1143,6 +1226,9 @@ class MethodJIT {
   std::unordered_map<const void*, std::unique_ptr<CompiledMethod>> compiled_;
   std::unordered_map<const void*, std::unique_ptr<MixedEntry>> mixed_;
   std::unordered_set<const void*> blacklist_;
+  std::unordered_map<const void*, int> osr_counts_;
+  std::unordered_set<const void*> osr_tried_;
+  int osr_threshold_ = 200;
 };
 
 }  // namespace minpython

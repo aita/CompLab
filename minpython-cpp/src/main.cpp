@@ -64,6 +64,7 @@ int main(int argc, char** argv) {
     std::cerr << "[method jit] compiled=" << mj->n_compiled
               << " mixed=" << mj->n_mixed
               << " native_calls=" << mj->n_calls_native
+              << " osr=" << mj->n_osr
               << " aborted=" << mj->n_aborted << "\n";
   if (ti)
     std::cerr << "[async method jit] compiled=" << ti->n_compiled

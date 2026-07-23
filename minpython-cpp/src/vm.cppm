@@ -89,7 +89,10 @@ class VM {
 
   // Back-edge hook: (code, target pc, regs, globals) -> resume pc, or <0 to keep
   // interpreting from the target. The seam a tracing JIT overrides.
-  std::function<long(CodeObject*, int, Value*, Globals&)> on_backedge;
+  // Returning kBackedgeDone means the hook ran the rest of the function in
+  // native code and `out` holds its return value.
+  static constexpr long kBackedgeDone = -2;
+  std::function<long(CodeObject*, int, Value*, Globals&, Value&)> on_backedge;
 
   // Call hook: (callee, regs, arg_base, argc, out) -> handled. If it returns
   // true it ran native code for the whole call and `out` is the result; else the
@@ -249,7 +252,9 @@ class VM {
               loop_counts[key]++;
             }
             if (on_backedge) {
-              long resume = on_backedge(code, a, regs, glb);
+              Value done;
+              long resume = on_backedge(code, a, regs, glb, done);
+              if (resume == kBackedgeDone) return done;   // finished natively
               if (resume >= 0) { pc = (int)resume; continue; }
             }
           }
