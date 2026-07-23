@@ -662,6 +662,23 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     jne(target, T_NEAR);
     L(ok);
   }
+  // Does the recorded feedback say this site is worth an inline integer path?
+  // No feedback at all (never executed, or collection off) -> speculate int.
+  static bool int_site(const CodeObject& code, int pc, bool two) {
+    if (pc >= (int)code.feedback.size()) return true;
+    const SiteFeedback& f = code.feedback[pc];
+    if (f.tags_b == 0 && f.tags_c == 0) return true;
+    if (!only_int_like(f.tags_b)) return false;
+    return !two || f.tags_c == 0 || only_int_like(f.tags_c);
+  }
+  // Has this site ever seen a List? If not, the inline list path is dead weight.
+  static bool list_site(const CodeObject& code, int pc) {
+    if (pc >= (int)code.feedback.size()) return true;
+    const SiteFeedback& f = code.feedback[pc];
+    if (f.tags_b == 0) return true;
+    return (f.tags_b & (1u << (int)Tag::List)) != 0;
+  }
+
   // vm, regs, op, a, b, c -> rdi, rsi, edx, ecx, r8d, r9d
   void emit_slow3(int (*fn)(VM*, Value*, int, int, int, int), int op, int a,
                   int b, int c, Xbyak::Label& bail) {
@@ -724,6 +741,10 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
         case Op::Add: case Op::Sub: case Op::Mul: case Op::BitAnd:
         case Op::BitOr: case Op::BitXor: case Op::LShift: case Op::RShift: {
           Xbyak::Label slow, done;
+          if (!int_site(code, pc, true)) {   // never an int here: slow path only
+            emit_slow3(&jit_m_binop, (int)ins.op, x, y, z, bail[pc]);
+            break;
+          }
           guard_int(pc, y, slow);
           guard_int(pc, z, slow);
           mov(rax, val(y));
@@ -749,6 +770,10 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
         case Op::Eq: case Op::Ne: case Op::Lt: case Op::Le:
         case Op::Gt: case Op::Ge: {
           Xbyak::Label slow, done;
+          if (!int_site(code, pc, true)) {
+            emit_slow3(&jit_m_cmp, (int)ins.op, x, y, z, bail[pc]);
+            break;
+          }
           guard_int(pc, y, slow);
           guard_int(pc, z, slow);
           mov(rax, val(y));
@@ -794,7 +819,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
 
         case Op::Len: {
           Xbyak::Label slow, done;
-          if (inline_lists_) {          // fast path: size of a List, inline
+          if (inline_lists_ && list_site(code, pc)) {  // inline List size
             mov(al, tg(y));
             cmp(al, (int)Tag::List);
             jne(slow, T_NEAR);
@@ -818,7 +843,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
         }
         case Op::Subscr: {
           Xbyak::Label slow, done;
-          if (inline_lists_) {          // fast path: List[int], bounds-checked
+          if (inline_lists_ && list_site(code, pc)) {  // inline List[int]
             mov(al, tg(y));
             cmp(al, (int)Tag::List);
             jne(slow, T_NEAR);
@@ -1016,6 +1041,7 @@ class MethodJIT {
  public:
   explicit MethodJIT(VM& vm, int threshold = 10)
       : vm_(vm), threshold_(threshold) {
+    vm_.collect_feedback = true;
     vm_.on_call = [this](const Value& callee, Value* regs,
                          int arg_base, int argc, Value& out) -> bool {
       return on_call(callee, regs, arg_base, argc, out);

@@ -71,6 +71,24 @@ struct Instr {
   int c = 0;
 };
 
+// What the interpreter has actually seen at one bytecode site. The optimizing
+// compiler reads this instead of guessing: a site that only ever saw ints gets
+// the inline integer path, one that never did skips it, and a call site with a
+// single callee can be made a direct native call.
+struct SiteFeedback {
+  std::uint8_t tags_b = 0;   // bitmask over Tag, for operand b (or a, for jumps)
+  std::uint8_t tags_c = 0;   // ... for operand c
+  const void* callee = nullptr;  // CALL: the one callee seen, if monomorphic
+  bool polymorphic = false;      // CALL: more than one callee seen
+};
+
+inline std::uint8_t tag_bit(Value v) { return (std::uint8_t)(1u << (int)v.tag); }
+inline bool only_int_like(std::uint8_t seen) {
+  constexpr std::uint8_t kIntLike =
+      (1u << (int)Tag::Int) | (1u << (int)Tag::Bool);
+  return seen != 0 && (seen & ~kIntLike) == 0;
+}
+
 struct CodeObject {
   std::string name;
   std::vector<std::string> params;
@@ -81,6 +99,7 @@ struct CodeObject {
   std::vector<std::string> names;              // global-name pool
   std::vector<Instr> code;
   std::vector<std::string> local_names;
+  std::vector<SiteFeedback> feedback;  // one per instruction; filled by the VM
 };
 
 inline bool is_binop(Op op) { return op >= Op::Add && op <= Op::RShift; }

@@ -117,6 +117,7 @@ class Compiler {
     co->names = std::move(names_);
     co->code = std::move(code_);
     co->local_names = locals_;
+    co->feedback.resize(co->code.size());
     CodeObject* ptr = co.get();
     prog_.units.push_back(std::move(co));
     return ptr;

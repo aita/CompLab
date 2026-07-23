@@ -85,6 +85,7 @@ class VM {
   Globals globals;
   Diag diag;
   bool profile = true;
+  bool collect_feedback = false;  // record per-site types for the optimizing JIT
 
   // Back-edge hook: (code, target pc, regs, globals) -> resume pc, or <0 to keep
   // interpreting from the target. The seam a tracing JIT overrides.
@@ -228,13 +229,16 @@ class VM {
         case Op::Add: case Op::Sub: case Op::Mul: case Op::FloorDiv:
         case Op::Mod: case Op::Pow: case Op::BitAnd: case Op::BitOr:
         case Op::BitXor: case Op::LShift: case Op::RShift:
+          if (collect_feedback) note2(code, pc, regs[b], regs[c]);
           regs[a] = binop(x.op, regs[b], regs[c]);
           break;
         case Op::Eq: case Op::Ne: case Op::Lt: case Op::Le:
         case Op::Gt: case Op::Ge:
+          if (collect_feedback) note2(code, pc, regs[b], regs[c]);
           regs[a] = compare(x.op, regs[b], regs[c]);
           break;
         case Op::Neg: case Op::Pos: case Op::Invert: case Op::Not:
+          if (collect_feedback) note1(code, pc, regs[b]);
           regs[a] = unaryop(x.op, regs[b]);
           break;
 
@@ -252,13 +256,16 @@ class VM {
           pc = a;
           continue;
         case Op::JumpIfFalse:
+          if (collect_feedback) note1(code, pc, regs[a]);
           if (!truthy(regs[a])) { pc = b; continue; }
           break;
         case Op::JumpIfTrue:
+          if (collect_feedback) note1(code, pc, regs[a]);
           if (truthy(regs[a])) { pc = b; continue; }
           break;
 
         case Op::Call:
+          if (collect_feedback) note_callee(code, pc, regs[b]);
           regs[a] = do_call(regs[b], regs, b + 1, c);
           break;
         case Op::Return: return regs[a];
@@ -278,8 +285,14 @@ class VM {
           regs[a] = Value::object(Tag::List, o);
           break;
         }
-        case Op::Subscr: regs[a] = subscr(regs[b], regs[c]); break;
-        case Op::Len: regs[a] = length(regs[b]); break;
+        case Op::Subscr:
+          if (collect_feedback) note2(code, pc, regs[b], regs[c]);
+          regs[a] = subscr(regs[b], regs[c]);
+          break;
+        case Op::Len:
+          if (collect_feedback) note1(code, pc, regs[b]);
+          regs[a] = length(regs[b]);
+          break;
       }
       pc++;
     }
@@ -442,6 +455,23 @@ class VM {
       line += (i ? " " : "") + to_display(regs[base + i]);
     out_.push_back(line);
     std::println("{}", line);
+  }
+
+  static void note1(CodeObject* code, int pc, const Value& b) {
+    if (pc < (int)code->feedback.size()) code->feedback[pc].tags_b |= tag_bit(b);
+  }
+  static void note2(CodeObject* code, int pc, const Value& b, const Value& c) {
+    if (pc >= (int)code->feedback.size()) return;
+    SiteFeedback& f = code->feedback[pc];
+    f.tags_b |= tag_bit(b);
+    f.tags_c |= tag_bit(c);
+  }
+  static void note_callee(CodeObject* code, int pc, const Value& fn) {
+    if (pc >= (int)code->feedback.size()) return;
+    SiteFeedback& f = code->feedback[pc];
+    const void* o = fn.tag == Tag::Func ? (const void*)fn.obj : nullptr;
+    if (!f.callee) f.callee = o;
+    else if (f.callee != o) f.polymorphic = true;
   }
 
   void mark(const Value& v) {

@@ -31,6 +31,7 @@ class TieredJIT {
  public:
   explicit TieredJIT(VM& vm, int threshold = 10)
       : vm_(vm), threshold_(threshold) {
+    vm_.collect_feedback = true;
     worker_ = std::thread([this] { worker_loop(); });
     vm_.on_call = [this](const Value& callee, Value* regs,
                          int arg_base, int argc, Value& out) -> bool {
