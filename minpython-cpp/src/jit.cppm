@@ -23,6 +23,7 @@ import std;
 import :value;
 import :bytecode;
 import :regalloc;
+import :disasm;
 import :vm;
 
 export namespace minpython {
@@ -857,6 +858,9 @@ class TracingJIT {
     }
     if (tr.mixed) n_mixed++;
     ct.fn = (TraceFn)ct.code->getCode();
+    jit_dump(std::format("trace {}@{}{}", code->name, target,
+                         tr.mixed ? " (mixed)" : ""),
+             (const void*)ct.fn, ct.code->getSize());
     CompiledTrace& stored = (traces_[key] = std::move(ct));
     n_compiled++;
     return run(stored, regs);

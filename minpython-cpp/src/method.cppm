@@ -20,6 +20,7 @@ import std;
 import :value;
 import :bytecode;
 import :regalloc;
+import :disasm;
 import :vm;
 
 export namespace minpython {
@@ -662,6 +663,18 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     return osr_targets_.empty() ? nullptr : (void*)(getCode() + osr_off_);
   }
   bool has_osr() const { return !osr_targets_.empty(); }
+  // Which VM slots ended up in which machine register -- the thing you need to
+  // read the disassembly.
+  std::string reg_map() const {
+    std::vector<std::pair<int, int>> v;
+    for (auto& [slot, r] : slot_reg_) v.push_back({slot, r.getIdx()});
+    std::sort(v.begin(), v.end());
+    std::string s = "regs:";
+    for (auto& [slot, idx] : v) s += std::format(" r{}=>x{}", slot, idx);
+    if (v.empty()) s += " (none hoisted)";
+    if (!osr_targets_.empty()) s += std::format("  osr_off={}", osr_off_);
+    return s;
+  }
   int frame_size() const { return n_regs_ + 1; }
 
  private:
@@ -1258,6 +1271,8 @@ class MethodJIT {
         return -1;
       }
       me->fn = me->code->entry_addr();
+      jit_dump(std::format("method(obj,osr) {}", code->name), me->fn,
+               me->code->getSize(), me->code->reg_map());
       it = mixed_.emplace(key, std::move(me)).first;
       n_mixed++;
     }
@@ -1325,6 +1340,8 @@ class MethodJIT {
         return false;
       }
       cm->fn = cm->code->entry_addr();
+      jit_dump(std::format("method(int) {}", code->name), cm->fn,
+               cm->code->getSize());
       cm->argc = argc;
       it = compiled_.emplace(key, std::move(cm)).first;
       n_compiled++;

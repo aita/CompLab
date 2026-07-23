@@ -9,6 +9,7 @@ export import :parser;
 export import :compiler;
 export import :vm;
 export import :regalloc;
+export import :disasm;
 export import :jit;
 export import :method;
 export import :tiered;
