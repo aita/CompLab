@@ -1,0 +1,21 @@
+# Two ways to compute Fibonacci: an iterative loop (hot `while`, JIT-friendly)
+# and the recursive definition (exercises calls and returns).
+
+def fib_iter(n):
+    a = 0
+    b = 1
+    i = 0
+    while i < n:
+        t = a + b
+        a = b
+        b = t
+        i = i + 1
+    return a
+
+def fib_rec(n):
+    if n < 2:
+        return n
+    return fib_rec(n - 1) + fib_rec(n - 2)
+
+print(fib_iter(30))
+print(fib_rec(20))
