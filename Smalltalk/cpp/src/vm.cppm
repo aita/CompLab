@@ -45,6 +45,24 @@ public:
     void register_class(Class* c) {
         classes_[c->name] = c;
         globals_[c->name] = ref(c);
+        flush_caches();
+    }
+
+    // Invalidate all method-lookup caches. Call after any change to a method
+    // dictionary or the class hierarchy.
+    void flush_caches() {
+        for (auto& [name, c] : classes_) c->mcache.clear();
+    }
+
+    // Disable the inline integer fast path if an arithmetic selector is
+    // overridden on a class that SmallInteger inherits from.
+    void note_override(Class* cls, const std::string& sel) {
+        static const std::string arith[] = {"+", "-", "*", "<", ">", "<=", ">=", "="};
+        bool is_arith = false;
+        for (const auto& s : arith) is_arith |= (s == sel);
+        if (!is_arith) return;
+        Class* si = classes_["SmallInteger"];
+        if (si != nullptr && si->is_kind_of(cls)) optimize_arithmetic_ = false;
     }
     Class* find_class(const std::string& name) {
         auto it = classes_.find(name);
@@ -62,6 +80,7 @@ public:
             case Tag::Symbol: return classes_["Symbol"];
             case Tag::Character: return classes_["Character"];
             case Tag::Array: return classes_["Array"];
+            case Tag::Dictionary: return classes_["Dictionary"];
             case Tag::Class: return classes_["Class"];
             case Tag::Instance: return static_cast<Instance*>(o)->st_class;
             case Tag::Block: return classes_["BlockClosure"];
@@ -137,6 +156,7 @@ private:
     std::unordered_map<std::string, Class*> classes_;
     Context* active_context_ = nullptr;
     bool errored_ = false;
+    bool optimize_arithmetic_ = true;
     std::string error_;
 
     static bool is_value_selector(const std::string& s, int argc) {
@@ -292,6 +312,26 @@ private:
                     stk->erase(stk->end() - argc, stk->end());
                     Value receiver = stk->back();
                     stk->pop_back();
+
+                    // inline fast path: SmallInteger binary arithmetic/compare
+                    if (ins.op == Op::Send && optimize_arithmetic_ && argc == 1 &&
+                        std::holds_alternative<std::int64_t>(receiver) &&
+                        std::holds_alternative<std::int64_t>(args[0])) {
+                        std::int64_t x = std::get<std::int64_t>(receiver);
+                        std::int64_t y = std::get<std::int64_t>(args[0]);
+                        const std::string& s = ins.name;
+                        bool done = true;
+                        if (s == "+") stk->push_back(Value{x + y});
+                        else if (s == "-") stk->push_back(Value{x - y});
+                        else if (s == "*") stk->push_back(Value{x * y});
+                        else if (s == "<") stk->push_back(Value{x < y});
+                        else if (s == ">") stk->push_back(Value{x > y});
+                        else if (s == "<=") stk->push_back(Value{x <= y});
+                        else if (s == ">=") stk->push_back(Value{x >= y});
+                        else if (s == "=") stk->push_back(Value{x == y});
+                        else done = false;
+                        if (done) break;
+                    }
 
                     if (ins.op == Op::Send) {
                         if (Block* blk = as<Block>(receiver)) {

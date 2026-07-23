@@ -45,6 +45,7 @@ public:
     String* new_string(std::string s) { return make<String>(std::move(s)); }
     Character* new_char(char c) { return make<Character>(c); }
     Array* new_array() { return make<Array>(); }
+    Dict* new_dict() { return make<Dict>(); }
     Class* new_class(std::string name) { return make<Class>(std::move(name)); }
     Instance* new_instance(Class* c) { return make<Instance>(c); }
     CompiledMethod* new_method() { return make<CompiledMethod>(); }
@@ -119,6 +120,12 @@ private:
             case Tag::Array:
                 for (const Value& e : static_cast<Array*>(o)->items)
                     push_value(work, e);
+                break;
+            case Tag::Dictionary:
+                for (const auto& [k, v] : static_cast<Dict*>(o)->map) {
+                    push_value(work, k);
+                    push_value(work, v);
+                }
                 break;
             case Tag::Class: {
                 auto* c = static_cast<Class*>(o);

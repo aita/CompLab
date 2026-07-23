@@ -58,12 +58,13 @@ public:
         if (Class* existing = vm_.find_class(name)) {
             existing->superclass = sup;
             existing->ivar_names = std::move(ivars);
+            vm_.flush_caches();
             return existing;
         }
         Class* c = heap_.new_class(name);
         c->superclass = sup;
         c->ivar_names = std::move(ivars);
-        vm_.register_class(c);
+        vm_.register_class(c);  // registers + flushes caches
         return c;
     }
 
@@ -83,6 +84,8 @@ public:
         CompiledMethod* m = comp.compile_method(p.value, std::string(src));
         m->defined_in = c;
         c->methods[m->selector] = Method{nullptr, m};
+        vm_.note_override(c, m->selector);
+        vm_.flush_caches();
         return m;
     }
 
@@ -134,6 +137,21 @@ public:
             {"SequenceableCollection",
              "asOrderedCollection\n"
              "  | r | r := OrderedCollection new. self do: [:e | r add: e]. ^r"},
+            {"Dictionary",
+             "at: key ifAbsent: aBlock\n"
+             "  (self includesKey: key) ifTrue: [^self at: key]. ^aBlock value"},
+            {"Dictionary",
+             "at: key ifAbsentPut: aBlock\n"
+             "  | v |\n"
+             "  (self includesKey: key) ifTrue: [^self at: key].\n"
+             "  v := aBlock value. self at: key put: v. ^v"},
+            {"Dictionary",
+             "keysAndValuesDo: aBlock\n"
+             "  self keys do: [:k | aBlock value: k value: (self at: k)]"},
+            {"Dictionary",
+             "do: aBlock\n"
+             "  self keys do: [:k | aBlock value: (self at: k)]"},
+            {"Dictionary", "keysDo: aBlock\n  self keys do: aBlock"},
         };
         for (const Def& d : defs) define_method(d.cls, d.src);
     }

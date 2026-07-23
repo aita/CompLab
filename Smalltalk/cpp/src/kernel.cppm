@@ -83,6 +83,7 @@ void build_kernel(VM& vm) {
     Class* String_ = cls("String", Seq);
     cls("Symbol", String_);
     Class* OrderedCollection = cls("OrderedCollection", Seq, {"items"});
+    Class* Dictionary = cls("Dictionary", Collection);
     Class* BlockClosure = cls("BlockClosure", Object);
     Class* Transcript = cls("Transcript", Object);
     cls("Context", Object);
@@ -403,6 +404,48 @@ void build_kernel(VM& vm) {
     def(OrderedCollection, "asArray", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
         Array* out = vm.heap().new_array();
         out->items = oc_items(r)->items;
+        return ref(out);
+    });
+
+    // --- Dictionary ---
+    cdef(Dictionary, "new", [](VM& vm, const Value&, std::vector<Value>&) -> Value {
+        return ref(vm.heap().new_dict());
+    });
+    def(Dictionary, "at:put:", [](VM&, const Value& r, std::vector<Value>& a) -> Value {
+        as<Dict>(r)->map[a[0]] = a[1];
+        return a[1];
+    });
+    def(Dictionary, "at:", [](VM& vm, const Value& r, std::vector<Value>& a) -> Value {
+        auto& m = as<Dict>(r)->map;
+        auto it = m.find(a[0]);
+        if (it == m.end()) { vm.fail("key not found: " + print_string(a[0])); return nil(); }
+        return it->second;
+    });
+    def(Dictionary, "includesKey:", [](VM&, const Value& r, std::vector<Value>& a) -> Value {
+        return Value{as<Dict>(r)->map.count(a[0]) != 0};
+    });
+    def(Dictionary, "removeKey:", [](VM&, const Value& r, std::vector<Value>& a) -> Value {
+        auto& m = as<Dict>(r)->map;
+        auto it = m.find(a[0]);
+        if (it == m.end()) return nil();
+        Value v = it->second;
+        m.erase(it);
+        return v;
+    });
+    def(Dictionary, "size", [](VM&, const Value& r, std::vector<Value>&) -> Value {
+        return Value{static_cast<std::int64_t>(as<Dict>(r)->map.size())};
+    });
+    def(Dictionary, "isEmpty", [](VM&, const Value& r, std::vector<Value>&) -> Value {
+        return Value{as<Dict>(r)->map.empty()};
+    });
+    def(Dictionary, "keys", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
+        Array* out = vm.heap().new_array();
+        for (const auto& [k, v] : as<Dict>(r)->map) out->items.push_back(k);
+        return ref(out);
+    });
+    def(Dictionary, "values", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
+        Array* out = vm.heap().new_array();
+        for (const auto& [k, v] : as<Dict>(r)->map) out->items.push_back(v);
         return ref(out);
     });
 

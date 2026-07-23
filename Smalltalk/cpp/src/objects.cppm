@@ -7,6 +7,7 @@
 // no shared_ptr, no reference counting.
 module;
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <variant>
@@ -48,6 +49,7 @@ enum class Tag {
     Symbol,
     Character,
     Array,
+    Dictionary,
     Class,
     Instance,
     CompiledMethod,
@@ -97,6 +99,45 @@ struct Array : Object {
     Array() : Object(TAG) {}
 };
 
+// Hash/equality for Dictionary keys: numbers by value, Strings by content,
+// Symbols/Characters by content (symbols are interned), other objects by
+// identity. Keys of different immediate kinds never compare equal.
+struct ValueHash {
+    std::size_t operator()(const Value& v) const {
+        if (is_nil(v)) return 0;
+        if (auto* b = std::get_if<bool>(&v)) return *b ? 1 : 2;
+        if (auto* i = std::get_if<std::int64_t>(&v)) return std::hash<std::int64_t>{}(*i);
+        if (auto* d = std::get_if<double>(&v)) return std::hash<double>{}(*d);
+        Object* o = std::get<Object*>(v);
+        if (o->tag == Tag::String) return std::hash<std::string>{}(static_cast<String*>(o)->data);
+        if (o->tag == Tag::Symbol) return std::hash<std::string>{}(static_cast<Symbol*>(o)->data);
+        if (o->tag == Tag::Character) return std::hash<char>{}(static_cast<Character*>(o)->value);
+        return std::hash<void*>{}(o);
+    }
+};
+struct ValueEq {
+    bool operator()(const Value& a, const Value& b) const {
+        if (a.index() != b.index()) return false;
+        if (auto* pa = std::get_if<Object*>(&a)) {
+            Object* oa = *pa;
+            Object* ob = std::get<Object*>(b);
+            if (oa->tag != ob->tag) return false;
+            if (oa->tag == Tag::String)
+                return static_cast<String*>(oa)->data == static_cast<String*>(ob)->data;
+            if (oa->tag == Tag::Character)
+                return static_cast<Character*>(oa)->value == static_cast<Character*>(ob)->value;
+            return oa == ob;  // symbols (interned) and other objects: identity
+        }
+        return a == b;  // nil / bool / int / double
+    }
+};
+
+struct Dict : Object {
+    static constexpr Tag TAG = Tag::Dictionary;
+    std::unordered_map<Value, Value, ValueHash, ValueEq> map;
+    Dict() : Object(TAG) {}
+};
+
 struct CompiledMethod;
 
 // A method is a C++ primitive or a compiled bytecode method.
@@ -116,15 +157,26 @@ struct Class : Object {
     std::vector<std::string> ivar_names;
     std::unordered_map<std::string, Method> methods;
     std::unordered_map<std::string, Method> class_methods;
+    // Resolved-lookup cache (selector -> method, nullptr = cached miss).
+    // Node pointers into `methods` stay valid across inserts; cleared by
+    // VM::flush_caches when any method dictionary or the hierarchy changes.
+    std::unordered_map<std::string, Method*> mcache;
 
     explicit Class(std::string n) : Object(TAG), name(std::move(n)) {}
 
     Method* lookup(const std::string& sel) {
+        auto hit = mcache.find(sel);
+        if (hit != mcache.end()) return hit->second;
+        Method* found = nullptr;
         for (Class* c = this; c != nullptr; c = c->superclass) {
             auto it = c->methods.find(sel);
-            if (it != c->methods.end()) return &it->second;
+            if (it != c->methods.end()) {
+                found = &it->second;
+                break;
+            }
         }
-        return nullptr;
+        mcache[sel] = found;
+        return found;
     }
     Method* lookup_class(const std::string& sel) {
         for (Class* c = this; c != nullptr; c = c->superclass) {
@@ -234,6 +286,12 @@ inline std::string print_object(Object* o) {
             std::string s = "(";
             for (const auto& e : static_cast<Array*>(o)->items)
                 s += print_string(e) + " ";
+            return s + ")";
+        }
+        case Tag::Dictionary: {
+            std::string s = "a Dictionary (";
+            for (const auto& [k, v] : static_cast<Dict*>(o)->map)
+                s += print_string(k) + "->" + print_string(v) + " ";
             return s + ")";
         }
         case Tag::Class:

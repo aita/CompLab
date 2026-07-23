@@ -52,15 +52,20 @@ Counter >> increment  count := count + 1
 Counter >> count      ^count
 ```
 
-`Character`, `Array`, `String`, and `OrderedCollection` with the higher-order
-protocol — `do:`, `collect:`, `select:`, `reject:`, `detect:ifNone:`,
-`inject:into:`, `includes:`, … These are written **in Smalltalk** (a prelude in
-`system.cppm`) on top of `at:` / `size` / `whileTrue:` / `value:`, so block
-sends and `^` flow through the one non-recursive loop — no primitive re-enters
-the VM, no exceptions.
+`Character`, `Array`, `String`, `OrderedCollection`, and `Dictionary` with the
+higher-order protocol — `do:`, `collect:`, `select:`, `reject:`,
+`detect:ifNone:`, `inject:into:`, `includes:`, `at:ifAbsent:`,
+`keysAndValuesDo:`, … The iteration methods are written **in Smalltalk** (a
+prelude in `system.cppm`) on top of `at:` / `size` / `whileTrue:` / `value:`, so
+block sends and `^` flow through the one non-recursive loop — no primitive
+re-enters the VM, no exceptions.
 
-Not yet ported from the Python side: `Dictionary`, metaclasses, the IDE, and
-the performance work (method cache, inline arithmetic, dispatch ordering).
+Performance mirrors the Python port: a per-class method-lookup cache (flushed on
+any method/hierarchy change) and an inline SmallInteger arithmetic fast path in
+the VM loop (auto-disabled if a numeric class overrides an operator). The opcode
+`switch` is already a jump table, so no dispatch reordering is needed.
+
+Not yet ported from the Python side: metaclasses and the IDE.
 
 ## Build & run
 

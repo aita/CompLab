@@ -118,6 +118,33 @@ void test_collections() {
     check(ev(sys, "(#(10 20 30) inject: 0 into: [:a :b | a + b])") == "60", "inject sum");
 }
 
+void test_dictionary() {
+    st::System sys;
+    check(ev(sys, "| d | d := Dictionary new. d at: #a put: 1. d at: #b put: 2. d at: #a") == "1",
+          "Dictionary at:put: / at:");
+    check(ev(sys, "| d | d := Dictionary new. d at: #a put: 1. d includesKey: #b") == "false",
+          "includesKey:");
+    check(ev(sys, "| d | d := Dictionary new. d at: 1 put: 'one'. d at: 2 ifAbsent: ['none']") == "'none'",
+          "at:ifAbsent:");
+    check(ev(sys, "| d | d := Dictionary new. d at: #x put: 10. d at: #y put: 20. d size") == "2",
+          "size");
+    check(ev(sys, "| d sum | d := Dictionary new. d at: #a put: 3. d at: #b put: 4. "
+                  "sum := 0. d do: [:v | sum := sum + v]. sum") == "7",
+          "Dictionary do: over values");
+}
+
+void test_arithmetic_fast_path() {
+    st::System sys;
+    // fast path must match primitive semantics
+    check(ev(sys, "1000000 * 1000000") == "1000000000000", "int * fast path");
+    check(ev(sys, "5 - 8") == "-3", "int - fast path");
+    check(ev(sys, "3 = 3") == "true", "int = fast path");
+    // overriding an arithmetic selector on a numeric class disables the fast path
+    sys.define_method("SmallInteger", "* other\n  ^42");
+    check(ev(sys, "3 * 4") == "42", "override wins after fast path disabled");
+    check(ev(sys, "3 + 4") == "7", "other operators still correct");
+}
+
 void test_string_iteration() {
     st::System sys;
     check(ev(sys, "| n | n := 0. 'hello' do: [:c | n := n + 1]. n") == "5",
@@ -144,6 +171,8 @@ int main() {
     test_non_local_return();
     test_character();
     test_collections();
+    test_dictionary();
+    test_arithmetic_fast_path();
     test_string_iteration();
     test_gc_survives_computation();
     if (failures == 0) std::println("all tests passed");
