@@ -77,6 +77,8 @@ inline Alloc linear_scan(std::vector<Interval> intervals, int n_regs) {
       out.loc[iv.key] = Loc{reg, -1};
       used.insert(reg);
       active.push_back({iv.end, iv.key});
+    } else if (active.empty()) {
+      out.loc[iv.key] = Loc{-1, spill_slot()};  // no registers at all
     } else {
       sort_active();
       auto furthest = active.back();

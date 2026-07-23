@@ -145,9 +145,38 @@ inline std::optional<std::unordered_set<int>> feasible(const CodeObject& code,
   return reach;
 }
 
+// def / use for the *object-capable* compiler. It differs from the int one:
+// LOAD_GLOBAL really defines its slot (nothing is elided), CALL reads the callee
+// slot for its identity guard, and LEN / SUBSCR exist at all. Getting this wrong
+// silently corrupts register allocation, so it is spelled out separately.
+inline void def_use_obj(const Instr& ins, std::vector<int>& defs,
+                        std::vector<int>& uses) {
+  defs.clear();
+  uses.clear();
+  Op op = ins.op;
+  if (op == Op::LoadConst || op == Op::LoadGlobal) {
+    defs = {ins.a};
+  } else if (op == Op::Move) {
+    defs = {ins.a}; uses = {ins.b};
+  } else if (is_binop(op) || is_cmpop(op) || op == Op::Subscr) {
+    defs = {ins.a}; uses = {ins.b, ins.c};
+  } else if (is_unaryop(op) || op == Op::Len) {
+    defs = {ins.a}; uses = {ins.b};
+  } else if (op == Op::JumpIfFalse || op == Op::JumpIfTrue) {
+    uses = {ins.a};
+  } else if (op == Op::Call) {
+    defs = {ins.a};
+    uses.push_back(ins.b);                       // the callee itself
+    for (int i = 0; i < ins.c; ++i) uses.push_back(ins.b + 1 + i);
+  } else if (op == Op::Return) {
+    uses = {ins.a};
+  }
+}
+
 // Backward-dataflow liveness -> a [start, end] interval per VM register.
 inline std::unordered_map<int, std::pair<int, int>> live_ranges(
-    const CodeObject& code, const std::unordered_set<int>& reach) {
+    const CodeObject& code, const std::unordered_set<int>& reach,
+    bool object_mode = false) {
   std::vector<int> order(reach.begin(), reach.end());
   std::sort(order.rbegin(), order.rend());  // descending
 
@@ -156,7 +185,8 @@ inline std::unordered_map<int, std::pair<int, int>> live_ranges(
   for (int pc : reach) {
     live_in[pc] = {};
     std::vector<int> d, u;
-    def_use(code.code[pc], d, u);
+    if (object_mode) def_use_obj(code.code[pc], d, u);
+    else def_use(code.code[pc], d, u);
     du[pc] = {d, u};
   }
   bool changed = true;
@@ -621,6 +651,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
       : vm_(vm), self_obj_(self_obj) {
     n_regs_ = code.n_regs;
     known_ = mdetail::known_int_slots(code, reach);
+    allocate(code, reach);
     emit(code, reach);
     ready();
   }
@@ -636,6 +667,54 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
  private:
   Xbyak::Address tg(int slot) {
     return Xbyak::util::byte[Xbyak::util::r12 + slot * kValueSize + kTagOffset];
+  }
+  // Hoisting. Payloads of hot slots live in callee-saved registers; the tag
+  // always stays in memory, so bool-vs-int stays exact for free. Any path that
+  // calls out (a safepoint, and the only place a GC can run) flushes first, so
+  // the collector and the helper both see the real values.
+  bool has_reg(int s) const { return slot_reg_.count(s) != 0; }
+  Xbyak::Reg64 reg(int s) const { return slot_reg_.at(s); }
+  void ld(const Xbyak::Reg64& dst, int slot) {
+    if (has_reg(slot)) { if (reg(slot).getIdx() != dst.getIdx()) mov(dst, reg(slot)); }
+    else mov(dst, val(slot));
+  }
+  void st(int slot) {  // payload <- rax
+    using namespace Xbyak::util;
+    if (has_reg(slot)) mov(reg(slot), rax);
+    else mov(val(slot), rax);
+  }
+  template <class F>
+  void with(int slot, F&& f) {
+    if (has_reg(slot)) f(reg(slot));
+    else f(val(slot));
+  }
+  void flush_all() {
+    for (auto& [slot, r] : slot_reg_) mov(val(slot), r);
+  }
+  void reload(int slot) {
+    if (has_reg(slot)) mov(reg(slot), val(slot));
+  }
+  void load_all() {
+    for (auto& [slot, r] : slot_reg_) mov(r, val(slot));
+  }
+
+  void allocate(const CodeObject& code, const std::unordered_set<int>& reach) {
+    using namespace Xbyak::util;
+    // Only call-free functions hoist for now. Once a call is in the picture the
+    // frame has to be flushed and reloaded around every safepoint, and getting
+    // that exactly right interacts with the self-call frame setup, the generic
+    // call helper and the bail paths -- so that is left for its own change.
+    // The loops this is really for (tight integer loops, where the tracing JIT
+    // still wins) contain no calls anyway.
+    for (int pc : reach)
+      if (code.code[pc].op == Op::Call) return;
+    std::vector<Xbyak::Reg64> pool = {r13, r14, r15, rbp};  // callee-saved
+    auto ranges = mdetail::live_ranges(code, reach, /*object_mode=*/true);
+    std::vector<Interval> intervals;
+    for (auto& [r, se] : ranges) intervals.push_back({se.first, se.second, r});
+    Alloc a = linear_scan(intervals, (int)pool.size());
+    for (auto& [slot, loc] : a.loc)
+      if (loc.in_reg()) slot_reg_.insert({slot, pool[loc.reg]});
   }
   Xbyak::Address val(int slot) {
     return Xbyak::util::qword[Xbyak::util::r12 + slot * kValueSize +
@@ -684,12 +763,24 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   void emit_slow3(int (*fn)(VM*, Value*, int, int, int, int), int op, int a,
                   int b, int c, Xbyak::Label& bail) {
     using namespace Xbyak::util;
+    flush_all();   // safepoint: the helper reads the array, and may collect
     mov(rdi, rbx); mov(rsi, r12); mov(edx, op);
     mov(ecx, a); mov(r8d, b); mov(r9d, c);
     mov(rax, (std::uint64_t)(std::uintptr_t)fn);
     call(rax);
     test(eax, eax);
     jz(bail, T_NEAR);
+    reload(a);
+  }
+
+  // Move between VM slots, honouring hoisting: the tag travels through memory
+  // (it always lives there), the payload through the register file.
+  void move_value(int dst, int src) {
+    using namespace Xbyak::util;
+    mov(al, tg(src));
+    mov(tg(dst), al);
+    ld(rax, src);
+    st(dst);
   }
 
   void copy_value(int dst, int src) {
@@ -705,14 +796,21 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     std::unordered_map<int, Xbyak::Label> labels, bail;
     for (int pc : reach) { labels[pc]; bail[pc]; }
 
-    // 5 pushes = 40 bytes, leaving rsp 16-aligned for the calls we make.
+    // 6 pushes + a 24-byte scratch area leaves rsp 16-aligned for our calls.
+    // r13/r14/r15/rbp are freed for value hoisting, so the Globals pointer and
+    // the self-call temporaries live in the scratch area instead.
     L(entry_);
-    push(rbx); push(r12); push(r13); push(r14); push(r15);
+    push(rbx); push(r12); push(r13); push(r14); push(r15); push(rbp);
+    sub(rsp, 24);
     mov(r12, rdi);  // frame array
     mov(rbx, rsi);  // VM*
-    mov(r13, rdx);  // Globals*
+    mov(qword[rsp + 0], rdx);  // Globals*
+    load_all();
 
-    auto pops = [&] { pop(r15); pop(r14); pop(r13); pop(r12); pop(rbx); };
+    auto pops = [&] {
+      add(rsp, 24);
+      pop(rbp); pop(r15); pop(r14); pop(r13); pop(r12); pop(rbx);
+    };
 
     for (int pc = 0; pc < (int)code.code.size(); ++pc) {
       if (!reach.count(pc)) continue;
@@ -725,18 +823,20 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           mov(rax, qword[rcx]);
           mov(hi(x), rax);
           mov(rax, qword[rcx + 8]);
-          mov(val(x), rax);
+          st(x);
           break;
-        case Op::Move: copy_value(x, y); break;
+        case Op::Move: move_value(x, y); break;
 
         case Op::LoadGlobal:
-          mov(rdi, rbx); mov(rsi, r13); mov(rdx, r12);
+          flush_all();
+          mov(rdi, rbx); mov(rsi, qword[rsp + 0]); mov(rdx, r12);
           mov(rcx, (std::uint64_t)(std::uintptr_t)&code);
           mov(r8d, x); mov(r9d, y);
           mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_loadglobal);
           call(rax);
           test(eax, eax);
           jz(bail[pc], T_NEAR);
+          reload(x);
           break;
 
         case Op::Add: case Op::Sub: case Op::Mul: case Op::BitAnd:
@@ -748,18 +848,18 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           }
           guard_int(pc, y, slow);
           guard_int(pc, z, slow);
-          mov(rax, val(y));
+          ld(rax, y);
           switch (ins.op) {
-            case Op::Add: add(rax, val(z)); break;
-            case Op::Sub: sub(rax, val(z)); break;
-            case Op::Mul: imul(rax, val(z)); break;
-            case Op::BitAnd: and_(rax, val(z)); break;
-            case Op::BitOr: or_(rax, val(z)); break;
-            case Op::BitXor: xor_(rax, val(z)); break;
-            case Op::LShift: mov(rcx, val(z)); shl(rax, cl); break;
-            default: mov(rcx, val(z)); sar(rax, cl); break;
+            case Op::Add: with(z, [&](auto&& o){ add(rax, o); }); break;
+            case Op::Sub: with(z, [&](auto&& o){ sub(rax, o); }); break;
+            case Op::Mul: with(z, [&](auto&& o){ imul(rax, o); }); break;
+            case Op::BitAnd: with(z, [&](auto&& o){ and_(rax, o); }); break;
+            case Op::BitOr: with(z, [&](auto&& o){ or_(rax, o); }); break;
+            case Op::BitXor: with(z, [&](auto&& o){ xor_(rax, o); }); break;
+            case Op::LShift: ld(rcx, z); shl(rax, cl); break;
+            default: ld(rcx, z); sar(rax, cl); break;
           }
-          mov(val(x), rax);
+          st(x);
           mov(tg(x), (int)Tag::Int);
           jmp(done, T_NEAR);
           L(slow);
@@ -777,8 +877,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           }
           guard_int(pc, y, slow);
           guard_int(pc, z, slow);
-          mov(rax, val(y));
-          cmp(rax, val(z));
+          ld(rax, y);
+          with(z, [&](auto&& o){ cmp(rax, o); });
           switch (ins.op) {
             case Op::Eq: sete(al); break;
             case Op::Ne: setne(al); break;
@@ -788,7 +888,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
             default: setge(al); break;
           }
           movzx(eax, al);
-          mov(val(x), rax);
+          st(x);
           mov(tg(x), (int)Tag::Bool);
           jmp(done, T_NEAR);
           L(slow);
@@ -800,20 +900,22 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
         case Op::Neg: case Op::Pos: case Op::Invert: case Op::Not: {
           Xbyak::Label slow, done;
           guard_int(pc, y, slow);
-          mov(rax, val(y));
+          ld(rax, y);
           if (ins.op == Op::Neg) neg(rax);
           else if (ins.op == Op::Invert) not_(rax);
           else if (ins.op == Op::Not) { test(rax, rax); sete(al); movzx(eax, al); }
-          mov(val(x), rax);
+          st(x);
           mov(tg(x), ins.op == Op::Not ? (int)Tag::Bool : (int)Tag::Int);
           jmp(done, T_NEAR);
           L(slow);
+          flush_all();
           mov(rdi, rbx); mov(rsi, r12); mov(edx, (int)ins.op);
           mov(ecx, x); mov(r8d, y);
           mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_unary);
           call(rax);
           test(eax, eax);
           jz(bail[pc], T_NEAR);
+          reload(x);
           L(done);
           break;
         }
@@ -824,21 +926,23 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
             mov(al, tg(y));
             cmp(al, (int)Tag::List);
             jne(slow, T_NEAR);
-            mov(rcx, val(y));
+            ld(rcx, y);
             mov(rdx, qword[rcx + list_off_]);
             mov(rax, qword[rcx + list_off_ + 8]);
             sub(rax, rdx);
             sar(rax, 4);
-            mov(val(x), rax);
+            st(x);
             mov(tg(x), (int)Tag::Int);
             jmp(done, T_NEAR);
           }
           L(slow);
+          flush_all();
           mov(rdi, rbx); mov(rsi, r12); mov(edx, x); mov(ecx, y);
           mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_len);
           call(rax);
           test(eax, eax);
           jz(bail[pc], T_NEAR);
+          reload(x);
           L(done);
           break;
         }
@@ -851,12 +955,12 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
             mov(al, tg(z));
             cmp(al, (int)Tag::Int);
             jne(slow, T_NEAR);
-            mov(rcx, val(y));
+            ld(rcx, y);
             mov(rdx, qword[rcx + list_off_]);        // begin
             mov(r8, qword[rcx + list_off_ + 8]);     // end
             sub(r8, rdx);
             sar(r8, 4);                              // size
-            mov(rax, val(z));
+            ld(rax, z);
             cmp(rax, r8);
             jae(slow, T_NEAR);   // unsigned: catches negative and out-of-range
             shl(rax, 4);
@@ -864,15 +968,17 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
             mov(rax, qword[rdx]);
             mov(hi(x), rax);
             mov(rax, qword[rdx + kPayloadOffset]);
-            mov(val(x), rax);
+            st(x);
             jmp(done, T_NEAR);
           }
           L(slow);
+          flush_all();
           mov(rdi, rbx); mov(rsi, r12); mov(edx, x); mov(ecx, y); mov(r8d, z);
           mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_subscr);
           call(rax);
           test(eax, eax);
           jz(bail[pc], T_NEAR);
+          reload(x);
           L(done);
           break;
         }
@@ -880,11 +986,13 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           if (self_obj_ && is_self_call(code, pc)) {
             emit_native_self_call(code, x, y, z, bail[pc]);
           } else {
+            flush_all();
             mov(rdi, rbx); mov(rsi, r12); mov(edx, x); mov(ecx, y); mov(r8d, z);
             mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_call);
             call(rax);
             test(eax, eax);
             jz(bail[pc], T_NEAR);
+            reload(x);
           }
           break;
 
@@ -892,12 +1000,14 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
         case Op::JumpIfFalse: case Op::JumpIfTrue: {
           Xbyak::Label slow, have;
           guard_int(pc, x, slow);
-          mov(rax, val(x));       // int-like: truthiness is payload != 0
+          ld(rax, x);             // int-like: truthiness is payload != 0
           jmp(have, T_NEAR);
           L(slow);                // any other type: ask the runtime
+          flush_all();
           mov(rdi, r12); mov(esi, x);
           mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_truthy);
           call(rax);
+          movzx(eax, al);   // it returns int; clear the upper half before test
           L(have);
           test(rax, rax);
           if (ins.op == Op::JumpIfFalse) jz(labels[y], T_NEAR);
@@ -906,7 +1016,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
         }
 
         case Op::Return:
-          copy_value(n_regs_, x);  // the result slot
+          flush_all();             // make the array authoritative first
+          copy_value(n_regs_, x);  // ... then take the result out of it
           pops();
           mov(rax, -1);
           ret();
@@ -919,6 +1030,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     // just resumes at this pc.
     for (int pc : reach) {
       L(bail[pc]);
+      flush_all();
       pops();
       mov(rax, pc);
       ret();
@@ -933,10 +1045,12 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     }
     if (!osr_targets_.empty()) {
       osr_off_ = (int)getSize();
-      push(rbx); push(r12); push(r13); push(r14); push(r15);
+      push(rbx); push(r12); push(r13); push(r14); push(r15); push(rbp);
+      sub(rsp, 24);
       mov(r12, rdi);
       mov(rbx, rsi);
-      mov(r13, rdx);
+      mov(qword[rsp + 0], rdx);
+      load_all();
       std::vector<int> targets(osr_targets_.begin(), osr_targets_.end());
       std::sort(targets.begin(), targets.end());
       for (int t : targets) {
@@ -955,6 +1069,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
                              Xbyak::Label& bail) {
     using namespace Xbyak::util;
     int fsize = n_regs_ + 1;
+    flush_all();  // the callee copies its arguments out of our frame array
 
     mov(al, tg(fr));                       // callee identity guard
     cmp(al, (int)Tag::Func);
@@ -965,56 +1080,60 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     jne(bail, T_NEAR);
 
     mov(rcx, (std::uint64_t)(std::uintptr_t)&vm_->vtop);
-    mov(r14, qword[rcx]);                  // r14 = old vtop, restored after
-    mov(rdx, r14);
+    mov(rax, qword[rcx]);
+    mov(qword[rsp + 8], rax);              // saved vtop, restored after
+    mov(rdx, rax);
     add(rdx, fsize);
-    mov(rax, (std::uint64_t)vm_->vstack.size());
-    cmp(rdx, rax);
+    mov(r8, (std::uint64_t)vm_->vstack.size());
+    cmp(rdx, r8);
     ja(bail, T_NEAR);                      // frame stack full -> interpret
     mov(qword[rcx], rdx);
 
-    mov(r15, (std::uint64_t)(std::uintptr_t)vm_->vstack.data());
-    mov(rax, r14);
+    mov(r8, (std::uint64_t)(std::uintptr_t)vm_->vstack.data());
     shl(rax, 4);
-    add(r15, rax);                         // r15 = callee frame
+    add(r8, rax);                          // r8 = callee frame
+    mov(qword[rsp + 16], r8);
 
     for (int k = 0; k < fsize; ++k)        // a fresh frame reads as None
-      mov(byte[r15 + k * kValueSize], (int)Tag::None);
+      mov(byte[r8 + k * kValueSize], (int)Tag::None);
     for (int i = 0; i < argc; ++i) {
       mov(rax, qword[r12 + (fr + 1 + i) * kValueSize]);
-      mov(qword[r15 + i * kValueSize], rax);
+      mov(qword[r8 + i * kValueSize], rax);
       mov(rax, val(fr + 1 + i));
-      mov(qword[r15 + i * kValueSize + kPayloadOffset], rax);
+      mov(qword[r8 + i * kValueSize + kPayloadOffset], rax);
     }
 
-    mov(rdi, r15);
+    mov(rdi, r8);
     mov(rsi, rbx);
-    mov(rdx, r13);
+    mov(rdx, qword[rsp + 0]);
     call(entry_);
 
     Xbyak::Label done, finish;
+    mov(r8, qword[rsp + 16]);              // the call clobbered r8
     cmp(rax, 0);
     jge(finish, T_NEAR);
-    mov(rcx, qword[r15 + n_regs_ * kValueSize]);      // completed: take result
+    mov(rcx, qword[r8 + n_regs_ * kValueSize]);      // completed: take result
     mov(hi(dst), rcx);
-    mov(rcx, qword[r15 + n_regs_ * kValueSize + kPayloadOffset]);
-    mov(val(dst), rcx);
+    mov(rax, qword[r8 + n_regs_ * kValueSize + kPayloadOffset]);
+    st(dst);
     jmp(done, T_NEAR);
 
     L(finish);   // the callee bailed: finish that frame in the interpreter
     mov(rdi, rbx);
-    mov(rsi, r15);
+    mov(rsi, r8);
     mov(rdx, (std::uint64_t)(std::uintptr_t)&code);
-    mov(rcx, r13);
+    mov(rcx, qword[rsp + 0]);
     mov(r8d, eax);
     mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_finish);
     call(rax);
     mov(hi(dst), rax);
-    mov(val(dst), rdx);
+    mov(rax, rdx);
+    st(dst);
 
     L(done);
     mov(rcx, (std::uint64_t)(std::uintptr_t)&vm_->vtop);
-    mov(qword[rcx], r14);                  // release the frame
+    mov(rax, qword[rsp + 8]);
+    mov(qword[rcx], rax);                  // release the frame
     mov(rax, (std::uint64_t)(std::uintptr_t)&vm_->diag.failed);
     mov(al, byte[rax]);
     test(al, al);
@@ -1023,6 +1142,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
 
   bool inline_lists_ = list_layout().ok;
   int list_off_ = (int)list_layout().list_off;
+  std::unordered_map<int, Xbyak::Reg64> slot_reg_;
   int n_regs_ = 0;
   int osr_off_ = 0;
   std::unordered_set<int> osr_targets_;
