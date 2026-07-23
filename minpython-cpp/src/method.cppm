@@ -307,6 +307,27 @@ inline int jit_m_loadglobal(VM* vm, Globals* glb, Value* regs,
                             const CodeObject* code, int a, int b) {
   return vm->op_loadglobal(glb, regs, code, a, b) ? 1 : 0;
 }
+// A natively-called frame bailed on a type guard: finish it in the interpreter
+// and hand the result back, so the native caller can carry on. The 16-byte
+// Value comes back in rax:rdx per the SysV ABI.
+inline Value jit_m_finish(VM* vm, Value* frame, const CodeObject* code,
+                          Globals* glb, int pc) {
+  return vm->run_frame_raw(const_cast<CodeObject*>(code), frame, *glb, pc);
+}
+
+// Is the CALL at `pc` a direct call to `code` itself? (the preceding
+// LOAD_GLOBAL that defines its callee register names this function)
+inline bool is_self_call(const CodeObject& code, int pc) {
+  const Instr& ins = code.code[pc];
+  if (ins.op != Op::Call) return false;
+  for (int j = pc - 1; j >= 0; --j) {
+    const Instr& prev = code.code[j];
+    if (prev.op == Op::LoadGlobal && prev.a == ins.b)
+      return code.names[prev.b] == code.name;
+    if (prev.a == ins.b) return false;  // written by something else
+  }
+  return false;
+}
 
 // -- codegen ----------------------------------------------------------------
 
@@ -580,7 +601,11 @@ class MethodCode : public Xbyak::CodeGenerator {
 // deoptimisation machinery and no second GC root mechanism.
 class MixedMethodCode : public Xbyak::CodeGenerator {
  public:
-  MixedMethodCode(const CodeObject& code, const std::unordered_set<int>& reach) {
+  // `self_obj` is the Function object this code was compiled for; a direct
+  // self-call is guarded against it and then made as a real native call.
+  MixedMethodCode(const CodeObject& code, const std::unordered_set<int>& reach,
+                  VM* vm, const Object* self_obj)
+      : vm_(vm), self_obj_(self_obj) {
     n_regs_ = code.n_regs;
     known_ = mdetail::known_int_slots(code, reach);
     emit(code, reach);
@@ -631,13 +656,14 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     std::unordered_map<int, Xbyak::Label> labels, bail;
     for (int pc : reach) { labels[pc]; bail[pc]; }
 
-    // 3 pushes = 24 bytes, leaving rsp 16-aligned for the helper calls.
-    push(rbx); push(r12); push(r13);
+    // 5 pushes = 40 bytes, leaving rsp 16-aligned for the calls we make.
+    L(entry_);
+    push(rbx); push(r12); push(r13); push(r14); push(r15);
     mov(r12, rdi);  // frame array
     mov(rbx, rsi);  // VM*
     mov(r13, rdx);  // Globals*
 
-    auto pops = [&] { pop(r13); pop(r12); pop(rbx); };
+    auto pops = [&] { pop(r15); pop(r14); pop(r13); pop(r12); pop(rbx); };
 
     for (int pc = 0; pc < (int)code.code.size(); ++pc) {
       if (!reach.count(pc)) continue;
@@ -727,11 +753,15 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           jz(bail[pc], T_NEAR);
           break;
         case Op::Call:
-          mov(rdi, rbx); mov(rsi, r12); mov(edx, x); mov(ecx, y); mov(r8d, z);
-          mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_call);
-          call(rax);
-          test(eax, eax);
-          jz(bail[pc], T_NEAR);
+          if (self_obj_ && is_self_call(code, pc)) {
+            emit_native_self_call(code, x, y, z, bail[pc]);
+          } else {
+            mov(rdi, rbx); mov(rsi, r12); mov(edx, x); mov(ecx, y); mov(r8d, z);
+            mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_call);
+            call(rax);
+            test(eax, eax);
+            jz(bail[pc], T_NEAR);
+          }
           break;
 
         case Op::Jump: jmp(labels[x], T_NEAR); break;
@@ -764,7 +794,84 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     }
   }
 
+  // A direct self-recursive call made natively: guard that the callee is still
+  // this same function, take a frame off the VM value stack (a pointer bump),
+  // copy the arguments and `call` our own entry -- skipping the whole
+  // helper -> op_call -> do_call -> on_call -> driver dispatch chain.
+  void emit_native_self_call(const CodeObject& code, int dst, int fr, int argc,
+                             Xbyak::Label& bail) {
+    using namespace Xbyak::util;
+    int fsize = n_regs_ + 1;
+
+    mov(al, tg(fr));                       // callee identity guard
+    cmp(al, (int)Tag::Func);
+    jne(bail, T_NEAR);
+    mov(rax, val(fr));
+    mov(rcx, (std::uint64_t)(std::uintptr_t)self_obj_);
+    cmp(rax, rcx);
+    jne(bail, T_NEAR);
+
+    mov(rcx, (std::uint64_t)(std::uintptr_t)&vm_->vtop);
+    mov(r14, qword[rcx]);                  // r14 = old vtop, restored after
+    mov(rdx, r14);
+    add(rdx, fsize);
+    mov(rax, (std::uint64_t)vm_->vstack.size());
+    cmp(rdx, rax);
+    ja(bail, T_NEAR);                      // frame stack full -> interpret
+    mov(qword[rcx], rdx);
+
+    mov(r15, (std::uint64_t)(std::uintptr_t)vm_->vstack.data());
+    mov(rax, r14);
+    shl(rax, 4);
+    add(r15, rax);                         // r15 = callee frame
+
+    for (int k = 0; k < fsize; ++k)        // a fresh frame reads as None
+      mov(byte[r15 + k * kValueSize], (int)Tag::None);
+    for (int i = 0; i < argc; ++i) {
+      mov(rax, qword[r12 + (fr + 1 + i) * kValueSize]);
+      mov(qword[r15 + i * kValueSize], rax);
+      mov(rax, val(fr + 1 + i));
+      mov(qword[r15 + i * kValueSize + kPayloadOffset], rax);
+    }
+
+    mov(rdi, r15);
+    mov(rsi, rbx);
+    mov(rdx, r13);
+    call(entry_);
+
+    Xbyak::Label done, finish;
+    cmp(rax, 0);
+    jge(finish, T_NEAR);
+    mov(rcx, qword[r15 + n_regs_ * kValueSize]);      // completed: take result
+    mov(hi(dst), rcx);
+    mov(rcx, qword[r15 + n_regs_ * kValueSize + kPayloadOffset]);
+    mov(val(dst), rcx);
+    jmp(done, T_NEAR);
+
+    L(finish);   // the callee bailed: finish that frame in the interpreter
+    mov(rdi, rbx);
+    mov(rsi, r15);
+    mov(rdx, (std::uint64_t)(std::uintptr_t)&code);
+    mov(rcx, r13);
+    mov(r8d, eax);
+    mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_finish);
+    call(rax);
+    mov(hi(dst), rax);
+    mov(val(dst), rdx);
+
+    L(done);
+    mov(rcx, (std::uint64_t)(std::uintptr_t)&vm_->vtop);
+    mov(qword[rcx], r14);                  // release the frame
+    mov(rax, (std::uint64_t)(std::uintptr_t)&vm_->diag.failed);
+    mov(al, byte[rax]);
+    test(al, al);
+    jnz(bail, T_NEAR);                     // a latched error unwinds
+  }
+
   int n_regs_ = 0;
+  Xbyak::Label entry_;
+  VM* vm_ = nullptr;
+  const Object* self_obj_ = nullptr;
   std::unordered_map<int, std::unordered_set<int>> known_;
 
  public:
@@ -860,7 +967,8 @@ class MethodJIT {
         auto mreach = mdetail::mixed_feasible(*code);
         if (!mreach) { blacklist_.insert(key); n_aborted++; return false; }
         auto me = std::make_unique<MixedEntry>();
-        me->code = std::make_unique<MixedMethodCode>(*code, *mreach);
+        me->code = std::make_unique<MixedMethodCode>(*code, *mreach, &vm_,
+                                                     callee.obj);
         if (Xbyak::GetError()) {
           Xbyak::ClearError();
           blacklist_.insert(key);
