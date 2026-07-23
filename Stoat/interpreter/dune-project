@@ -1,0 +1,5 @@
+(lang dune 3.21)
+
+(name stoat)
+
+(using menhir 2.1)
