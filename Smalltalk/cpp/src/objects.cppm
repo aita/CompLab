@@ -46,6 +46,7 @@ inline bool is_nil(const Value& v) { return std::holds_alternative<Nil>(v); }
 enum class Tag {
     String,
     Symbol,
+    Character,
     Array,
     Class,
     Instance,
@@ -82,6 +83,12 @@ struct Symbol : Object {
     static constexpr Tag TAG = Tag::Symbol;
     std::string data;
     explicit Symbol(std::string s) : Object(TAG), data(std::move(s)) {}
+};
+
+struct Character : Object {
+    static constexpr Tag TAG = Tag::Character;
+    char value;
+    explicit Character(char c) : Object(TAG), value(c) {}
 };
 
 struct Array : Object {
@@ -221,6 +228,8 @@ inline std::string print_object(Object* o) {
             return "'" + static_cast<String*>(o)->data + "'";
         case Tag::Symbol:
             return "#" + static_cast<Symbol*>(o)->data;
+        case Tag::Character:
+            return std::string("$") + static_cast<Character*>(o)->value;
         case Tag::Array: {
             std::string s = "(";
             for (const auto& e : static_cast<Array*>(o)->items)
@@ -230,7 +239,16 @@ inline std::string print_object(Object* o) {
         case Tag::Class:
             return static_cast<Class*>(o)->name;
         case Tag::Instance: {
-            const std::string& n = static_cast<Instance*>(o)->st_class->name;
+            auto* inst = static_cast<Instance*>(o);
+            const std::string& n = inst->st_class->name;
+            if (n == "OrderedCollection") {
+                std::string s = "OrderedCollection (";
+                auto it = inst->ivars.find("items");
+                if (it != inst->ivars.end())
+                    if (auto* arr = as<Array>(it->second))
+                        for (const auto& e : arr->items) s += print_string(e) + " ";
+                return s + ")";
+            }
             bool vowel = !n.empty() &&
                          std::string("AEIOU").find(n[0]) != std::string::npos;
             return (vowel ? "an " : "a ") + n;
@@ -253,6 +271,7 @@ inline std::string print_string(const Value& v) {
 inline std::string display_string(const Value& v) {
     if (auto* s = as<String>(v)) return s->data;
     if (auto* y = as<Symbol>(v)) return y->data;
+    if (auto* c = as<Character>(v)) return std::string(1, c->value);
     return print_string(v);
 }
 

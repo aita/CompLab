@@ -43,6 +43,7 @@ public:
     }
 
     String* new_string(std::string s) { return make<String>(std::move(s)); }
+    Character* new_char(char c) { return make<Character>(c); }
     Array* new_array() { return make<Array>(); }
     Class* new_class(std::string name) { return make<Class>(std::move(name)); }
     Instance* new_instance(Class* c) { return make<Instance>(c); }
@@ -113,6 +114,7 @@ private:
         switch (o->tag) {
             case Tag::String:
             case Tag::Symbol:
+            case Tag::Character:
                 break;
             case Tag::Array:
                 for (const Value& e : static_cast<Array*>(o)->items)

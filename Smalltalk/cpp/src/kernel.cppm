@@ -27,6 +27,12 @@ inline bool as_num(const Value& v, double& out) {
 }
 inline std::int64_t as_i(const Value& v) { return std::get<std::int64_t>(v); }
 
+inline Array* oc_items(const Value& r) {
+    Instance* inst = as<Instance>(r);
+    auto it = inst->ivars.find("items");
+    return it == inst->ivars.end() ? nullptr : as<Array>(it->second);
+}
+
 inline bool identical(const Value& a, const Value& b) {
     if (is_obj(a) || is_obj(b)) return as_obj(a) == as_obj(b);
     return a == b;
@@ -70,9 +76,13 @@ void build_kernel(VM& vm) {
     Class* Integer = cls("Integer", Number);
     cls("SmallInteger", Integer);
     cls("Float", Number);
-    Class* String_ = cls("String", Object);
+    Class* Char = cls("Character", Magnitude);
+    Class* Collection = cls("Collection", Object);
+    Class* Seq = cls("SequenceableCollection", Collection);
+    Class* Array_ = cls("Array", Seq);
+    Class* String_ = cls("String", Seq);
     cls("Symbol", String_);
-    Class* Array_ = cls("Array", Object);
+    Class* OrderedCollection = cls("OrderedCollection", Seq, {"items"});
     Class* BlockClosure = cls("BlockClosure", Object);
     Class* Transcript = cls("Transcript", Object);
     cls("Context", Object);
@@ -265,6 +275,42 @@ void build_kernel(VM& vm) {
     def(String_, "asString", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
         return ref(vm.heap().new_string(display_string(r)));
     });
+    def(String_, "at:", [](VM& vm, const Value& r, std::vector<Value>& a) -> Value {
+        const std::string& s = as<String>(r)->data;
+        std::int64_t i = is_int(a[0]) ? as_i(a[0]) : 0;
+        if (i < 1 || i > static_cast<std::int64_t>(s.size())) {
+            vm.fail("index out of bounds"); return nil();
+        }
+        return ref(vm.heap().new_char(s[i - 1]));
+    });
+
+    // --- Character ---
+    def(Char, "asInteger", [](VM&, const Value& r, std::vector<Value>&) -> Value {
+        return Value{static_cast<std::int64_t>(
+            static_cast<unsigned char>(as<Character>(r)->value))};
+    });
+    def(Char, "value", [](VM&, const Value& r, std::vector<Value>&) -> Value {
+        return Value{static_cast<std::int64_t>(
+            static_cast<unsigned char>(as<Character>(r)->value))};
+    });
+    def(Char, "asString", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
+        return ref(vm.heap().new_string(std::string(1, as<Character>(r)->value)));
+    });
+    def(Char, "asUppercase", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
+        char c = static_cast<char>(std::toupper(
+            static_cast<unsigned char>(as<Character>(r)->value)));
+        return ref(vm.heap().new_char(c));
+    });
+    def(Char, "=", [](VM&, const Value& r, std::vector<Value>& a) -> Value {
+        auto* b = as<Character>(a[0]);
+        return Value{b != nullptr && as<Character>(r)->value == b->value};
+    });
+    def(Char, "<", [](VM&, const Value& r, std::vector<Value>& a) -> Value {
+        return Value{as<Character>(r)->value < as<Character>(a[0])->value};
+    });
+    cdef(Char, "value:", [](VM& vm, const Value&, std::vector<Value>& a) -> Value {
+        return ref(vm.heap().new_char(static_cast<char>(is_int(a[0]) ? as_i(a[0]) : 0)));
+    });
 
     // --- Array ---
     cdef(Array_, "new", [](VM& vm, const Value&, std::vector<Value>&) -> Value {
@@ -304,6 +350,60 @@ void build_kernel(VM& vm) {
         auto* arr = as<Array>(r);
         if (arr->items.empty()) { vm.fail("empty"); return nil(); }
         return arr->items.back();
+    });
+
+    // --- OrderedCollection (an Instance whose `items` ivar holds an Array) ---
+    cdef(OrderedCollection, "new", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
+        Instance* oc = vm.heap().new_instance(as<Class>(r));
+        oc->ivars["items"] = ref(vm.heap().new_array());
+        return ref(oc);
+    });
+    def(OrderedCollection, "add:", [](VM&, const Value& r, std::vector<Value>& a) -> Value {
+        oc_items(r)->items.push_back(a[0]);
+        return a[0];
+    });
+    def(OrderedCollection, "addFirst:", [](VM&, const Value& r, std::vector<Value>& a) -> Value {
+        auto& v = oc_items(r)->items;
+        v.insert(v.begin(), a[0]);
+        return a[0];
+    });
+    def(OrderedCollection, "removeFirst", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
+        auto& v = oc_items(r)->items;
+        if (v.empty()) { vm.fail("empty"); return nil(); }
+        Value f = v.front();
+        v.erase(v.begin());
+        return f;
+    });
+    def(OrderedCollection, "size", [](VM&, const Value& r, std::vector<Value>&) -> Value {
+        return Value{static_cast<std::int64_t>(oc_items(r)->items.size())};
+    });
+    def(OrderedCollection, "at:", [](VM& vm, const Value& r, std::vector<Value>& a) -> Value {
+        auto& v = oc_items(r)->items;
+        std::int64_t i = is_int(a[0]) ? as_i(a[0]) : 0;
+        if (i < 1 || i > static_cast<std::int64_t>(v.size())) { vm.fail("index out of bounds"); return nil(); }
+        return v[i - 1];
+    });
+    def(OrderedCollection, "at:put:", [](VM& vm, const Value& r, std::vector<Value>& a) -> Value {
+        auto& v = oc_items(r)->items;
+        std::int64_t i = is_int(a[0]) ? as_i(a[0]) : 0;
+        if (i < 1 || i > static_cast<std::int64_t>(v.size())) { vm.fail("index out of bounds"); return nil(); }
+        v[i - 1] = a[1];
+        return a[1];
+    });
+    def(OrderedCollection, "first", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
+        auto& v = oc_items(r)->items;
+        if (v.empty()) { vm.fail("empty"); return nil(); }
+        return v.front();
+    });
+    def(OrderedCollection, "last", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
+        auto& v = oc_items(r)->items;
+        if (v.empty()) { vm.fail("empty"); return nil(); }
+        return v.back();
+    });
+    def(OrderedCollection, "asArray", [](VM& vm, const Value& r, std::vector<Value>&) -> Value {
+        Array* out = vm.heap().new_array();
+        out->items = oc_items(r)->items;
+        return ref(out);
     });
 
     // --- BlockClosure ---

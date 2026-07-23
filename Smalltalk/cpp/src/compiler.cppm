@@ -126,7 +126,7 @@ private:
             case Literal::K::Float: return Value{lit.d};
             case Literal::K::Str: return ref(heap_.new_string(lit.s));
             case Literal::K::Sym: return ref(heap_.intern_symbol(lit.s));
-            case Literal::K::Char: return ref(heap_.new_string(std::string(1, lit.c)));
+            case Literal::K::Char: return ref(heap_.new_char(lit.c));
             case Literal::K::Arr: {
                 Array* a = heap_.new_array();
                 for (const auto& e : lit.arr) a->items.push_back(materialize(e));

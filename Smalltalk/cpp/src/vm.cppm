@@ -60,6 +60,7 @@ public:
         switch (o->tag) {
             case Tag::String: return classes_["String"];
             case Tag::Symbol: return classes_["Symbol"];
+            case Tag::Character: return classes_["Character"];
             case Tag::Array: return classes_["Array"];
             case Tag::Class: return classes_["Class"];
             case Tag::Instance: return static_cast<Instance*>(o)->st_class;

@@ -95,6 +95,35 @@ void test_non_local_return() {
     check(ev(sys, "Finder new firstOver: 1") == "'small'", "non-local return not taken");
 }
 
+void test_character() {
+    st::System sys;
+    check(ev(sys, "$a") == "$a", "character literal prints");
+    check(ev(sys, "$a asInteger") == "97", "character asInteger");
+    check(ev(sys, "($a = $a) & ($a = $b) not") == "true", "character equality");
+    check(ev(sys, "'hello' at: 1") == "$h", "String at: returns a Character");
+}
+
+void test_collections() {
+    st::System sys;
+    check(ev(sys, "#(1 2 3 4) collect: [:x | x * x]") == "(1 4 9 16 )", "collect:");
+    check(ev(sys, "#(1 2 3 4 5) select: [:x | x odd]") == "OrderedCollection (1 3 5 )", "select:");
+    check(ev(sys, "#(1 2 3 4 5) inject: 0 into: [:a :b | a + b]") == "15", "inject:into:");
+    check(ev(sys, "#(1 2 3) includes: 2") == "true", "includes:");
+    check(ev(sys, "#(3 1 4 1 5) detect: [:x | x > 3]") == "4", "detect: (non-local return through do:)");
+    check(ev(sys, "#(1 2 3) detect: [:x | x > 9] ifNone: [42]") == "42", "detect:ifNone:");
+    check(ev(sys, "| c | c := OrderedCollection new. c add: 1; add: 2; add: 3. c size") == "3",
+          "OrderedCollection add:");
+    check(ev(sys, "| c | c := OrderedCollection new. c add: 5; addFirst: 1. c first") == "1",
+          "OrderedCollection addFirst:");
+    check(ev(sys, "(#(10 20 30) inject: 0 into: [:a :b | a + b])") == "60", "inject sum");
+}
+
+void test_string_iteration() {
+    st::System sys;
+    check(ev(sys, "| n | n := 0. 'hello' do: [:c | n := n + 1]. n") == "5",
+          "String do: iterates characters");
+}
+
 void test_gc_survives_computation() {
     st::System sys;
     // allocates many short-lived strings; must not corrupt the result
@@ -113,6 +142,9 @@ int main() {
     test_user_class();
     test_super_and_polymorphism();
     test_non_local_return();
+    test_character();
+    test_collections();
+    test_string_iteration();
     test_gc_survives_computation();
     if (failures == 0) std::println("all tests passed");
     return failures;

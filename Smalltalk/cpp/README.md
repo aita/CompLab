@@ -52,9 +52,15 @@ Counter >> increment  count := count + 1
 Counter >> count      ^count
 ```
 
-Not yet ported from the Python side: the full collection protocol
-(`OrderedCollection` / `Dictionary` / `do:` / `collect:`), `Character`,
-metaclasses, and the IDE.
+`Character`, `Array`, `String`, and `OrderedCollection` with the higher-order
+protocol — `do:`, `collect:`, `select:`, `reject:`, `detect:ifNone:`,
+`inject:into:`, `includes:`, … These are written **in Smalltalk** (a prelude in
+`system.cppm`) on top of `at:` / `size` / `whileTrue:` / `value:`, so block
+sends and `^` flow through the one non-recursive loop — no primitive re-enters
+the VM, no exceptions.
+
+Not yet ported from the Python side: `Dictionary`, metaclasses, the IDE, and
+the performance work (method cache, inline arithmetic, dispatch ordering).
 
 ## Build & run
 
