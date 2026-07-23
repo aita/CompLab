@@ -273,6 +273,18 @@ int main() {
     check("jit typeguard resume", j.out, run(src));
     check("jit typeguard fired", j.type_deopt >= 1 ? "y" : "n", "y");
   }
+  {  // the inline list fast path must fall back correctly: a negative index
+     // and a str subscript both leave it for the helper
+    std::string src =
+        "def s(xs, t, reps):\n    n = 0\n    r = 0\n"
+        "    while n < reps:\n        i = 0\n"
+        "        while i < len(xs):\n            r = r + xs[i - 1]\n"
+        "            i = i + 1\n"
+        "        r = r + len(t)\n        n = n + 1\n    return r\n"
+        "print(s([1, 2, 3, 4], 'abc', 400))";
+    JitRun j = run_jit(src, 4);
+    check("jit list fastpath fallback", j.out, run(src));
+  }
   {  // heterogeneous list: the per-op type guard must deopt, still exact
     std::string src =
         "def s(xs, reps):\n    t = 0\n    n = 0\n"

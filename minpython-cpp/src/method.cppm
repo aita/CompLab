@@ -738,20 +738,64 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           mov(tg(x), ins.op == Op::Not ? (int)Tag::Bool : (int)Tag::Int);
           break;
 
-        case Op::Len:
+        case Op::Len: {
+          Xbyak::Label slow, done;
+          if (inline_lists_) {          // fast path: size of a List, inline
+            mov(al, tg(y));
+            cmp(al, (int)Tag::List);
+            jne(slow, T_NEAR);
+            mov(rcx, val(y));
+            mov(rdx, qword[rcx + list_off_]);
+            mov(rax, qword[rcx + list_off_ + 8]);
+            sub(rax, rdx);
+            sar(rax, 4);
+            mov(val(x), rax);
+            mov(tg(x), (int)Tag::Int);
+            jmp(done, T_NEAR);
+          }
+          L(slow);
           mov(rdi, rbx); mov(rsi, r12); mov(edx, x); mov(ecx, y);
           mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_len);
           call(rax);
           test(eax, eax);
           jz(bail[pc], T_NEAR);
+          L(done);
           break;
-        case Op::Subscr:
+        }
+        case Op::Subscr: {
+          Xbyak::Label slow, done;
+          if (inline_lists_) {          // fast path: List[int], bounds-checked
+            mov(al, tg(y));
+            cmp(al, (int)Tag::List);
+            jne(slow, T_NEAR);
+            mov(al, tg(z));
+            cmp(al, (int)Tag::Int);
+            jne(slow, T_NEAR);
+            mov(rcx, val(y));
+            mov(rdx, qword[rcx + list_off_]);        // begin
+            mov(r8, qword[rcx + list_off_ + 8]);     // end
+            sub(r8, rdx);
+            sar(r8, 4);                              // size
+            mov(rax, val(z));
+            cmp(rax, r8);
+            jae(slow, T_NEAR);   // unsigned: catches negative and out-of-range
+            shl(rax, 4);
+            add(rdx, rax);
+            mov(rax, qword[rdx]);
+            mov(hi(x), rax);
+            mov(rax, qword[rdx + kPayloadOffset]);
+            mov(val(x), rax);
+            jmp(done, T_NEAR);
+          }
+          L(slow);
           mov(rdi, rbx); mov(rsi, r12); mov(edx, x); mov(ecx, y); mov(r8d, z);
           mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_subscr);
           call(rax);
           test(eax, eax);
           jz(bail[pc], T_NEAR);
+          L(done);
           break;
+        }
         case Op::Call:
           if (self_obj_ && is_self_call(code, pc)) {
             emit_native_self_call(code, x, y, z, bail[pc]);
@@ -868,6 +912,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     jnz(bail, T_NEAR);                     // a latched error unwinds
   }
 
+  bool inline_lists_ = list_layout().ok;
+  int list_off_ = (int)list_layout().list_off;
   int n_regs_ = 0;
   Xbyak::Label entry_;
   VM* vm_ = nullptr;

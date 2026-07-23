@@ -94,6 +94,37 @@ struct Object {
   Globals* globals;         // Func
 };
 
+// Where a List's elements live inside an Object, so the JIT can inline the fast
+// path of `xs[i]` / `len(xs)` instead of calling back into C++.
+//
+// A std::vector's first two pointer-sized words are its begin and end pointers
+// on both libstdc++ and libc++ -- but that is an implementation detail, so it is
+// measured at run time on a real object and then *verified*. If the check ever
+// fails, `ok` stays false and the JITs simply keep calling the helper.
+struct ListLayout {
+  std::size_t list_off = 0;  // offsetof(Object, list)
+  bool ok = false;
+  ListLayout();
+};
+
+inline const ListLayout& list_layout() {
+  static const ListLayout layout;
+  return layout;
+}
+
+inline ListLayout::ListLayout() {
+  Object probe;
+  probe.kind = Object::Kind::List;
+  probe.list.resize(3);
+  const char* base = reinterpret_cast<const char*>(&probe);
+  list_off = static_cast<std::size_t>(
+      reinterpret_cast<const char*>(&probe.list) - base);
+  Value* const* words =
+      reinterpret_cast<Value* const*>(base + list_off);
+  ok = words[0] == probe.list.data() &&
+       words[1] == probe.list.data() + probe.list.size();
+}
+
 inline bool truthy(const Value& v) {
   switch (v.tag) {
     case Tag::None:

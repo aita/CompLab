@@ -693,6 +693,44 @@ class MixedTraceCode : public Xbyak::CodeGenerator {
   // the real values, call out, then reload just the slot the helper wrote.
   void emit_objop(const TraceStep& s, Xbyak::Label& err) {
     using namespace Xbyak::util;
+    Xbyak::Label slow, done;
+    if (inline_lists_) {
+      // Fast path for Lists, inline: no call, so no flush and no safepoint.
+      // Operands may be register-resident, so go through the load/store helpers
+      // rather than touching the array (whose payloads can be stale here).
+      mov(al, tg(s.b));
+      cmp(al, (int)Tag::List);
+      jne(slow, T_NEAR);
+      if (s.op == Op::Len) {
+        load_rcx(s.b);
+        mov(rdx, qword[rcx + list_off_]);         // begin
+        mov(rax, qword[rcx + list_off_ + 8]);     // end
+        sub(rax, rdx);
+        sar(rax, 4);
+        store(s.a, Tag::Int);
+        jmp(done, T_NEAR);
+      } else {
+        mov(al, tg(s.c));
+        cmp(al, (int)Tag::Int);
+        jne(slow, T_NEAR);
+        load_rcx(s.b);
+        mov(rdx, qword[rcx + list_off_]);         // begin
+        mov(r8, qword[rcx + list_off_ + 8]);      // end
+        sub(r8, rdx);
+        sar(r8, 4);                               // size
+        load_rax(s.c);
+        cmp(rax, r8);
+        jae(slow, T_NEAR);  // unsigned: catches negative and out-of-range
+        shl(rax, 4);
+        add(rdx, rax);
+        mov(rax, qword[rdx]);                     // tag word -> memory
+        mov(qword[r12 + s.a * kValueSize + kTagOffset], rax);
+        mov(rax, qword[rdx + kPayloadOffset]);
+        store_rax(s.a);                           // payload -> reg or memory
+        jmp(done, T_NEAR);
+      }
+    }
+    L(slow);
     flush_all();
     mov(rdi, rbx);  // VM*
     mov(rsi, r12);  // Value* regs
@@ -708,6 +746,7 @@ class MixedTraceCode : public Xbyak::CodeGenerator {
     test(eax, eax);
     jz(err, T_NEAR);
     if (has_reg(s.a)) mov(reg(s.a), mem(s.a));  // the helper wrote the array
+    L(done);
   }
 
   void store(int slot, Tag t) {
@@ -759,6 +798,8 @@ class MixedTraceCode : public Xbyak::CodeGenerator {
     }
   }
 
+  bool inline_lists_ = list_layout().ok;
+  int list_off_ = (int)list_layout().list_off;
   std::unordered_map<int, Xbyak::Reg64> slot_reg_;
 };
 
