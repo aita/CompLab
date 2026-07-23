@@ -73,9 +73,10 @@ last receiver class → method, so a repeated call site skips lookup entirely).
 Both caches are invalidated by a version counter bumped on any (re)definition.
 The opcode `switch` is already a jump table, so no dispatch reordering is needed.
 
-Rough effect: a 3 M-iteration arithmetic loop dropped ~4.2 s → ~3.2 s with the
-selector ids; the inline cache speeds up method-send-heavy code (collection
-iteration, user-method calls).
+Build optimized (the default — see below). At `-O3`, a 3 M-iteration arithmetic
+loop runs in ~0.27 s and building + summing a 400 k `OrderedCollection` in
+~0.16 s. (An unoptimized `-O0` build is ~10× slower, which for a while hid the
+effect of these optimizations — always benchmark the Release build.)
 
 Not yet ported from the Python side: metaclasses and the IDE.
 
@@ -84,11 +85,14 @@ Not yet ported from the Python side: metaclasses and the IDE.
 Needs CMake ≥ 3.28, Ninja, and a modules-capable compiler.
 
 ```sh
-cmake -S . -B build -G Ninja
+cmake -S . -B build -G Ninja   # defaults to a Release (-O3) build
 cmake --build build
 ./build/smalltalk        # demo + a small REPL
 ctest --test-dir build   # unit tests
 ```
+
+The build defaults to `Release`; pass `-DCMAKE_BUILD_TYPE=Debug` for an
+unoptimized build. Benchmark the Release build — `-O0` is ~10× slower.
 
 > **Compiler note.** Use **Clang** (developed with Clang 22). GCC 16's C++20
 > modules currently fail to read this project's `st:vm` module ("Bad file

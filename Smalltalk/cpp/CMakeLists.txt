@@ -12,6 +12,12 @@ endif()
 
 project(smalltalk_cpp CXX)
 
+# Default to an optimized build — without this CMake uses no -O flag (a ~10x
+# slower debug build). Override with -DCMAKE_BUILD_TYPE=Debug.
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
