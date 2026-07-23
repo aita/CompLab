@@ -713,21 +713,28 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
 
   void allocate(const CodeObject& code, const std::unordered_set<int>& reach) {
     using namespace Xbyak::util;
-    // Only call-free functions hoist for now. Once a call is in the picture the
-    // frame has to be flushed and reloaded around every safepoint, and getting
-    // that exactly right interacts with the self-call frame setup, the generic
-    // call helper and the bail paths -- so that is left for its own change.
-    // The loops this is really for (tight integer loops, where the tracing JIT
-    // still wins) contain no calls anyway.
-    for (int pc : reach)
-      if (code.code[pc].op == Op::Call) return;
     std::vector<Xbyak::Reg64> pool = {r13, r14, r15, rbp};  // callee-saved
-    auto ranges = mdetail::live_ranges(code, reach, /*object_mode=*/true);
-    std::vector<Interval> intervals;
-    for (auto& [r, se] : ranges) intervals.push_back({se.first, se.second, r});
-    Alloc a = linear_scan(intervals, (int)pool.size());
-    for (auto& [slot, loc] : a.loc)
-      if (loc.in_reg()) slot_reg_.insert({slot, pool[loc.reg]});
+    // Deliberately not linear-scan: that shares one register between slots whose
+    // live ranges are disjoint, which is right for a compiler that tracks where
+    // each value lives at each point. This one loads its registers once on entry
+    // and flushes them at every exit, so a shared register means one slot
+    // silently clobbering another -- which is exactly what went wrong. Give the
+    // hottest slots whole-function ownership instead.
+    std::unordered_map<int, int> refs;
+    std::vector<int> defs, uses;
+    for (int pc : reach) {
+      mdetail::def_use_obj(code.code[pc], defs, uses);
+      for (int r : defs) refs[r]++;
+      for (int r : uses) refs[r]++;
+    }
+    std::vector<std::pair<int, int>> ranked;
+    for (auto& [slot, n] : refs)
+      if (slot < code.n_regs) ranked.push_back({slot, n});
+    std::sort(ranked.begin(), ranked.end(), [](auto& x, auto& y) {
+      return x.second != y.second ? x.second > y.second : x.first < y.first;
+    });
+    for (std::size_t k = 0; k < ranked.size() && k < pool.size(); ++k)
+      slot_reg_.insert({ranked[k].first, pool[k]});
   }
   Xbyak::Address val(int slot) {
     return Xbyak::util::qword[Xbyak::util::r12 + slot * kValueSize +
@@ -1327,6 +1334,8 @@ class MethodJIT {
           return false;
         }
         me->fn = me->code->entry_addr();
+        jit_dump(std::format("method(obj) {}", code->name), me->fn,
+                 me->code->getSize(), me->code->reg_map());
         auto& slot = mixed_.emplace(key, std::move(me)).first->second;
         n_mixed++;
         return run_mixed(*slot, code, callee, regs, arg_base, argc, out);
