@@ -53,6 +53,7 @@ class Smalltalk:
         if existing is not None:
             existing.superclass = sup
             existing.instance_variables = list(instance_vars or [])
+            self.vm.flush_method_caches()
             return existing
         cls = STClass(
             name=name,
@@ -75,6 +76,8 @@ class Smalltalk:
             cls.class_methods[method.selector] = method
         else:
             cls.methods[method.selector] = method
+            self.vm.note_override(cls, method.selector)
+        self.vm.flush_method_caches()
         return method
 
     # --- convenience ---

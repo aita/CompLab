@@ -9,20 +9,36 @@ non-local return from the home method (implemented with :class:`NonLocalReturn`)
 
 from __future__ import annotations
 
+import operator
 import sys
 from typing import Any, Callable
 
-from st.bytecode import CompiledBlock, CompiledMethod, Instr, Op
+from st.bytecode import CompiledBlock, CompiledMethod, Op
 from st.objects import (
+    PrimitiveMethod,
     STBlock,
     STChar,
     STClass,
     STError,
     STObject,
     STSymbol,
-    PrimitiveMethod,
     nil,
 )
+
+# Special binary selectors that, for SmallInteger/Float operands, are executed
+# inline in the dispatch loop (bypassing lookup + the arithmetic primitives).
+# Disabled per-VM if a user overrides one of them on a numeric class.
+_ARITH: dict[str, Callable[[Any, Any], Any]] = {
+    "+": operator.add,
+    "-": operator.sub,
+    "*": operator.mul,
+    "<": operator.lt,
+    ">": operator.gt,
+    "<=": operator.le,
+    ">=": operator.ge,
+    "=": operator.eq,
+}
+ARITHMETIC_SELECTORS = frozenset(_ARITH)
 
 
 class NonLocalReturn(Exception):
@@ -102,6 +118,9 @@ class VM:
         # The currently executing activation; the top of the reified call
         # stack. thisContext reads it and sender links walk it.
         self.active_context: Frame | None = None
+        # Inline integer/float arithmetic in the loop; switched off if a user
+        # overrides an arithmetic selector on a numeric class.
+        self.optimize_arithmetic = True
         # Where Transcript output goes; the IDE overrides this to capture it.
         # Resolve sys.stdout lazily so test capture / redirection still works.
         self.output: Callable[[str], None] = lambda s: sys.stdout.write(s)
@@ -111,9 +130,38 @@ class VM:
     def register_class(self, cls: STClass) -> None:
         self.classes[cls.name] = cls
         self.globals[cls.name] = cls
+        self.flush_method_caches()
+
+    def flush_method_caches(self) -> None:
+        """Invalidate every class's method/layout caches. Call after any change
+        to the class hierarchy or method dictionaries."""
+        for cls in self.classes.values():
+            cls.method_cache.clear()
+            cls.class_method_cache.clear()
+            cls._ivars_cache = None
+
+    def note_override(self, cls: STClass, selector: str) -> None:
+        """Disable inline arithmetic if an instance-side arithmetic selector is
+        overridden on a class that SmallInteger or Float inherits from."""
+        if selector not in ARITHMETIC_SELECTORS:
+            return
+        for name in ("SmallInteger", "Float"):
+            num = self.classes.get(name)
+            if num is not None and num.is_kind_of(cls):
+                self.optimize_arithmetic = False
+                return
 
     def class_of(self, value: Any) -> STClass:
         c = self.classes
+        # fast path for the hottest exact types (bool/STSymbol/_Nil are
+        # distinct types, so `is int`/`is str` never misclassify them)
+        t = type(value)
+        if t is STObject:
+            return value.st_class
+        if t is int:
+            return c["SmallInteger"]
+        if t is str:
+            return c["String"]
         match value:
             case _ if value is nil:
                 return c["UndefinedObject"]
@@ -150,6 +198,19 @@ class VM:
 
     # --- message send ---
 
+    def _lookup(
+        self, receiver: Any, selector: str, super_start: STClass | None
+    ) -> Any:
+        if super_start is not None:
+            return super_start.lookup(selector)
+        if isinstance(receiver, STClass):
+            method = receiver.lookup_class_method(selector)
+            if method is None:
+                # a class also understands generic instance messages of Class
+                method = self.classes["Class"].lookup(selector)
+            return method
+        return self.class_of(receiver).lookup(selector)
+
     def send(
         self,
         receiver: Any,
@@ -157,21 +218,18 @@ class VM:
         args: list[Any],
         super_start: STClass | None = None,
     ) -> Any:
-        if super_start is not None:
-            method = super_start.lookup(selector)
-        elif isinstance(receiver, STClass):
-            method = receiver.lookup_class_method(selector)
-            if method is None:
-                # a class also understands generic instance messages of Class
-                method = self.classes["Class"].lookup(selector)
-        else:
-            method = self.class_of(receiver).lookup(selector)
+        """Synchronous send used from Python (primitives, the REPL, the IDE).
 
+        A primitive runs in place; a compiled method starts a fresh driver
+        (:meth:`_run`) whose frame's sender is the current activation, so the
+        reified call stack stays continuous across the Python/Smalltalk border.
+        """
+        method = self._lookup(receiver, selector, super_start)
         if method is None:
             return self.does_not_understand(receiver, selector, args)
         if isinstance(method, PrimitiveMethod):
             return method.fn(self, receiver, args)
-        return self.activate(method, receiver, args)
+        return self._run(self._method_frame(method, receiver, args))
 
     def does_not_understand(
         self, receiver: Any, selector: str, args: list[Any]
@@ -187,20 +245,19 @@ class VM:
 
     # --- activation ---
 
-    def activate(
+    def _method_frame(
         self, method: CompiledMethod, receiver: Any, args: list[Any]
-    ) -> Any:
+    ) -> Frame:
         if len(args) != method.num_args:
             raise STError(
                 f"#{method.selector} expects {method.num_args} args, "
                 f"got {len(args)}"
             )
         env = Environment()
-        for name in method.local_names:
-            env.vars[name] = nil
-        for name, value in zip(method.params, args):
-            env.vars[name] = value
-        frame = Frame(
+        env.vars = dict.fromkeys(method.local_names, nil)
+        if method.params:
+            env.vars.update(zip(method.params, args))
+        return Frame(
             receiver,
             method,
             env,
@@ -209,30 +266,20 @@ class VM:
             sender=self.active_context,
             st_class=self.classes.get("MethodContext"),
         )
-        self.active_context = frame
-        try:
-            return self.interpret(frame)
-        except NonLocalReturn as nlr:
-            if nlr.home is frame:
-                return nlr.value
-            raise
-        finally:
-            self.active_context = frame.sender
 
-    def run_block(self, block: STBlock, args: list[Any]) -> Any:
+    def _block_frame(self, block: STBlock, args: list[Any]) -> Frame:
         tmpl: CompiledBlock = block.node
         if len(args) != tmpl.num_args:
             raise STError(
                 f"block expects {tmpl.num_args} args, got {len(args)}"
             )
         env = Environment(block.home_env)
-        for name in tmpl.local_names:
-            env.vars[name] = nil
-        for name, value in zip(tmpl.params, args):
-            env.vars[name] = value
+        env.vars = dict.fromkeys(tmpl.local_names, nil)
+        if tmpl.params:
+            env.vars.update(zip(tmpl.params, args))
         home: Frame | None = block.home_context
         receiver = home.receiver if home is not None else nil
-        frame = Frame(
+        return Frame(
             receiver,
             tmpl,
             env,
@@ -241,11 +288,55 @@ class VM:
             sender=self.active_context,
             st_class=self.classes.get("BlockContext"),
         )
-        self.active_context = frame
-        try:
-            return self.interpret(frame)
-        finally:
-            self.active_context = frame.sender
+
+    def activate(
+        self, method: CompiledMethod, receiver: Any, args: list[Any]
+    ) -> Any:
+        """Top-level entry (the REPL / IDE / ``system.eval``)."""
+        return self._run(self._method_frame(method, receiver, args))
+
+    def run_block(self, block: STBlock, args: list[Any]) -> Any:
+        return self._run(self._block_frame(block, args))
+
+    # --- the non-recursive driver ---
+
+    def _run(self, root: Frame) -> Any:
+        """Drive execution until ``root`` returns.
+
+        Method-to-method sends push a new activation and keep looping (no host
+        recursion), so a deep chain of Smalltalk sends costs heap, not Python
+        stack. Only a primitive that re-enters the VM (``value``, ``do:`` …)
+        nests another ``_run``. ``^`` from a block surfaces as
+        :class:`NonLocalReturn` and is resolved by whichever ``_run`` owns the
+        home activation.
+        """
+        boundary = root.sender
+        self.active_context = root
+        while True:
+            try:
+                return self._loop(boundary)
+            except NonLocalReturn as nlr:
+                if self._manages(nlr.home, boundary):
+                    target = nlr.home.sender
+                    if target is boundary:
+                        self.active_context = target
+                        return nlr.value
+                    target.stack.append(nlr.value)
+                    self.active_context = target
+                    continue  # resume executing the home's sender
+                if boundary is None:
+                    raise STError("non-local return from a dead context") from None
+                raise
+
+    def _manages(self, home: Frame, boundary: Frame | None) -> bool:
+        """Is ``home`` one of the activations this ``_run`` owns (i.e. above
+        ``boundary`` in the current sender chain)?"""
+        ctx: Frame | None = self.active_context
+        while ctx is not None and ctx is not boundary:
+            if ctx is home:
+                return True
+            ctx = ctx.sender
+        return False
 
     # --- variable access ---
 
@@ -274,21 +365,31 @@ class VM:
 
     # --- the dispatch loop ---
 
-    def interpret(self, frame: Frame) -> Any:
-        code: list[Instr] = frame.method.code
-        literals = frame.method.literals
-        stack = frame.stack
+    def _loop(self, boundary: Frame | None) -> Any:
+        """Execute instructions until an activation whose sender is
+        ``boundary`` returns; then hand that return value back to :meth:`_run`.
+
+        ``ctx`` is the current activation. A compiled send swaps ``ctx`` to the
+        callee (rebinding the hot locals ``code``/``literals``/``stack``); a
+        return swaps it back to the sender. No Python recursion is involved for
+        Smalltalk-to-Smalltalk sends.
+        """
+        ctx = self.active_context
+        assert ctx is not None
+        code = ctx.method.code
+        literals = ctx.method.literals
+        stack = ctx.stack
         while True:
-            ins = code[frame.ip]
-            frame.ip += 1
+            ins = code[ctx.ip]
+            ctx.ip += 1
 
             match ins.op:
                 case Op.PUSH_LITERAL:
                     stack.append(literals[ins.arg])
                 case Op.PUSH_SELF:
-                    stack.append(frame.receiver)
+                    stack.append(ctx.receiver)
                 case Op.PUSH_CONTEXT:
-                    stack.append(frame)
+                    stack.append(ctx)
                 case Op.PUSH_NIL:
                     stack.append(nil)
                 case Op.PUSH_TRUE:
@@ -296,44 +397,64 @@ class VM:
                 case Op.PUSH_FALSE:
                     stack.append(False)
                 case Op.PUSH_VAR:
-                    stack.append(self._read_var(frame, ins.arg))
+                    stack.append(self._read_var(ctx, ins.arg))
                 case Op.STORE_VAR:
-                    self._write_var(frame, ins.arg, stack[-1])
+                    self._write_var(ctx, ins.arg, stack[-1])
                 case Op.POP:
                     stack.pop()
                 case Op.DUP:
                     stack.append(stack[-1])
-                case Op.SEND:
+                case Op.SEND | Op.SEND_SUPER:
                     selector, argc = ins.arg
-                    args = stack[len(stack) - argc :]
-                    del stack[len(stack) - argc :]
+                    n = len(stack) - argc
+                    args = stack[n:]
+                    del stack[n:]
                     receiver = stack.pop()
-                    stack.append(self.send(receiver, selector, args))
-                case Op.SEND_SUPER:
-                    selector, argc = ins.arg
-                    args = stack[len(stack) - argc :]
-                    del stack[len(stack) - argc :]
-                    receiver = stack.pop()
-                    defined_in = frame.method.defined_in
-                    start = defined_in.superclass if defined_in is not None else None
-                    stack.append(
-                        self.send(receiver, selector, args, super_start=start)
-                    )
+                    if ins.op is Op.SEND_SUPER:
+                        defined_in = ctx.method.defined_in
+                        start = (
+                            defined_in.superclass
+                            if defined_in is not None
+                            else None
+                        )
+                        method = self._lookup(receiver, selector, start)
+                    else:
+                        # inline fast path for numeric binary operators
+                        if argc == 1 and self.optimize_arithmetic:
+                            fast = _ARITH.get(selector)
+                            if fast is not None:
+                                rt = type(receiver)
+                                if rt is int or rt is float:
+                                    at = type(args[0])
+                                    if at is int or at is float:
+                                        stack.append(fast(receiver, args[0]))
+                                        continue
+                        method = self._lookup(receiver, selector, None)
+                    if method is None:
+                        self.does_not_understand(receiver, selector, args)
+                    if isinstance(method, PrimitiveMethod):
+                        stack.append(method.fn(self, receiver, args))
+                    else:
+                        ctx = self._method_frame(method, receiver, args)
+                        self.active_context = ctx
+                        code = ctx.method.code
+                        literals = ctx.method.literals
+                        stack = ctx.stack
                 case Op.PUSH_BLOCK:
                     tmpl = literals[ins.arg]
-                    home = frame if not frame.is_block else frame.home
-                    stack.append(STBlock(tmpl, frame.env, home))
+                    home = ctx if not ctx.is_block else ctx.home
+                    stack.append(STBlock(tmpl, ctx.env, home))
                 case Op.MAKE_ARRAY:
-                    n = ins.arg
-                    items = stack[len(stack) - n :]
-                    del stack[len(stack) - n :]
+                    n = len(stack) - ins.arg
+                    items = stack[n:]
+                    del stack[n:]
                     stack.append(list(items))
                 case Op.JUMP:
-                    frame.ip = ins.arg
+                    ctx.ip = ins.arg
                 case Op.JUMP_TRUE:
                     match stack.pop():
                         case True:
-                            frame.ip = ins.arg
+                            ctx.ip = ins.arg
                         case False:
                             pass
                         case _:
@@ -341,19 +462,26 @@ class VM:
                 case Op.JUMP_FALSE:
                     match stack.pop():
                         case False:
-                            frame.ip = ins.arg
+                            ctx.ip = ins.arg
                         case True:
                             pass
                         case _:
                             raise STError("condition must be a Boolean")
-                case Op.RETURN:
+                case Op.RETURN | Op.BLOCK_RETURN:
                     value = stack.pop()
-                    if not frame.is_block:
+                    if ins.op is Op.RETURN and ctx.is_block:
+                        if ctx.home is None:
+                            raise STError("non-local return with no home context")
+                        raise NonLocalReturn(ctx.home, value)
+                    sender = ctx.sender
+                    self.active_context = sender
+                    if sender is boundary:
                         return value
-                    if frame.home is None:
-                        raise STError("non-local return with no home context")
-                    raise NonLocalReturn(frame.home, value)
-                case Op.BLOCK_RETURN:
-                    return stack.pop()
+                    assert sender is not None
+                    sender.stack.append(value)
+                    ctx = sender
+                    code = ctx.method.code
+                    literals = ctx.method.literals
+                    stack = ctx.stack
                 case _:  # pragma: no cover
                     raise STError(f"unknown opcode {ins.op!r}")

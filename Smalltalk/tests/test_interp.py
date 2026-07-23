@@ -215,6 +215,45 @@ def test_top_level_sender_is_nil(st):
     assert ev(st, "thisContext sender") == "nil"
 
 
+# --- non-recursive engine: deep recursion beyond Python's stack limit ---
+
+
+def test_deep_recursion(st):
+    st.define_class("R", "Object", [])
+    st.define_method("R", "sum: n\n    n = 0 ifTrue: [^0].\n    ^n + (self sum: n - 1)")
+    # 20000 levels far exceeds CPython's default recursion limit (~1000);
+    # the reified context stack lives on the heap, so this must not overflow.
+    assert ev(st, "R new sum: 20000") == "200010000"
+
+
+def test_mutual_recursion(st):
+    st.define_class("R", "Object", [])
+    st.define_method("R", "isEven: n\n    n = 0 ifTrue: [^true].\n    ^self isOdd: n - 1")
+    st.define_method("R", "isOdd: n\n    n = 0 ifTrue: [^false].\n    ^self isEven: n - 1")
+    assert ev(st, "R new isEven: 10000") == "true"
+
+
+def test_inline_arithmetic_fast_path(st):
+    # sanity: the fast path must match the primitive semantics
+    assert st.vm.optimize_arithmetic is True
+    assert ev(st, "3 + 4") == "7"
+    assert ev(st, "10 = 10") == "true"
+    assert ev(st, "10 = 11") == "false"
+    assert ev(st, "3.0 + 0.5") == "3.5"
+    assert ev(st, "7 // 2 + (1 = 1 ifTrue: [1] ifFalse: [0])") == "4"
+    # a non-numeric arg is not fast-pathed; falls through to a real send
+    assert ev(st, "1 = 'a'") == "false"
+
+
+def test_overriding_numeric_operator_disables_fast_path(st):
+    # Overriding an arithmetic selector on a numeric class must win, and the
+    # inline fast path must switch off so the override is actually consulted.
+    st.define_method("SmallInteger", "* other\n    ^42")
+    assert st.vm.optimize_arithmetic is False
+    assert ev(st, "3 * 4") == "42"
+    assert ev(st, "3 + 4") == "7"  # other operators still correct
+
+
 def test_polymorphism(st):
     st.define_class("Shape", "Object", [])
     st.define_method("Shape", "area ^0")

@@ -94,6 +94,10 @@ class PrimitiveMethod:
 Method = Any
 
 
+# Sentinel distinguishing "not yet resolved" from a cached miss (``None``).
+_UNRESOLVED: Any = object()
+
+
 @dataclass
 class STClass:
     """A Smalltalk class.
@@ -110,9 +114,26 @@ class STClass:
     methods: dict[str, Method] = field(default_factory=dict)
     class_methods: dict[str, Method] = field(default_factory=dict)
 
+    # Per-class caches (not part of identity/repr). ``method_cache`` /
+    # ``class_method_cache`` memoize resolved lookups (value ``None`` records a
+    # miss); ``_ivars_cache`` memoizes the flattened ivar layout. All are
+    # cleared by ``VM.flush_method_caches`` when behaviour changes.
+    method_cache: dict[str, Any] = field(
+        default_factory=dict, compare=False, repr=False
+    )
+    class_method_cache: dict[str, Any] = field(
+        default_factory=dict, compare=False, repr=False
+    )
+    _ivars_cache: "list[str] | None" = field(
+        default=None, compare=False, repr=False
+    )
+
     # --- reflection helpers ---
 
     def all_instance_variables(self) -> list[str]:
+        cached = self._ivars_cache
+        if cached is not None:
+            return cached
         ivars: list[str] = []
         chain: list[STClass] = []
         cls: STClass | None = self
@@ -121,24 +142,37 @@ class STClass:
             cls = cls.superclass
         for cls in reversed(chain):
             ivars.extend(cls.instance_variables)
+        self._ivars_cache = ivars
         return ivars
 
     def lookup(self, selector: str) -> Method | None:
+        cache = self.method_cache
+        hit = cache.get(selector, _UNRESOLVED)
+        if hit is not _UNRESOLVED:
+            return hit
         cls: STClass | None = self
         while cls is not None:
             method = cls.methods.get(selector)
             if method is not None:
+                cache[selector] = method
                 return method
             cls = cls.superclass
+        cache[selector] = None
         return None
 
     def lookup_class_method(self, selector: str) -> Method | None:
+        cache = self.class_method_cache
+        hit = cache.get(selector, _UNRESOLVED)
+        if hit is not _UNRESOLVED:
+            return hit
         cls: STClass | None = self
         while cls is not None:
             method = cls.class_methods.get(selector)
             if method is not None:
+                cache[selector] = method
                 return method
             cls = cls.superclass
+        cache[selector] = None
         return None
 
     def is_kind_of(self, other: "STClass") -> bool:

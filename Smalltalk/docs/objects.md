@@ -174,9 +174,13 @@ backtrace
 ```
 
 `Context` のプロトコル: `receiver` / `sender` / `home` / `selector` / `pc` /
-`isBlockContext` / `printString`。ただし現状は**ホスト（Python）の再帰**の上に
-reify しているだけで、コンテキストを保存して後で再開する・スタックを書き換える
-といった完全な操作（継続、`Process` スケジューリング、再開可能例外）は未対応です。
+`isBlockContext` / `printString`。
+
+VM は[非再帰の単一ループ](bytecode.md#実行モデル非再帰)で動くため、この `sender`
+連鎖が**ヒープ上の実コールスタック**になっており、メソッドの深い再帰も CPython の
+再帰上限に縛られません。ただしコンテキストを保存して後で**再開**する・スタックを
+書き換えるといった完全な操作（継続、`Process` スケジューリング、再開可能例外）は
+まだ未対応です。
 
 ## 制限
 
