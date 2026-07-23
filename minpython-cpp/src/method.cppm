@@ -307,6 +307,25 @@ inline int jit_m_loadglobal(VM* vm, Globals* glb, Value* regs,
                             const CodeObject* code, int a, int b) {
   return vm->op_loadglobal(glb, regs, code, a, b) ? 1 : 0;
 }
+// Generic slow paths. When an inline integer path's type check fails, native
+// code calls one of these and keeps going -- the function is never abandoned to
+// the interpreter just because a value was a str or a list.
+inline int jit_m_binop(VM* vm, Value* regs, int op, int a, int b, int c) {
+  regs[a] = vm->op_binop((Op)op, regs[b], regs[c]);
+  return vm->diag.failed ? 0 : 1;
+}
+inline int jit_m_cmp(VM* vm, Value* regs, int op, int a, int b, int c) {
+  regs[a] = vm->op_compare((Op)op, regs[b], regs[c]);
+  return vm->diag.failed ? 0 : 1;
+}
+inline int jit_m_unary(VM* vm, Value* regs, int op, int a, int b) {
+  regs[a] = vm->op_unary((Op)op, regs[b]);
+  return vm->diag.failed ? 0 : 1;
+}
+inline int jit_m_truthy(Value* regs, int slot) {
+  return truthy(regs[slot]) ? 1 : 0;
+}
+
 // A natively-called frame bailed on a type guard: finish it in the interpreter
 // and hand the result back, so the native caller can carry on. The 16-byte
 // Value comes back in rax:rdx per the SysV ABI.
@@ -627,7 +646,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
 
   // The value must be int-like for the inline integer path; otherwise bail to
   // the interpreter, which knows what `+` on two strings means.
-  void guard_int(int pc, int slot, Xbyak::Label& bail) {
+  void guard_int(int pc, int slot, Xbyak::Label& target) {
     using namespace Xbyak::util;
     auto it = known_.find(pc);
     if (it != known_.end() && it->second.count(slot)) {
@@ -640,9 +659,21 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     cmp(al, (int)Tag::Int);
     je(ok, T_NEAR);
     cmp(al, (int)Tag::Bool);
-    jne(bail, T_NEAR);
+    jne(target, T_NEAR);
     L(ok);
   }
+  // vm, regs, op, a, b, c -> rdi, rsi, edx, ecx, r8d, r9d
+  void emit_slow3(int (*fn)(VM*, Value*, int, int, int, int), int op, int a,
+                  int b, int c, Xbyak::Label& bail) {
+    using namespace Xbyak::util;
+    mov(rdi, rbx); mov(rsi, r12); mov(edx, op);
+    mov(ecx, a); mov(r8d, b); mov(r9d, c);
+    mov(rax, (std::uint64_t)(std::uintptr_t)fn);
+    call(rax);
+    test(eax, eax);
+    jz(bail, T_NEAR);
+  }
+
   void copy_value(int dst, int src) {
     using namespace Xbyak::util;
     mov(rax, hi(src));
@@ -691,9 +722,10 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           break;
 
         case Op::Add: case Op::Sub: case Op::Mul: case Op::BitAnd:
-        case Op::BitOr: case Op::BitXor: case Op::LShift: case Op::RShift:
-          guard_int(pc, y, bail[pc]);
-          guard_int(pc, z, bail[pc]);
+        case Op::BitOr: case Op::BitXor: case Op::LShift: case Op::RShift: {
+          Xbyak::Label slow, done;
+          guard_int(pc, y, slow);
+          guard_int(pc, z, slow);
           mov(rax, val(y));
           switch (ins.op) {
             case Op::Add: add(rax, val(z)); break;
@@ -707,12 +739,18 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           }
           mov(val(x), rax);
           mov(tg(x), (int)Tag::Int);
+          jmp(done, T_NEAR);
+          L(slow);
+          emit_slow3(&jit_m_binop, (int)ins.op, x, y, z, bail[pc]);
+          L(done);
           break;
+        }
 
         case Op::Eq: case Op::Ne: case Op::Lt: case Op::Le:
-        case Op::Gt: case Op::Ge:
-          guard_int(pc, y, bail[pc]);
-          guard_int(pc, z, bail[pc]);
+        case Op::Gt: case Op::Ge: {
+          Xbyak::Label slow, done;
+          guard_int(pc, y, slow);
+          guard_int(pc, z, slow);
           mov(rax, val(y));
           cmp(rax, val(z));
           switch (ins.op) {
@@ -726,17 +764,33 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           movzx(eax, al);
           mov(val(x), rax);
           mov(tg(x), (int)Tag::Bool);
+          jmp(done, T_NEAR);
+          L(slow);
+          emit_slow3(&jit_m_cmp, (int)ins.op, x, y, z, bail[pc]);
+          L(done);
           break;
+        }
 
-        case Op::Neg: case Op::Pos: case Op::Invert: case Op::Not:
-          guard_int(pc, y, bail[pc]);
+        case Op::Neg: case Op::Pos: case Op::Invert: case Op::Not: {
+          Xbyak::Label slow, done;
+          guard_int(pc, y, slow);
           mov(rax, val(y));
           if (ins.op == Op::Neg) neg(rax);
           else if (ins.op == Op::Invert) not_(rax);
           else if (ins.op == Op::Not) { test(rax, rax); sete(al); movzx(eax, al); }
           mov(val(x), rax);
           mov(tg(x), ins.op == Op::Not ? (int)Tag::Bool : (int)Tag::Int);
+          jmp(done, T_NEAR);
+          L(slow);
+          mov(rdi, rbx); mov(rsi, r12); mov(edx, (int)ins.op);
+          mov(ecx, x); mov(r8d, y);
+          mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_unary);
+          call(rax);
+          test(eax, eax);
+          jz(bail[pc], T_NEAR);
+          L(done);
           break;
+        }
 
         case Op::Len: {
           Xbyak::Label slow, done;
@@ -809,14 +863,21 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           break;
 
         case Op::Jump: jmp(labels[x], T_NEAR); break;
-        case Op::JumpIfFalse:
-          guard_int(pc, x, bail[pc]);
-          mov(rax, val(x)); test(rax, rax); jz(labels[y], T_NEAR);
+        case Op::JumpIfFalse: case Op::JumpIfTrue: {
+          Xbyak::Label slow, have;
+          guard_int(pc, x, slow);
+          mov(rax, val(x));       // int-like: truthiness is payload != 0
+          jmp(have, T_NEAR);
+          L(slow);                // any other type: ask the runtime
+          mov(rdi, r12); mov(esi, x);
+          mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_truthy);
+          call(rax);
+          L(have);
+          test(rax, rax);
+          if (ins.op == Op::JumpIfFalse) jz(labels[y], T_NEAR);
+          else jnz(labels[y], T_NEAR);
           break;
-        case Op::JumpIfTrue:
-          guard_int(pc, x, bail[pc]);
-          mov(rax, val(x)); test(rax, rax); jnz(labels[y], T_NEAR);
-          break;
+        }
 
         case Op::Return:
           copy_value(n_regs_, x);  // the result slot

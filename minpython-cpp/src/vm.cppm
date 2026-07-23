@@ -155,6 +155,13 @@ class VM {
   // allocation or std::string/vector). Public so a JIT helper can reach them.
   Value op_subscr(const Value& obj, const Value& idx) { return subscr(obj, idx); }
   Value op_length(const Value& v) { return length(v); }
+  // Generic slow paths, so JIT code can handle a non-int operand by calling out
+  // and carrying on instead of abandoning the whole function to the interpreter.
+  Value op_binop(Op op, const Value& l, const Value& r) { return binop(op, l, r); }
+  Value op_compare(Op op, const Value& l, const Value& r) {
+    return compare(op, l, r);
+  }
+  Value op_unary(Op op, const Value& v) { return unaryop(op, v); }
   // Full VM call (may re-enter native code through on_call) on a raw frame.
   bool op_call(Value* regs, int dst, int func_reg, int argc) {
     regs[dst] = do_call(regs[func_reg], regs, func_reg + 1, argc);
