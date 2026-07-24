@@ -433,8 +433,9 @@ inline std::unordered_map<int, TagMap> mem_tags(
 
 // A native entry point found the machine stack nearly spent. Latch the error
 // and let the interpreter unwind; nothing of the callee has run.
-inline void jit_stack_exhausted(VM* vm) {
-  vm->diag.fail("maximum recursion depth exceeded");
+inline void jit_stack_exhausted(VM* vm, const char* name) {
+  vm->diag.fail(
+      std::format("maximum recursion depth exceeded calling {}()", name));
 }
 
 inline int jit_m_subscr(VM* vm, Value* regs, int a, int b, int c) {
@@ -499,8 +500,14 @@ inline bool is_self_call(const CodeObject& code, int pc) {
 
 class MethodCode : public Xbyak::CodeGenerator {
  public:
+// Xbyak's default code buffer is 4KB, which a mid-sized function with
+// out-of-line slow paths overruns -- and the overrun shows up as a compile
+// failure, so the function silently stays interpreted. Grow on demand instead;
+// ready() below does the relocation.
   MethodCode(const CodeObject& code, const std::unordered_set<int>& reach,
-             int argc, VM* vm) : vm_(vm) {
+             int argc, VM* vm)
+      : Xbyak::CodeGenerator(8192, Xbyak::AutoGrow), vm_(vm),
+        name_(code.name) {
     using namespace Xbyak::util;
     pool_ = {rbx, r12, r13, r14, r15};
     arg_regs_ = {rdi, rsi, rdx, rcx, r8, r9};
@@ -646,6 +653,7 @@ class MethodCode : public Xbyak::CodeGenerator {
     jmp(body, T_NEAR);
     L(deep_);                 // out of line: never taken until it matters
     mov(rdi, (std::uint64_t)(std::uintptr_t)vm_);
+    mov(rsi, (std::uint64_t)(std::uintptr_t)name_.c_str());
     mov(rax, (std::uint64_t)(std::uintptr_t)&jit_stack_exhausted);
     call(rax);
     xor_(eax, eax);           // the caller unwinds on the latched error
@@ -767,6 +775,7 @@ class MethodCode : public Xbyak::CodeGenerator {
   Alloc alloc_;
   int save_n_ = 0;
   VM* vm_ = nullptr;
+  std::string name_;   // kept alive: the too-deep stub points into it
   Xbyak::Label entry_, deep_;
 };
 
@@ -788,7 +797,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   // self-call is guarded against it and then made as a real native call.
   MixedMethodCode(const CodeObject& code, const std::unordered_set<int>& reach,
                   VM* vm, const Object* self_obj)
-      : vm_(vm), self_obj_(self_obj) {
+      : Xbyak::CodeGenerator(8192, Xbyak::AutoGrow), vm_(vm),
+        self_obj_(self_obj) {
     n_regs_ = code.n_regs;
     int_params_ = mdetail::int_params(code);
     known_ = mdetail::known_int_slots(code, reach, int_params_);

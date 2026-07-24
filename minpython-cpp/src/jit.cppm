@@ -315,7 +315,8 @@ inline int jit_help_len(VM* vm, Value* regs, int a, int b) {
 // times instead of on every operation.
 class TraceCode : public Xbyak::CodeGenerator {
  public:
-  explicit TraceCode(const RecordedTrace& t) { emit(t); }
+  explicit TraceCode(const RecordedTrace& t)
+      : Xbyak::CodeGenerator(8192, Xbyak::AutoGrow) { emit(t); }
 
  private:
   Xbyak::Address tag(int slot) {
@@ -523,7 +524,8 @@ class TraceCode : public Xbyak::CodeGenerator {
 // so nothing else needs reloading and the GC never has to scan native frames.
 class MixedTraceCode : public Xbyak::CodeGenerator {
  public:
-  explicit MixedTraceCode(const RecordedTrace& t) { emit(t); }
+  explicit MixedTraceCode(const RecordedTrace& t)
+      : Xbyak::CodeGenerator(8192, Xbyak::AutoGrow) { emit(t); }
 
  private:
   Xbyak::Address tg(int slot) {

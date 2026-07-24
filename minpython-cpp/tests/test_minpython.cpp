@@ -367,6 +367,19 @@ int main() {
     check("gc bounded", vm.live_objects() < 3000 ? "y" : "n", "y");
   }
 
+  {  // A body long enough to overrun a 4KB code buffer must still compile:
+     // the failure mode is silent, the function just stays interpreted.
+    std::string src = "def big(xs, n):\n    a = xs[0]\n";
+    const char* v = "bcdefghijklmnop";
+    for (int i = 0; v[i]; ++i)
+      src += std::format("    {} = a * n + {} - a * {}\n", v[i], i + 1, i + 2);
+    src += "    return a + p\nxs = [7, 1, 2]\nk = 0\nt = 0\n"
+           "while k < 50:\n    t = t + big(xs, k)\n    k = k + 1\nprint(t)";
+    MethodRun m = run_method(src, 2);
+    check("method long body matches", m.out, run(src));
+    check("method long body compiled", m.aborted == 0 ? "y" : "n", "y");
+  }
+
   {  // Runaway recursion must be an error in every tier, not a segfault. The
      // compiled tiers recurse on the machine stack, where only the entry
      // point's own budget check stands between them and the guard page.
