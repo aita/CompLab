@@ -49,6 +49,8 @@ offset 8:  payload         int64（Int/Bool）または Object*（Str/List/Func�
 
 Lua 風のレジスタ機械。`x = a + b` は 1 命令 `ADD dst, a, b`。`while` の後方ジャンプ（back-edge）だけがループ再入の場所なので、そこでプロファイルを取り、`on_backedge` フックで JIT に制御を渡す。
 
+ディスパッチは **token threading**（computed goto で 66 要素の静的テーブル `optable[op]` に飛ぶ）。switch は clang が既にジャンプテーブル化するが、各ハンドラ末尾に間接分岐を複製すると分岐予測にオペコード履歴が効き、インタプリタ留まりのループ（`//`・`%` を含み JIT が降りるもの）で **switch 比 ~6〜9% 速い**。**direct threading**（各 pc をハンドラアドレスに事前デコードした `htab[pc]`）も試したが、per-function の htab が小さな静的 optable より cache に乗らず ~6% *遅かった* ので採らない。3方式は `MP_DISPATCH` で切替可能（1/2 は GCC/Clang 拡張、他環境では switch にフォールバック）。JIT がホットループを持っていくので、この差はインタプリタ留まりのコードにしか効かない。
+
 ### JIT（xbyak）
 
 ネイティブへの入口は 2 つ:

@@ -103,7 +103,14 @@ struct CodeObject {
   // Tags seen for each parameter across calls. A parameter that is always an
   // int can be guarded once on entry instead of at every use.
   std::vector<std::uint8_t> param_tags;
+  // Direct-threaded dispatch: each pc's handler address, filled lazily on the
+  // interpreter's first pass. Empty (and unused) under switch/token dispatch.
+  mutable std::vector<void*> htab;
 };
+
+// One past the largest Op value: the size of an opcode-indexed dispatch table.
+inline constexpr std::size_t kOpTableSize = 66;
+static_assert((int)Op::Len == 65, "kOpTableSize must be max Op value + 1");
 
 inline bool is_binop(Op op) { return op >= Op::Add && op <= Op::RShift; }
 // The operators under which bool is closed: `&`, `|`, `^` on two bools give a
