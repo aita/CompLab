@@ -614,6 +614,8 @@ class MethodCode : public Xbyak::CodeGenerator {
     }
   }
 
+
+
   void emit(const CodeObject& code, const std::unordered_set<int>& reach,
             int argc, int framesize) {
     using namespace Xbyak::util;
@@ -803,6 +805,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     int_params_ = mdetail::int_params(code);
     known_ = mdetail::known_int_slots(code, reach, int_params_);
     mem_ = mdetail::mem_tags(code, reach, known_);
+    plan_inlines(code, reach);
     allocate(code, reach);
     emit(code, reach);
     ready();
@@ -826,7 +829,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     if (!osr_targets_.empty()) s += std::format("  osr_off={}", osr_off_);
     return s;
   }
-  int frame_size() const { return n_regs_ + 1; }
+  int frame_size() const { return n_regs_ + 1 + frame_extra_; }
 
  private:
   // Slot addressing goes through `off_`, which is 0 for the function's own body
@@ -856,13 +859,178 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     else f(val(slot));
   }
   void flush_all() {
-    for (auto& [slot, r] : slot_reg_) mov(val(slot), r);
+    for (auto& [slot, r] : slot_reg_) mov(val_at(slot), r);
   }
   void reload(int slot) {
     if (has_reg(slot)) mov(reg(slot), val(slot));
   }
   void load_all() {
-    for (auto& [slot, r] : slot_reg_) mov(r, val(slot));
+    for (auto& [slot, r] : slot_reg_) mov(r, val_at(slot));
+  }
+  // A call site the feedback says is monomorphic, whose callee is small enough
+  // to paste in. The callee gets its own region of the frame -- a real Value
+  // array, so the interpreter can still finish it if a guard fails there.
+  struct InlineSite {
+    const CodeObject* code;
+    const Object* fn;     // the exact Function the site is guarded against
+    int base;             // frame offset of the callee's region
+    std::unordered_set<int> reach;
+    std::unordered_map<int, std::unordered_set<int>> known;
+    std::unordered_map<int, mdetail::TagMap> mem;
+  };
+
+  // Callees bigger than this are left to the ordinary call: pasting them in
+  // costs code size and register pressure without removing much overhead.
+  static constexpr int kInlineMaxOps = 24;
+  static constexpr int kInlineMaxSites = 4;
+
+  void plan_inlines(const CodeObject& code,
+                    const std::unordered_set<int>& reach) {
+    int next = n_regs_ + 1;
+    for (int pc : sorted(reach)) {
+      if ((int)inlines_.size() >= kInlineMaxSites) break;
+      const Instr& ins = code.code[pc];
+      if (ins.op != Op::Call) continue;
+      if (self_obj_ && is_self_call(code, pc)) continue;  // has its own path
+      if (pc >= (int)code.feedback.size()) continue;
+      const SiteFeedback& f = code.feedback[pc];
+      if (!f.callee || f.polymorphic) continue;
+      const Object* fn = static_cast<const Object*>(f.callee);
+      const CodeObject* cal = fn->code;
+      if (!cal || cal == &code) continue;                 // never itself
+      if ((int)cal->params.size() != ins.c) continue;
+      if ((int)cal->code.size() > kInlineMaxOps) continue;
+      auto r = mdetail::mixed_feasible(*cal);
+      if (!r) continue;
+      // One level only. A callee that calls on would need its own frame
+      // accounting, and the win is already mostly in the leaves.
+      bool nested = false;
+      for (int q : *r)
+        if (cal->code[q].op == Op::Call) nested = true;
+      if (nested) continue;
+
+      InlineSite site;
+      site.code = cal;
+      site.fn = fn;
+      site.base = next;
+      site.reach = *r;
+      site.known = mdetail::known_int_slots(*cal, *r, mdetail::int_params(*cal));
+      site.mem = mdetail::mem_tags(*cal, *r, site.known);
+      next += cal->n_regs + 1;
+      inlines_.emplace(pc, std::move(site));
+    }
+    frame_extra_ = next - (n_regs_ + 1);
+  }
+
+  // Paste a callee in where the ordinary path would have called it. The frame
+  // region *is* a valid Value array, so nothing new is needed for GC (it is
+  // inside the rooted value stack) or for deopt (the interpreter can finish
+  // the callee from any pc).
+  void emit_inline_call(InlineSite& site, int dst, int fr, int argc,
+                        Xbyak::Label& bail_pc) {
+    using namespace Xbyak::util;
+    Xbyak::Label& generic = late_label();
+    Xbyak::Label& done = late_label();
+    const CodeObject& cal = *site.code;
+    const int base = site.base;
+
+    // The feedback only says which function this *was*. Globals are mutable,
+    // so check, and fall back to the real call if it is something else now.
+    mov(al, tg(fr));
+    cmp(al, (int)Tag::Func);
+    jne(generic, T_NEAR);
+    mov(rax, val(fr));
+    mov(rcx, (std::uint64_t)(std::uintptr_t)site.fn);
+    cmp(rax, rcx);
+    jne(generic, T_NEAR);
+
+    flush_all();   // the region works on the array
+    for (int i = 0; i < argc; ++i) {
+      mov(rax, hi_at(fr + 1 + i));
+      mov(hi_at(base + i), rax);
+      mov(rax, val_at(fr + 1 + i));
+      mov(val_at(base + i), rax);
+    }
+    // The rest of a fresh frame reads as None -- and clearing the tags also
+    // stops the collector from tracing objects a previous call left here.
+    for (int k = argc; k <= cal.n_regs; ++k)
+      mov(byte[r12 + (base + k) * kValueSize + kTagOffset], (int)Tag::None);
+
+    // Swap the region in: slot addressing, both analyses, and a private label
+    // space. The deferred slow paths have to be laid down while the offset is
+    // still set, so the outer function's pending ones are parked first.
+    int outer_off = off_;
+    auto outer_late = std::move(late_);
+    late_.clear();
+    off_ = base;
+    known_.swap(site.known);
+    mem_.swap(site.mem);
+    auto& labels = label_pool_.emplace_back();
+    auto& bails = label_pool_.emplace_back();
+    for (int q : site.reach) { labels[q]; bails[q]; }
+
+    emit_region(cal, site.reach, labels, bails, dst, &done);
+
+    // A guard failed inside the callee: the interpreter finishes *that* frame
+    // from that pc, and the result lands in the caller's slot as if the call
+    // had returned normally.
+    for (int q : sorted(site.reach)) {
+      L(bails[q]);
+      flush_all();
+      mov(rdi, rbx);
+      regs_ptr(rsi);
+      mov(rdx, (std::uint64_t)(std::uintptr_t)&cal);
+      mov(rcx, qword[rsp + 0]);
+      mov(r8d, q);
+      mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_finish);
+      call(rax);
+      mov(hi_at(dst), rax);
+      mov(val_at(dst), rdx);
+      jmp(done, T_NEAR);
+    }
+    flush_late();   // the region's own out-of-line paths, still at its offset
+
+    late_ = std::move(outer_late);
+    known_.swap(site.known);
+    mem_.swap(site.mem);
+    off_ = outer_off;
+
+    defer([this, dst, fr, argc, &generic, &done, &bail_pc] {
+      L(generic);                          // not that function any more
+      flush_all();
+      mov(rdi, rbx); regs_ptr(rsi);
+      mov(edx, dst); mov(ecx, fr); mov(r8d, argc);
+      mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_call);
+      call(rax);
+      test(eax, eax);
+      jz(bail_pc, T_NEAR);
+      jmp(done, T_NEAR);
+    });
+
+    L(done);
+    if (owns_reg(dst)) mov(reg(dst), val_at(dst));   // it came back via memory
+    mov(rax, (std::uint64_t)(std::uintptr_t)&vm_->diag.failed);
+    mov(al, byte[rax]);
+    test(al, al);
+    jnz(bail_pc, T_NEAR);                  // a latched error unwinds
+  }
+
+  // The frame pointer a runtime helper should see: the current region's base,
+  // which is r12 itself for the function's own body.
+  void regs_ptr(const Xbyak::Reg64& d) {
+    using namespace Xbyak::util;
+    if (off_ == 0) mov(d, r12);
+    else lea(d, ptr[r12 + off_ * kValueSize]);
+  }
+  // Does this slot own a machine register, ignoring the current region? Used
+  // where a value crosses a region boundary.
+  bool owns_reg(int s) const { return slot_reg_.count(s) != 0; }
+
+  // Unwind this function's prologue. Shared by RETURN and every bail stub.
+  void pops() {
+    using namespace Xbyak::util;
+    add(rsp, 24);
+    pop(rbp); pop(r15); pop(r14); pop(r13); pop(r12); pop(rbx);
   }
 
   void allocate(const CodeObject& code, const std::unordered_set<int>& reach) {
@@ -890,24 +1058,27 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     for (std::size_t k = 0; k < ranked.size() && k < pool.size(); ++k)
       slot_reg_.insert({ranked[k].first, pool[k]});
   }
-  Xbyak::Address val(int slot) {
+  // Absolute frame addressing, ignoring the current region. The hoisted
+  // registers belong to the function's own slots, so flushing and reloading
+  // them must not be shifted while an inlined callee is being emitted.
+  Xbyak::Address val_at(int slot) {
     return Xbyak::util::qword[Xbyak::util::r12 +
-                              (slot + off_) * kValueSize + kPayloadOffset];
+                              slot * kValueSize + kPayloadOffset];
   }
-  Xbyak::Address hi(int slot) {  // the tag word (tag + padding)
-    return Xbyak::util::qword[Xbyak::util::r12 +
-                              (slot + off_) * kValueSize + kTagOffset];
+  Xbyak::Address hi_at(int slot) {
+    return Xbyak::util::qword[Xbyak::util::r12 + slot * kValueSize + kTagOffset];
   }
+  Xbyak::Address val(int slot) { return val_at(slot + off_); }
+  Xbyak::Address hi(int slot) { return hi_at(slot + off_); }
 
   // The value must be int-like for the inline integer path; otherwise bail to
   // the interpreter, which knows what `+` on two strings means.
   // Does this site still need a runtime type check, or has the analysis already
   // pinned the slot down?
   // What the frame array is already known to hold for `slot` on entry to `pc`.
-  // Only valid for the function's own body: an inlined region's pcs are the
-  // callee's, so the analysis does not apply (off_ != 0).
+  // `mem_` is swapped along with `off_`, so this reads the current region's
+  // own analysis.
   std::optional<Tag> mem_tag(int pc, int slot) const {
-    if (off_ != 0) return std::nullopt;
     auto it = mem_.find(pc);
     if (it == mem_.end()) return std::nullopt;
     auto s = it->second.find(slot);
@@ -962,7 +1133,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
                   int b, int c, Xbyak::Label& bail) {
     using namespace Xbyak::util;
     flush_all();   // safepoint: the helper reads the array, and may collect
-    mov(rdi, rbx); mov(rsi, r12); mov(edx, op);
+    mov(rdi, rbx); regs_ptr(rsi); mov(edx, op);
     mov(ecx, a); mov(r8d, b); mov(r9d, c);
     mov(rax, (std::uint64_t)(std::uintptr_t)fn);
     call(rax);
@@ -1015,6 +1186,277 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     mov(val(dst), rax);
   }
 
+  // Emit the instructions of one region. For the function body ret_to is
+  // null and RETURN unwinds; for an inlined callee it points at the
+  // continuation and the result is copied into the caller's slot instead.
+  void emit_region(const CodeObject& code,
+                   const std::unordered_set<int>& reach,
+                   std::unordered_map<int, Xbyak::Label>& labels,
+                   std::unordered_map<int, Xbyak::Label>& bail,
+                   int ret_dst, Xbyak::Label* ret_to) {
+    using namespace Xbyak::util;
+      for (int pc = 0; pc < (int)code.code.size(); ++pc) {
+        if (!reach.count(pc)) continue;
+        L(labels[pc]);
+        const Instr& ins = code.code[pc];
+        int x = ins.a, y = ins.b, z = ins.c;
+        switch (ins.op) {
+          case Op::LoadConst: {
+            const Value& k = code.consts[y];
+            if (k.is_int_like()) {          // the common case: just an immediate
+              if (has_reg(x)) mov(reg(x), k.i);   // straight into its register
+              else { mov(rax, k.i); mov(val(x), rax); }
+              set_tag(pc, x, k.tag);
+            } else {                        // str / None: copy the whole Value
+              mov(rcx, (std::uint64_t)(std::uintptr_t)&code.consts[y]);
+              mov(rax, qword[rcx]);
+              mov(hi(x), rax);
+              mov(rax, qword[rcx + 8]);
+              st(x);
+            }
+            break;
+          }
+          case Op::Move: move_value(pc, x, y); break;
+
+          case Op::LoadGlobal:
+            flush_all();
+            mov(rdi, rbx); mov(rsi, qword[rsp + 0]); regs_ptr(rdx);
+            mov(rcx, (std::uint64_t)(std::uintptr_t)&code);
+            mov(r8d, x); mov(r9d, y);
+            mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_loadglobal);
+            call(rax);
+            test(eax, eax);
+            jz(bail[pc], T_NEAR);
+            reload(x);
+            break;
+
+          case Op::Add: case Op::Sub: case Op::Mul: case Op::BitAnd:
+          case Op::BitOr: case Op::BitXor: case Op::LShift: case Op::RShift: {
+            if (!int_site(code, pc, true)) {   // never an int here: slow path only
+              emit_slow3(&jit_m_binop, (int)ins.op, x, y, z, bail[pc]);
+              break;
+            }
+            Xbyak::Label& slow = late_label();
+            Xbyak::Label& done = late_label();
+            guard_int(pc, y, slow);
+            guard_int(pc, z, slow);
+            // Two-address form: when the destination has a register of its own and
+            // is not also the right operand, accumulate straight into it.
+            Xbyak::Reg64 acc = rax;
+            if (has_reg(x) && x != z) {
+              acc = reg(x);
+              if (!(has_reg(y) && reg(y).getIdx() == acc.getIdx())) ld(acc, y);
+            } else {
+              ld(rax, y);
+            }
+            switch (ins.op) {
+              case Op::Add: with(z, [&](auto&& o){ add(acc, o); }); break;
+              case Op::Sub: with(z, [&](auto&& o){ sub(acc, o); }); break;
+              case Op::Mul: with(z, [&](auto&& o){ imul(acc, o); }); break;
+              case Op::BitAnd: with(z, [&](auto&& o){ and_(acc, o); }); break;
+              case Op::BitOr: with(z, [&](auto&& o){ or_(acc, o); }); break;
+              case Op::BitXor: with(z, [&](auto&& o){ xor_(acc, o); }); break;
+              case Op::LShift: ld(rcx, z); shl(acc, cl); break;
+              default: ld(rcx, z); sar(acc, cl); break;
+            }
+            if (acc.getIdx() == rax.getIdx()) st(x);
+            set_tag(pc, x, Tag::Int);
+            L(done);
+            {
+              Op o = ins.op;
+              Xbyak::Label& b = bail[pc];
+              defer([this, o, x, y, z, &slow, &done, &b] {
+                L(slow);
+                emit_slow3(&jit_m_binop, (int)o, x, y, z, b);
+                jmp(done, T_NEAR);
+              });
+            }
+            break;
+          }
+
+          case Op::Eq: case Op::Ne: case Op::Lt: case Op::Le:
+          case Op::Gt: case Op::Ge: {
+            if (!int_site(code, pc, true)) {
+              emit_slow3(&jit_m_cmp, (int)ins.op, x, y, z, bail[pc]);
+              break;
+            }
+            Xbyak::Label& slow = late_label();
+            Xbyak::Label& done = late_label();
+            guard_int(pc, y, slow);
+            guard_int(pc, z, slow);
+            if (has_reg(y)) with(z, [&](auto&& o){ cmp(reg(y), o); });
+            else { ld(rax, y); with(z, [&](auto&& o){ cmp(rax, o); }); }
+            switch (ins.op) {
+              case Op::Eq: sete(al); break;
+              case Op::Ne: setne(al); break;
+              case Op::Lt: setl(al); break;
+              case Op::Le: setle(al); break;
+              case Op::Gt: setg(al); break;
+              default: setge(al); break;
+            }
+            movzx(eax, al);
+            st(x);
+            set_tag(pc, x, Tag::Bool);
+            L(done);
+            {
+              Op o = ins.op;
+              Xbyak::Label& b = bail[pc];
+              defer([this, o, x, y, z, &slow, &done, &b] {
+                L(slow);
+                emit_slow3(&jit_m_cmp, (int)o, x, y, z, b);
+                jmp(done, T_NEAR);
+              });
+            }
+            break;
+          }
+
+          case Op::Neg: case Op::Pos: case Op::Invert: case Op::Not: {
+            Xbyak::Label slow, done;
+            guard_int(pc, y, slow);
+            ld(rax, y);
+            if (ins.op == Op::Neg) neg(rax);
+            else if (ins.op == Op::Invert) not_(rax);
+            else if (ins.op == Op::Not) { test(rax, rax); sete(al); movzx(eax, al); }
+            st(x);
+            set_tag(pc, x, ins.op == Op::Not ? Tag::Bool : Tag::Int);
+            jmp(done, T_NEAR);
+            L(slow);
+            flush_all();
+            mov(rdi, rbx); regs_ptr(rsi); mov(edx, (int)ins.op);
+            mov(ecx, x); mov(r8d, y);
+            mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_unary);
+            call(rax);
+            test(eax, eax);
+            jz(bail[pc], T_NEAR);
+            reload(x);
+            L(done);
+            break;
+          }
+
+          case Op::Len: {
+            Xbyak::Label slow, done;
+            if (inline_lists_ && list_site(code, pc)) {  // inline List size
+              mov(al, tg(y));
+              cmp(al, (int)Tag::List);
+              jne(slow, T_NEAR);
+              ld(rcx, y);
+              mov(rdx, qword[rcx + list_off_]);
+              mov(rax, qword[rcx + list_off_ + 8]);
+              sub(rax, rdx);
+              sar(rax, 4);
+              st(x);
+              set_tag(pc, x, Tag::Int);
+              jmp(done, T_NEAR);
+            }
+            L(slow);
+            flush_all();
+            mov(rdi, rbx); regs_ptr(rsi); mov(edx, x); mov(ecx, y);
+            mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_len);
+            call(rax);
+            test(eax, eax);
+            jz(bail[pc], T_NEAR);
+            reload(x);
+            L(done);
+            break;
+          }
+          case Op::Subscr: {
+            Xbyak::Label slow, done;
+            if (inline_lists_ && list_site(code, pc)) {  // inline List[int]
+              mov(al, tg(y));
+              cmp(al, (int)Tag::List);
+              jne(slow, T_NEAR);
+              mov(al, tg(z));
+              cmp(al, (int)Tag::Int);
+              jne(slow, T_NEAR);
+              ld(rcx, y);
+              mov(rdx, qword[rcx + list_off_]);        // begin
+              mov(r8, qword[rcx + list_off_ + 8]);     // end
+              sub(r8, rdx);
+              sar(r8, 4);                              // size
+              ld(rax, z);
+              cmp(rax, r8);
+              jae(slow, T_NEAR);   // unsigned: catches negative and out-of-range
+              shl(rax, 4);
+              add(rdx, rax);
+              mov(rax, qword[rdx]);
+              mov(hi(x), rax);
+              mov(rax, qword[rdx + kPayloadOffset]);
+              st(x);
+              jmp(done, T_NEAR);
+            }
+            L(slow);
+            flush_all();
+            mov(rdi, rbx); regs_ptr(rsi); mov(edx, x); mov(ecx, y); mov(r8d, z);
+            mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_subscr);
+            call(rax);
+            test(eax, eax);
+            jz(bail[pc], T_NEAR);
+            reload(x);
+            L(done);
+            break;
+          }
+          case Op::Call: {
+            auto inl = off_ == 0 ? inlines_.find(pc) : inlines_.end();
+            if (inl != inlines_.end()) {
+              emit_inline_call(inl->second, x, y, z, bail[pc]);
+            } else if (self_obj_ && is_self_call(code, pc)) {
+              emit_native_self_call(code, x, y, z, bail[pc]);
+            } else {
+              flush_all();
+              mov(rdi, rbx); regs_ptr(rsi); mov(edx, x); mov(ecx, y); mov(r8d, z);
+              mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_call);
+              call(rax);
+              test(eax, eax);
+              jz(bail[pc], T_NEAR);
+              reload(x);
+            }
+            break;
+          }
+
+          case Op::Jump: jmp(labels[x], T_NEAR); break;
+          case Op::JumpIfFalse: case Op::JumpIfTrue: {
+            Xbyak::Label& have = late_label();
+            if (needs_guard(pc, x)) {
+              Xbyak::Label& slow = late_label();
+              guard_int(pc, x, slow);
+              defer([this, x, &slow, &have] {
+                L(slow);            // any other type: ask the runtime
+                flush_all();
+                regs_ptr(rdi); mov(esi, x);
+                mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_truthy);
+                call(rax);
+                movzx(eax, al);  // returns int; clear the upper half before test
+                jmp(have, T_NEAR);
+              });
+            }
+            ld(rax, x);             // int-like: truthiness is payload != 0
+            L(have);
+            test(rax, rax);
+            if (ins.op == Op::JumpIfFalse) jz(labels[y], T_NEAR);
+            else jnz(labels[y], T_NEAR);
+            break;
+          }
+
+          case Op::Return:
+            flush_all();             // make the array authoritative first
+            if (ret_to) {            // inlined: hand the value to the caller
+              mov(rax, hi(x));
+              mov(hi_at(ret_dst), rax);
+              mov(rax, val(x));
+              mov(val_at(ret_dst), rax);
+              jmp(*ret_to, T_NEAR);
+            } else {
+              copy_value(n_regs_, x);  // ... then take the result out of it
+              pops();
+              mov(rax, -1);
+              ret();
+            }
+            break;
+          default: break;
+        }
+      }
+  }
+
   void emit(const CodeObject& code, const std::unordered_set<int>& reach) {
     using namespace Xbyak::util;
     std::unordered_map<int, Xbyak::Label> labels, bail;
@@ -1047,259 +1489,9 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     }
     load_all();
 
-    auto pops = [&] {
-      add(rsp, 24);
-      pop(rbp); pop(r15); pop(r14); pop(r13); pop(r12); pop(rbx);
-    };
-
-    for (int pc = 0; pc < (int)code.code.size(); ++pc) {
-      if (!reach.count(pc)) continue;
-      L(labels[pc]);
-      const Instr& ins = code.code[pc];
-      int x = ins.a, y = ins.b, z = ins.c;
-      switch (ins.op) {
-        case Op::LoadConst: {
-          const Value& k = code.consts[y];
-          if (k.is_int_like()) {          // the common case: just an immediate
-            if (has_reg(x)) mov(reg(x), k.i);   // straight into its register
-            else { mov(rax, k.i); mov(val(x), rax); }
-            set_tag(pc, x, k.tag);
-          } else {                        // str / None: copy the whole Value
-            mov(rcx, (std::uint64_t)(std::uintptr_t)&code.consts[y]);
-            mov(rax, qword[rcx]);
-            mov(hi(x), rax);
-            mov(rax, qword[rcx + 8]);
-            st(x);
-          }
-          break;
-        }
-        case Op::Move: move_value(pc, x, y); break;
-
-        case Op::LoadGlobal:
-          flush_all();
-          mov(rdi, rbx); mov(rsi, qword[rsp + 0]); mov(rdx, r12);
-          mov(rcx, (std::uint64_t)(std::uintptr_t)&code);
-          mov(r8d, x); mov(r9d, y);
-          mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_loadglobal);
-          call(rax);
-          test(eax, eax);
-          jz(bail[pc], T_NEAR);
-          reload(x);
-          break;
-
-        case Op::Add: case Op::Sub: case Op::Mul: case Op::BitAnd:
-        case Op::BitOr: case Op::BitXor: case Op::LShift: case Op::RShift: {
-          if (!int_site(code, pc, true)) {   // never an int here: slow path only
-            emit_slow3(&jit_m_binop, (int)ins.op, x, y, z, bail[pc]);
-            break;
-          }
-          Xbyak::Label& slow = late_label();
-          Xbyak::Label& done = late_label();
-          guard_int(pc, y, slow);
-          guard_int(pc, z, slow);
-          // Two-address form: when the destination has a register of its own and
-          // is not also the right operand, accumulate straight into it.
-          Xbyak::Reg64 acc = rax;
-          if (has_reg(x) && x != z) {
-            acc = reg(x);
-            if (!(has_reg(y) && reg(y).getIdx() == acc.getIdx())) ld(acc, y);
-          } else {
-            ld(rax, y);
-          }
-          switch (ins.op) {
-            case Op::Add: with(z, [&](auto&& o){ add(acc, o); }); break;
-            case Op::Sub: with(z, [&](auto&& o){ sub(acc, o); }); break;
-            case Op::Mul: with(z, [&](auto&& o){ imul(acc, o); }); break;
-            case Op::BitAnd: with(z, [&](auto&& o){ and_(acc, o); }); break;
-            case Op::BitOr: with(z, [&](auto&& o){ or_(acc, o); }); break;
-            case Op::BitXor: with(z, [&](auto&& o){ xor_(acc, o); }); break;
-            case Op::LShift: ld(rcx, z); shl(acc, cl); break;
-            default: ld(rcx, z); sar(acc, cl); break;
-          }
-          if (acc.getIdx() == rax.getIdx()) st(x);
-          set_tag(pc, x, Tag::Int);
-          L(done);
-          {
-            Op o = ins.op;
-            Xbyak::Label& b = bail[pc];
-            defer([this, o, x, y, z, &slow, &done, &b] {
-              L(slow);
-              emit_slow3(&jit_m_binop, (int)o, x, y, z, b);
-              jmp(done, T_NEAR);
-            });
-          }
-          break;
-        }
-
-        case Op::Eq: case Op::Ne: case Op::Lt: case Op::Le:
-        case Op::Gt: case Op::Ge: {
-          if (!int_site(code, pc, true)) {
-            emit_slow3(&jit_m_cmp, (int)ins.op, x, y, z, bail[pc]);
-            break;
-          }
-          Xbyak::Label& slow = late_label();
-          Xbyak::Label& done = late_label();
-          guard_int(pc, y, slow);
-          guard_int(pc, z, slow);
-          if (has_reg(y)) with(z, [&](auto&& o){ cmp(reg(y), o); });
-          else { ld(rax, y); with(z, [&](auto&& o){ cmp(rax, o); }); }
-          switch (ins.op) {
-            case Op::Eq: sete(al); break;
-            case Op::Ne: setne(al); break;
-            case Op::Lt: setl(al); break;
-            case Op::Le: setle(al); break;
-            case Op::Gt: setg(al); break;
-            default: setge(al); break;
-          }
-          movzx(eax, al);
-          st(x);
-          set_tag(pc, x, Tag::Bool);
-          L(done);
-          {
-            Op o = ins.op;
-            Xbyak::Label& b = bail[pc];
-            defer([this, o, x, y, z, &slow, &done, &b] {
-              L(slow);
-              emit_slow3(&jit_m_cmp, (int)o, x, y, z, b);
-              jmp(done, T_NEAR);
-            });
-          }
-          break;
-        }
-
-        case Op::Neg: case Op::Pos: case Op::Invert: case Op::Not: {
-          Xbyak::Label slow, done;
-          guard_int(pc, y, slow);
-          ld(rax, y);
-          if (ins.op == Op::Neg) neg(rax);
-          else if (ins.op == Op::Invert) not_(rax);
-          else if (ins.op == Op::Not) { test(rax, rax); sete(al); movzx(eax, al); }
-          st(x);
-          set_tag(pc, x, ins.op == Op::Not ? Tag::Bool : Tag::Int);
-          jmp(done, T_NEAR);
-          L(slow);
-          flush_all();
-          mov(rdi, rbx); mov(rsi, r12); mov(edx, (int)ins.op);
-          mov(ecx, x); mov(r8d, y);
-          mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_unary);
-          call(rax);
-          test(eax, eax);
-          jz(bail[pc], T_NEAR);
-          reload(x);
-          L(done);
-          break;
-        }
-
-        case Op::Len: {
-          Xbyak::Label slow, done;
-          if (inline_lists_ && list_site(code, pc)) {  // inline List size
-            mov(al, tg(y));
-            cmp(al, (int)Tag::List);
-            jne(slow, T_NEAR);
-            ld(rcx, y);
-            mov(rdx, qword[rcx + list_off_]);
-            mov(rax, qword[rcx + list_off_ + 8]);
-            sub(rax, rdx);
-            sar(rax, 4);
-            st(x);
-            set_tag(pc, x, Tag::Int);
-            jmp(done, T_NEAR);
-          }
-          L(slow);
-          flush_all();
-          mov(rdi, rbx); mov(rsi, r12); mov(edx, x); mov(ecx, y);
-          mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_len);
-          call(rax);
-          test(eax, eax);
-          jz(bail[pc], T_NEAR);
-          reload(x);
-          L(done);
-          break;
-        }
-        case Op::Subscr: {
-          Xbyak::Label slow, done;
-          if (inline_lists_ && list_site(code, pc)) {  // inline List[int]
-            mov(al, tg(y));
-            cmp(al, (int)Tag::List);
-            jne(slow, T_NEAR);
-            mov(al, tg(z));
-            cmp(al, (int)Tag::Int);
-            jne(slow, T_NEAR);
-            ld(rcx, y);
-            mov(rdx, qword[rcx + list_off_]);        // begin
-            mov(r8, qword[rcx + list_off_ + 8]);     // end
-            sub(r8, rdx);
-            sar(r8, 4);                              // size
-            ld(rax, z);
-            cmp(rax, r8);
-            jae(slow, T_NEAR);   // unsigned: catches negative and out-of-range
-            shl(rax, 4);
-            add(rdx, rax);
-            mov(rax, qword[rdx]);
-            mov(hi(x), rax);
-            mov(rax, qword[rdx + kPayloadOffset]);
-            st(x);
-            jmp(done, T_NEAR);
-          }
-          L(slow);
-          flush_all();
-          mov(rdi, rbx); mov(rsi, r12); mov(edx, x); mov(ecx, y); mov(r8d, z);
-          mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_subscr);
-          call(rax);
-          test(eax, eax);
-          jz(bail[pc], T_NEAR);
-          reload(x);
-          L(done);
-          break;
-        }
-        case Op::Call:
-          if (self_obj_ && is_self_call(code, pc)) {
-            emit_native_self_call(code, x, y, z, bail[pc]);
-          } else {
-            flush_all();
-            mov(rdi, rbx); mov(rsi, r12); mov(edx, x); mov(ecx, y); mov(r8d, z);
-            mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_call);
-            call(rax);
-            test(eax, eax);
-            jz(bail[pc], T_NEAR);
-            reload(x);
-          }
-          break;
-
-        case Op::Jump: jmp(labels[x], T_NEAR); break;
-        case Op::JumpIfFalse: case Op::JumpIfTrue: {
-          Xbyak::Label& have = late_label();
-          if (needs_guard(pc, x)) {
-            Xbyak::Label& slow = late_label();
-            guard_int(pc, x, slow);
-            defer([this, x, &slow, &have] {
-              L(slow);            // any other type: ask the runtime
-              flush_all();
-              mov(rdi, r12); mov(esi, x);
-              mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_truthy);
-              call(rax);
-              movzx(eax, al);  // returns int; clear the upper half before test
-              jmp(have, T_NEAR);
-            });
-          }
-          ld(rax, x);             // int-like: truthiness is payload != 0
-          L(have);
-          test(rax, rax);
-          if (ins.op == Op::JumpIfFalse) jz(labels[y], T_NEAR);
-          else jnz(labels[y], T_NEAR);
-          break;
-        }
-
-        case Op::Return:
-          flush_all();             // make the array authoritative first
-          copy_value(n_regs_, x);  // ... then take the result out of it
-          pops();
-          mov(rax, -1);
-          ret();
-          break;
-        default: break;
-      }
-    }
+    // The function body itself is one "region": the same emitter also lays
+    // down inlined callees, at a frame offset and with their own labels.
+    emit_region(code, reach, labels, bail, /*ret_dst=*/-1, /*ret_to=*/nullptr);
 
     flush_late();  // the out-of-line slow paths, after the hot body
 
@@ -1474,6 +1666,11 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   const Object* self_obj_ = nullptr;
   std::unordered_map<int, std::unordered_set<int>> known_;
   std::unordered_map<int, mdetail::TagMap> mem_;
+  std::unordered_map<int, InlineSite> inlines_;   // by call pc
+  int frame_extra_ = 0;                           // slots the regions add
+  // Label maps outlive the region that made them: deferred slow paths capture
+  // references into them.
+  std::deque<std::unordered_map<int, Xbyak::Label>> label_pool_;
   int n_tags_ = 0, n_tags_elided_ = 0;
 
  public:
@@ -1545,7 +1742,8 @@ class MethodJIT {
     // The frame comes from the VM's contiguous value stack: a call costs a
     // pointer bump instead of a heap allocation, and the live region is already
     // a GC root, so nothing has to be registered.
-    std::size_t base = vm_.frame_alloc(code->n_regs + 1);
+    // frame_size() covers the inlined callees' regions as well as our own.
+    std::size_t base = vm_.frame_alloc(e.code->frame_size());
     if (base == (std::size_t)-1) return false;  // stack full -> interpret
     Value* frame = vm_.vstack.data() + base;
     for (int i = 0; i < argc; ++i) frame[i] = regs[arg_base + i];

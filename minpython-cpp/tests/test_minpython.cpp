@@ -348,6 +348,41 @@ int main() {
     check("gc bounded", vm.live_objects() < 3000 ? "y" : "n", "y");
   }
 
+  {  // A small leaf callee is pasted into its caller, so the loop stops making
+     // calls entirely once on-stack replacement has taken it over.
+    std::string src =
+        "def sq(x):\n    return x * x\n"
+        "def run(n):\n    i = 0\n    t = 0\n"
+        "    while i < n:\n        t = t + sq(i)\n        i = i + 1\n"
+        "    return t\nprint(run(20000))";
+    MethodRun m = run_method(src, 4);
+    check("inline leaf matches", m.out, run(src));
+    check("inline leaf removed calls", m.native < 1000 ? "y" : "n", "y");
+  }
+  {  // The site is only *probably* that function. Rebinding it must fall back
+     // to a real call rather than run the pasted-in body.
+    std::string src =
+        "def a(x):\n    return x + 1\n"
+        "def b(x):\n    return x + 100\n"
+        "def run(n, f):\n    i = 0\n    t = 0\n"
+        "    while i < n:\n        t = t + f(i)\n        i = i + 1\n"
+        "    return t\n"
+        "print(run(5000, a))\nprint(run(5000, b))";
+    MethodRun m = run_method(src, 4);
+    check("inline callee guard", m.out, run(src));
+  }
+  {  // An inlined callee that is handed a str must take its guard's slow path
+     // and still agree with the interpreter.
+    std::string src =
+        "def dbl(x):\n    return x + x\n"
+        "def run(n, v):\n    i = 0\n    t = v\n"
+        "    while i < n:\n        t = dbl(t)\n        i = i + 1\n"
+        "    return t\n"
+        "print(run(20, 1))\nprint(len(run(5, 'ab')))";
+    MethodRun m = run_method(src, 4);
+    check("inline callee mixed types", m.out, run(src));
+  }
+
   {  // A body long enough to overrun a 4KB code buffer must still compile:
      // the failure mode is silent, the function just stays interpreted.
     std::string src = "def big(xs, n):\n    a = xs[0]\n";
