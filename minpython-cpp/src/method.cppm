@@ -764,12 +764,15 @@ class MethodCode : public Xbyak::CodeGenerator {
           break;
 
         case Op::LShift: case Op::RShift: {
-          Xbyak::Reg64 tgt, yr;
+          Xbyak::Reg64 tgt, yr, zr;
           bool xreg = rloc(x, tgt);
           if (!xreg) tgt = rax;
-          if (!(rloc(y, yr) && same(yr, tgt))) load(tgt, y);
-          Xbyak::Reg64 zr;
+          // Read the count *before* writing the destination. x and z are
+          // different slots, but the scan hands a result the register of an
+          // operand whose last use is right here -- so they can be the same
+          // register, and loading y first destroyed the count.
           if (rloc(z, zr)) mov(rcx, zr); else mov(rcx, mem(z));
+          if (!(rloc(y, yr) && same(yr, tgt))) load(tgt, y);
           if (ins.op == Op::LShift) shl(tgt, cl); else sar(tgt, cl);
           if (!xreg) store(x);
           break;

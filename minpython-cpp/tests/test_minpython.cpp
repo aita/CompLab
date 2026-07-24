@@ -497,6 +497,19 @@ int main() {
     check("int tier declines bool result", m.out, run(src));
   }
 
+  {  // regression: the shift count has to be read before the destination is
+     // written. They are different slots, but the scan hands a result the
+     // register of an operand whose last use is right here, so `p << 3`
+     // shifted by itself. Found by tests/fuzz.py.
+    std::string src =
+        "def f(p):\n    return p << 3\n"
+        "def g(p):\n    return p >> 1\n"
+        "t = 0\nd = 0\nwhile d < 40:\n    t = t + f(d) + g(d)\n"
+        "    d = d + 1\nprint(t)";
+    MethodRun m = run_method(src, 4);
+    check("shift count read before dest", m.out, run(src));
+  }
+
   {  // A body long enough to overrun a 4KB code buffer must still compile:
      // the failure mode is silent, the function just stays interpreted.
     std::string src = "def big(xs, n):\n    a = xs[0]\n";
