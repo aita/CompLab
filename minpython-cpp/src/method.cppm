@@ -678,14 +678,17 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   int frame_size() const { return n_regs_ + 1; }
 
  private:
+  // Slot addressing goes through `off_`, which is 0 for the function's own body
+  // and the base of a region when an inlined callee's body is being emitted.
   Xbyak::Address tg(int slot) {
-    return Xbyak::util::byte[Xbyak::util::r12 + slot * kValueSize + kTagOffset];
+    return Xbyak::util::byte[Xbyak::util::r12 +
+                             (slot + off_) * kValueSize + kTagOffset];
   }
   // Hoisting. Payloads of hot slots live in callee-saved registers; the tag
   // always stays in memory, so bool-vs-int stays exact for free. Any path that
   // calls out (a safepoint, and the only place a GC can run) flushes first, so
   // the collector and the helper both see the real values.
-  bool has_reg(int s) const { return slot_reg_.count(s) != 0; }
+  bool has_reg(int s) const { return off_ == 0 && slot_reg_.count(s) != 0; }
   Xbyak::Reg64 reg(int s) const { return slot_reg_.at(s); }
   void ld(const Xbyak::Reg64& dst, int slot) {
     if (has_reg(slot)) { if (reg(slot).getIdx() != dst.getIdx()) mov(dst, reg(slot)); }
@@ -737,11 +740,12 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
       slot_reg_.insert({ranked[k].first, pool[k]});
   }
   Xbyak::Address val(int slot) {
-    return Xbyak::util::qword[Xbyak::util::r12 + slot * kValueSize +
-                              kPayloadOffset];
+    return Xbyak::util::qword[Xbyak::util::r12 +
+                              (slot + off_) * kValueSize + kPayloadOffset];
   }
   Xbyak::Address hi(int slot) {  // the tag word (tag + padding)
-    return Xbyak::util::qword[Xbyak::util::r12 + slot * kValueSize + kTagOffset];
+    return Xbyak::util::qword[Xbyak::util::r12 +
+                              (slot + off_) * kValueSize + kTagOffset];
   }
 
   // The value must be int-like for the inline integer path; otherwise bail to
@@ -1163,6 +1167,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   bool inline_lists_ = list_layout().ok;
   int list_off_ = (int)list_layout().list_off;
   std::unordered_map<int, Xbyak::Reg64> slot_reg_;
+  int off_ = 0;
   int n_regs_ = 0;
   int osr_off_ = 0;
   std::unordered_set<int> osr_targets_;
