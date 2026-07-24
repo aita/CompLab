@@ -48,6 +48,7 @@ target_sources(mp
       src/vm.cppm
       src/regalloc.cppm
       src/disasm.cppm
+      src/analysis.cppm
       src/method.cppm
       src/tiered.cppm
       src/minpython.cppm

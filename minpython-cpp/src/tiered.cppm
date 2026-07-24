@@ -23,6 +23,7 @@ import std;
 import :value;
 import :bytecode;
 import :method;
+import :analysis;
 import :vm;
 
 export namespace minpython {

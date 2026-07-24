@@ -30,12 +30,6 @@ inline std::int64_t py_mod(std::int64_t a, std::int64_t b) {
   if (r != 0 && ((r < 0) != (b < 0))) r += b;
   return r;
 }
-// The operators under which bool is closed: `&`, `|`, `^` on two bools give a
-// bool, every other int operator gives an int.
-inline bool bool_closed(Op op) {
-  return op == Op::BitAnd || op == Op::BitOr || op == Op::BitXor;
-}
-
 inline std::int64_t py_pow(std::int64_t a, std::int64_t e) {
   std::int64_t r = 1;
   while (e) {

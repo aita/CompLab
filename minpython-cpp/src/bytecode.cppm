@@ -106,6 +106,11 @@ struct CodeObject {
 };
 
 inline bool is_binop(Op op) { return op >= Op::Add && op <= Op::RShift; }
+// The operators under which bool is closed: `&`, `|`, `^` on two bools give a
+// bool, every other int operator gives an int.
+inline bool bool_closed(Op op) {
+  return op == Op::BitAnd || op == Op::BitOr || op == Op::BitXor;
+}
 inline bool is_unaryop(Op op) { return op >= Op::Neg && op <= Op::Not; }
 inline bool is_cmpop(Op op) { return op >= Op::Eq && op <= Op::Ge; }
 

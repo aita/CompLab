@@ -10,6 +10,7 @@ export import :compiler;
 export import :vm;
 export import :regalloc;
 export import :disasm;
+export import :analysis;
 export import :method;
 export import :tiered;
 

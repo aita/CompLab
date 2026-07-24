@@ -161,7 +161,8 @@ src/
   vm.cppm         レジスタ dispatch ループ + back-edge/on_call フック + GC
   regalloc.cppm   共有 linear-scan アロケータ
   disasm.cppm     生成コードのダンプ（MINPYTHON_JIT_DUMP=1）
-  method.cppm     method JIT（解析・codegen・OSR・driver）
+  analysis.cppm   CodeObject の解析（到達性・liveness・feasible・must 解析）
+  method.cppm     method JIT（codegen・OSR・inline・driver）
   tiered.cppm     非同期（バックグラウンド）method JIT
   minpython.cppm  primary module interface
   main.cpp        CLI（--jit / --tiered / --dis）
