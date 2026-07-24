@@ -160,25 +160,28 @@ class VM {
     pinned.push_back(v);
   }
 
-  // Mark-sweep GC. Roots: module globals, every live interpreter frame, the
-  // JIT frame stack's live region, and whatever the JITs have pinned. Only
-  // arena objects are swept; compile-time string constants live in the Program
-  // and are never freed.
-  void gc() {
-    for (auto& [k, v] : globals) mark(v);
+  // The GC roots, in one place. Anything reachable from one of these survives a
+  // collection; everything else in the arena is freed. The four sources:
+  //   - module globals
+  //   - every live interpreter frame (run_frame registers each via frames_)
+  //   - the JIT frame stack's live region [0, vtop)
+  //   - whatever a JIT has pinned (baked-in callee addresses)
+  // A precise, non-moving collector only reads the roots, so `f` takes them by
+  // const ref; a moving one would take Value& and rewrite in place.
+  template <class F>
+  void for_each_root(F&& f) {
+    for (auto& [name, v] : globals) f(v);
     for (auto* fr : frames_)
-      for (auto& v : *fr) mark(v);
-    for (std::size_t k = 0; k < vtop; ++k) mark(vstack[k]);
-    for (const Value& v : pinned) mark(v);
-    std::vector<std::unique_ptr<Object>> keep;
-    keep.reserve(arena_.size());
-    for (auto& o : arena_) {
-      if (o->marked) {
-        o->marked = false;
-        keep.push_back(std::move(o));
-      }
-    }
-    arena_ = std::move(keep);
+      for (const Value& v : *fr) f(v);
+    for (std::size_t k = 0; k < vtop; ++k) f(vstack[k]);
+    for (const Value& v : pinned) f(v);
+  }
+
+  // Mark-sweep GC. Only arena objects are swept; compile-time string constants
+  // live in the Program and are never freed.
+  void gc() {
+    for_each_root([](const Value& v) { v.gc_mark(); });
+    sweep();
     n_gc++;
   }
 
@@ -529,12 +532,18 @@ class VM {
     else if (f.callee != o) f.polymorphic = true;
   }
 
-  void mark(const Value& v) {
-    if (v.tag != Tag::Str && v.tag != Tag::List && v.tag != Tag::Func) return;
-    if (v.obj->marked) return;
-    v.obj->marked = true;
-    if (v.tag == Tag::List)
-      for (auto& e : v.obj->list) mark(e);
+  // Sweep phase: keep the objects the mark reached, freeing the rest, and clear
+  // the survivors' bits for the next cycle.
+  void sweep() {
+    std::vector<std::unique_ptr<Object>> keep;
+    keep.reserve(arena_.size());
+    for (auto& o : arena_) {
+      if (o->marked) {
+        o->marked = false;
+        keep.push_back(std::move(o));
+      }
+    }
+    arena_ = std::move(keep);
   }
 
   std::vector<std::unique_ptr<Object>> arena_;

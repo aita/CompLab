@@ -74,6 +74,12 @@ struct Value {
   }
 
   bool is_int_like() const { return tag == Tag::Int || tag == Tag::Bool; }
+
+  // Mark-sweep: set the GC bit on this value's object, and on everything it
+  // holds. Which tags carry an object, and that a list has children, is the
+  // value's own knowledge -- the collector only supplies the roots. Body is
+  // below, once Object is a complete type.
+  void gc_mark() const;
 };
 
 static_assert(sizeof(Value) == 16, "Value must be 16 bytes for the JIT layout");
@@ -93,6 +99,14 @@ struct Object {
   const CodeObject* code;   // Func
   Globals* globals;         // Func
 };
+
+inline void Value::gc_mark() const {
+  if (tag != Tag::Str && tag != Tag::List && tag != Tag::Func) return;
+  if (obj->marked) return;       // already reached: ends cycles and sharing
+  obj->marked = true;
+  if (tag == Tag::List)
+    for (const Value& e : obj->list) e.gc_mark();
+}
 
 // Where a List's elements live inside an Object, so the JIT can inline the fast
 // path of `xs[i]` / `len(xs)` instead of calling back into C++.
