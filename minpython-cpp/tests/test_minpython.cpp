@@ -383,6 +383,42 @@ int main() {
     check("inline callee mixed types", m.out, run(src));
   }
 
+  {  // regression: an inlined callee gets no entry guard of its own, but its
+     // analysis is seeded with the parameters the interpreter has only ever
+     // seen as ints. Hand it something else after it was compiled and the
+     // pasted-in integer path must not run on it.
+    std::string src =
+        "def g(x):\n    return x + x\n"
+        "def run(xs, n):\n    i = 0\n    t = 0\n"
+        "    while i < n:\n        j = 0\n"
+        "        while j < len(xs):\n            t = t + g(xs[j])\n"
+        "            j = j + 1\n        i = i + 1\n    return t\n"
+        "print(run([1, 2, 3], 400))\nprint(run([1, 'a', 3], 400))";
+    MethodRun m = run_method(src, 4);
+    check("inline callee param guard", m.out, run(src));
+  }
+
+  {  // regression: a self-recursive function that also inlines a callee needs
+     // the *whole* frame for its recursive call, regions included. Reserving
+     // only its own slots left the regions above vtop, where the collector
+     // does not look -- so an object a region held could be swept while it was
+     // still the only reference. Threshold forces collections mid-region.
+    std::string src =
+        "def cat(s):\n    return s + s + s\n"
+        "def f(n, s):\n    if n <= 0:\n        return len(cat(s))\n"
+        "    return len(cat(s)) + f(n - 1, s)\n"
+        "i = 0\nt = 0\n"
+        "while i < 400:\n    t = t + f(6, 'abcdefgh')\n    i = i + 1\nprint(t)";
+    std::string err;
+    auto prog = compile_module(src, err);
+    VM vm;
+    vm.gc_threshold = 200;
+    MethodJIT mj(vm, 4);
+    if (prog) vm.run_code(prog->module);
+    check("inline region rooted across self-call", vm.output(), run(src));
+    check("inline region gc ran", vm.n_gc > 0 ? "y" : "n", "y");
+  }
+
   {  // A body long enough to overrun a 4KB code buffer must still compile:
      // the failure mode is silent, the function just stays interpreted.
     std::string src = "def big(xs, n):\n    a = xs[0]\n";

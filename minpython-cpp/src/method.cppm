@@ -875,6 +875,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     const Object* fn;     // the exact Function the site is guarded against
     int base;             // frame offset of the callee's region
     std::unordered_set<int> reach;
+    std::unordered_set<int> int_params;  // what the region's analysis assumes
     std::unordered_map<int, std::unordered_set<int>> known;
     std::unordered_map<int, mdetail::TagMap> mem;
   };
@@ -914,7 +915,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
       site.fn = fn;
       site.base = next;
       site.reach = *r;
-      site.known = mdetail::known_int_slots(*cal, *r, mdetail::int_params(*cal));
+      site.int_params = mdetail::int_params(*cal);
+      site.known = mdetail::known_int_slots(*cal, *r, site.int_params);
       site.mem = mdetail::mem_tags(*cal, *r, site.known);
       next += cal->n_regs + 1;
       inlines_.emplace(pc, std::move(site));
@@ -955,6 +957,21 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     // stops the collector from tracing objects a previous call left here.
     for (int k = argc; k <= cal.n_regs; ++k)
       mov(byte[r12 + (base + k) * kValueSize + kTagOffset], (int)Tag::None);
+
+    // The region's analysis is seeded with the parameters the interpreter has
+    // only ever seen as ints, exactly as the callee's own entry point is. That
+    // entry point is not here, so the same guard has to be -- without it the
+    // pasted-in body runs its integer path on whatever it was handed.
+    for (int p : sorted(site.int_params)) {
+      if (p >= argc) continue;
+      Xbyak::Label ok;
+      mov(al, byte[r12 + (base + p) * kValueSize + kTagOffset]);
+      cmp(al, (int)Tag::Int);
+      je(ok, T_NEAR);
+      cmp(al, (int)Tag::Bool);
+      jne(generic, T_NEAR);
+      L(ok);
+    }
 
     // Swap the region in: slot addressing, both analyses, and a private label
     // space. The deferred slow paths have to be laid down while the offset is
@@ -1578,7 +1595,11 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   void emit_native_self_call(const CodeObject& code, int dst, int fr, int argc,
                              Xbyak::Label& bail) {
     using namespace Xbyak::util;
-    int fsize = n_regs_ + 1;
+    // The callee is this same function, so it needs the frame *this* code was
+    // compiled for -- inlined callees' regions included. Reserving only
+    // n_regs + 1 leaves those regions above vtop, where the collector does not
+    // look and where the next frame allocation lands.
+    int fsize = frame_size();
     flush_all();  // the callee copies its arguments out of our frame array
 
     mov(al, tg(fr));                       // callee identity guard
