@@ -53,6 +53,10 @@ _BIN_METHOD = {
 # Commutative binops (incl. MUL, handled separately): the destination may reuse
 # either operand's register for an in-place two-address form.
 _COMMUTATIVE = {Op.ADD, Op.BIT_AND, Op.BIT_OR, Op.BIT_XOR}
+# The operators bool is closed under: True & True is True, while True + True is
+# 2 and True << 1 is 2. Native code has no tag, so a result that could be a bool
+# keeps the function out of this tier entirely.
+_BOOL_CLOSED = {Op.BIT_AND, Op.BIT_OR, Op.BIT_XOR}
 _SETCC = {
     Op.EQ: "sete", Op.NE: "setne", Op.LT: "setl",
     Op.LE: "setle", Op.GT: "setg", Op.GE: "setge",
@@ -205,13 +209,63 @@ def _live_ranges(code: CodeObject, reachable: set[int]) -> dict[int, list[int]]:
 def _allocate(ranges: dict[int, list[int]], argc: int
               ) -> tuple[dict[int, object], list[Reg], int]:
     """Linear-scan the function's VM registers to `_POOL` or stack spill slots
-    via the shared `regalloc.linear_scan`. Parameters are live from entry, so
-    their intervals start at 0. Returns (loc, used pool registers, spill count)."""
+    via the shared `regalloc.linear_scan`. Parameters are live from *before* the
+    first instruction, not at it: the scan retires an interval whose end is at
+    the new one's start -- deliberately, so a result can take an operand's
+    register -- and with every parameter starting at 0 that let one parameter
+    take another's. Returns (loc, used pool registers, spill count)."""
     for p in range(argc):
         if p in ranges:
-            ranges[p][0] = 0
+            ranges[p][0] = -1
     intervals = [Interval(s, e, r) for r, (s, e) in ranges.items()]
     return linear_scan(intervals, _POOL)
+
+
+def _int_result_only(code: CodeObject, reachable: set[int], argc: int) -> bool:
+    """Does every RETURN on a live path definitely hand back an `int` rather
+    than a `bool`? Native code keeps values as raw int64 with no tag, so the
+    driver boxes the result as an int -- which is wrong for `return a < b`,
+    where the interpreter says True. Parameters count as int because the entry
+    guard insists on it, and a slot never written counts as neither, which also
+    keeps a read-before-assignment (None to the interpreter) out of this tier.
+
+    A forward must-analysis: start optimistic and intersect at merges."""
+    universe = set(range(code.n_regs))
+    in_: dict[int, set[int]] = {pc: set(universe) for pc in reachable}
+    in_[0] = set(range(argc))
+
+    def transfer(s: set[int], ins) -> set[int]:
+        o = set(s)
+        op = ins.op
+        if op is Op.LOAD_CONST:
+            v = code.consts[ins.b]
+            o.add(ins.a) if v.__class__ is int else o.discard(ins.a)
+        elif op is Op.MOVE:
+            o.add(ins.a) if ins.b in s else o.discard(ins.a)
+        elif op in _SETCC or op is Op.NOT:
+            o.discard(ins.a)                    # a bool, by definition
+        elif op in _BOOL_CLOSED:
+            # bool & bool is a bool; anything else is an int
+            o.add(ins.a) if (ins.b in s and ins.c in s) else o.discard(ins.a)
+        elif op in _BIN_METHOD or op in (Op.MUL, Op.LSHIFT, Op.RSHIFT,
+                                         Op.NEG, Op.INVERT, Op.CALL):
+            o.add(ins.a)
+        return o
+
+    changed = True
+    while changed:
+        changed = False
+        for pc in sorted(reachable):
+            out = transfer(in_[pc], code.code[pc])
+            for succ in _successors(code, pc):
+                if succ not in in_:
+                    continue
+                merged = in_[succ] & out
+                if merged != in_[succ]:
+                    in_[succ] = merged
+                    changed = True
+    return all(code.code[pc].a in in_[pc]
+               for pc in reachable if code.code[pc].op is Op.RETURN)
 
 
 def feasible(code: CodeObject) -> set[int] | None:
@@ -237,6 +291,8 @@ def feasible(code: CodeObject) -> set[int] | None:
             return None                    # a loop -> leave it to the trace JIT
         if ins.op == Op.LOAD_GLOBAL and ins.a not in callee_regs:
             return None                    # a real global read, not a self-call
+    if not _int_result_only(code, reachable, len(code.params)):
+        return None                        # could return a bool: no tag to say so
     return reachable
 
 
@@ -382,9 +438,13 @@ def compile_method(code: CodeObject, rt: Runtime):
             tgt = reg_of(x)
             if tgt is None:
                 tgt = RAX
+            # Read the count *before* writing the destination. x and z are
+            # different slots, but the scan hands a result the register of an
+            # operand whose last use is right here -- so they can be the same
+            # register, and loading y first destroyed the count.
+            a.mov(RCX, rm(z))
             if reg_of(y) != tgt:
                 load(tgt, y)
-            a.mov(RCX, rm(z))
             (a.shl if op == Op.LSHIFT else a.sar)(tgt, CL)
             if reg_of(x) is None:
                 store(x)                     # tgt is RAX here
@@ -487,13 +547,15 @@ class MethodJIT:
                 print(f"[method] compile {code.name}/{argc}")
 
         fn, _ = comp
-        # entry type guard: every argument must be an int for the native code
+        # Entry type guard: every argument must be an `int`, not merely
+        # int-like. A bool argument would let `a & b` produce a bool, which raw
+        # int64 registers have no way to carry back out.
         args = regs[arg_base:arg_base + argc]
         for v in args:
-            if v.__class__ is not int and v.__class__ is not bool:
+            if v.__class__ is not int:
                 return (False, None)       # deopt to the interpreter
         self.n_calls_native += 1
-        return (True, fn(*[int(v) for v in args]))
+        return (True, fn(*args))
 
     def stats(self) -> dict[str, int]:
         return {

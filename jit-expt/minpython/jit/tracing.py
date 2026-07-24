@@ -178,13 +178,26 @@ class Trace:
         self.terminal_id = g.exit_id
         self.is_loop = False
 
-    def finalize(self) -> None:
+    def finalize(self) -> bool:
         """Compute each guard's exit snapshot now that the loop is closed. Every
         output local maps to the IR value holding it at that exit: the value
         written before the guard this iteration, else its loop-entry value (its
         LOAD if read, or -- for a write-only local -- the carried value, whose
-        register still holds the previous iteration's result at the top)."""
+        register still holds the previous iteration's result at the top).
+
+        That last case only holds while the carried value is computed *after*
+        the guard. CSE can move it before: `r = i < n` inside `while i < n`
+        becomes the same IR value as the loop condition, which is recomputed
+        above the guard, so the exit would hand back this iteration's
+        comparison instead of the previous one's. Returns False to abort the
+        trace when that happens, rather than compile something wrong."""
+        # A side trace's terminal exit is not an instruction, so positions come
+        # from a lookup rather than from enumerating instrs -- every exit needs
+        # a snapshot, including that one.
+        pos = {id(ins.guard): i for i, ins in enumerate(self.instrs)
+               if ins.op is IROp.GUARD and ins.guard is not None}
         for g in self.exits:
+            g_pos = pos.get(id(g), len(self.instrs))
             mapping: dict[int, int] = {}
             for slot in self.out_slots:
                 if slot in g.written:
@@ -192,8 +205,12 @@ class Trace:
                 elif slot in self.load_refs:
                     mapping[slot] = self.load_refs[slot]
                 else:
-                    mapping[slot] = self.carried[slot]
+                    ref = self.carried[slot]
+                    if self.is_loop and ref < g_pos:
+                        return False       # recomputed above the guard
+                    mapping[slot] = ref
             g.snapshot = Snapshot(g.resume_pc, mapping)
+        return True
 
 
 def loop_invariants(trace: Trace) -> set[int]:
@@ -325,11 +342,9 @@ def record(code: CodeObject, entry_pc: int, regs: list[Value],
                     return None
                 if is_side:                # linear side trace reaches the header
                     t.add_terminal(written, header_pc)
-                    t.finalize()
-                    return t
+                    return t if t.finalize() else None
                 t.carried = dict(written)  # main trace: self-loop closed
-                t.finalize()
-                return t
+                return t if t.finalize() else None
             if a <= pc:                    # some other backward edge (nested)
                 return None
             pc = a                         # forward jump: just follow it
@@ -384,6 +399,13 @@ def record(code: CodeObject, entry_pc: int, regs: list[Value],
         else:
             # RETURN / CALL / PRINT / LOAD_GLOBAL / STORE_GLOBAL / MAKE_FUNCTION
             # / FLOORDIV / MOD / POW: not supported in a trace.
+            return None
+        # Every branch above writes slot `a`. Native code keeps values as raw
+        # int64 with no tag, and the write-back hands each live-out local back
+        # as a plain int -- so a bool that reaches a *named* local would come
+        # out as 0/1 where the interpreter says False/True. Temporaries never
+        # leave the trace, so int64 is all anyone looks at there.
+        if a < n_locals and sregs[a].__class__ is bool:
             return None
         pc += 1
 
@@ -446,6 +468,19 @@ def _trace_intervals(trace: Trace, extra_live) -> list[Interval]:
         assert g.snapshot is not None
         loop_live |= set(g.snapshot.mapping.values())
 
+    # A value a guard's snapshot reads but that is computed *later* in the body
+    # is the previous iteration's: its range wraps the back-edge, so it has to
+    # be reserved from the top of the loop too. Without this the scan reused its
+    # register for something computed earlier in the body, and the guard handed
+    # that back as the local's value.
+    wraps: set[int] = set()
+    for i, ins in enumerate(instrs):
+        if ins.op != IROp.GUARD:
+            continue
+        g = ins.guard
+        assert g is not None and g.snapshot is not None
+        wraps |= {ref for ref in g.snapshot.mapping.values() if ref > i}
+
     last_use: dict[int, int] = {}
 
     def note(ref: int, pos: int) -> None:
@@ -463,7 +498,7 @@ def _trace_intervals(trace: Trace, extra_live) -> list[Interval]:
     for ref, ins in enumerate(instrs):
         if ins.op in (IROp.GUARD, IROp.CONST):
             continue                       # guards have no value; consts inline
-        start = 0 if ins.op == IROp.LOAD else ref
+        start = 0 if (ins.op == IROp.LOAD or ref in wraps) else ref
         end = N if ref in loop_live else last_use.get(ref, ref)
         intervals.append(Interval(start, end, ref))
     return intervals
@@ -681,13 +716,17 @@ def compile_trace(trace: Trace, rt: Runtime, *, name: str | None = None
             store(ref)
 
     # -- prologue: load each live-in into its allocated location -------------
-    for slot, ref in trace.load_refs.items():
-        l = loc[ref]
+    def seed(slot: int, ref: int) -> None:
+        l = loc.get(ref)
         if isinstance(l, Reg):
             a.mov(l, mem_local(slot))
-        else:
+        elif l is not None:
             a.mov(RAX, mem_local(slot))
             a.mov(mem_spill(l.index), RAX)
+
+    for slot, ref in trace.load_refs.items():
+        seed(slot, ref)
+
 
     # Preheader: the hoisted loop-invariant computations, run once.
     for ref in hoist:
