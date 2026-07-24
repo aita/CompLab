@@ -763,6 +763,13 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
 
   // The value must be int-like for the inline integer path; otherwise bail to
   // the interpreter, which knows what `+` on two strings means.
+  // Does this site still need a runtime type check, or has the analysis already
+  // pinned the slot down?
+  bool needs_guard(int pc, int slot) const {
+    auto it = known_.find(pc);
+    return !(it != known_.end() && it->second.count(slot));
+  }
+
   void guard_int(int pc, int slot, Xbyak::Label& target) {
     using namespace Xbyak::util;
     auto it = known_.find(pc);
@@ -824,6 +831,18 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     }
   }
 
+  // Slow paths are emitted after the body instead of inline, so the hot path is
+  // contiguous and does not even need a jump over them.
+  Xbyak::Label& late_label() {
+    late_labels_.emplace_back();
+    return late_labels_.back();
+  }
+  void defer(std::function<void()> f) { late_.push_back(std::move(f)); }
+  void flush_late() {
+    for (auto& f : late_) f();
+    late_.clear();
+  }
+
   static std::vector<int> sorted(const std::unordered_set<int>& s) {
     std::vector<int> v(s.begin(), s.end());
     std::sort(v.begin(), v.end());
@@ -879,8 +898,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
         case Op::LoadConst: {
           const Value& k = code.consts[y];
           if (k.is_int_like()) {          // the common case: just an immediate
-            mov(rax, k.i);
-            st(x);
+            if (has_reg(x)) mov(reg(x), k.i);   // straight into its register
+            else { mov(rax, k.i); mov(val(x), rax); }
             mov(tg(x), (int)k.tag);
           } else {                        // str / None: copy the whole Value
             mov(rcx, (std::uint64_t)(std::uintptr_t)&code.consts[y]);
@@ -907,11 +926,12 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
 
         case Op::Add: case Op::Sub: case Op::Mul: case Op::BitAnd:
         case Op::BitOr: case Op::BitXor: case Op::LShift: case Op::RShift: {
-          Xbyak::Label slow, done;
           if (!int_site(code, pc, true)) {   // never an int here: slow path only
             emit_slow3(&jit_m_binop, (int)ins.op, x, y, z, bail[pc]);
             break;
           }
+          Xbyak::Label& slow = late_label();
+          Xbyak::Label& done = late_label();
           guard_int(pc, y, slow);
           guard_int(pc, z, slow);
           // Two-address form: when the destination has a register of its own and
@@ -935,20 +955,27 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           }
           if (acc.getIdx() == rax.getIdx()) st(x);
           mov(tg(x), (int)Tag::Int);
-          jmp(done, T_NEAR);
-          L(slow);
-          emit_slow3(&jit_m_binop, (int)ins.op, x, y, z, bail[pc]);
           L(done);
+          {
+            Op o = ins.op;
+            Xbyak::Label& b = bail[pc];
+            defer([this, o, x, y, z, &slow, &done, &b] {
+              L(slow);
+              emit_slow3(&jit_m_binop, (int)o, x, y, z, b);
+              jmp(done, T_NEAR);
+            });
+          }
           break;
         }
 
         case Op::Eq: case Op::Ne: case Op::Lt: case Op::Le:
         case Op::Gt: case Op::Ge: {
-          Xbyak::Label slow, done;
           if (!int_site(code, pc, true)) {
             emit_slow3(&jit_m_cmp, (int)ins.op, x, y, z, bail[pc]);
             break;
           }
+          Xbyak::Label& slow = late_label();
+          Xbyak::Label& done = late_label();
           guard_int(pc, y, slow);
           guard_int(pc, z, slow);
           if (has_reg(y)) with(z, [&](auto&& o){ cmp(reg(y), o); });
@@ -964,10 +991,16 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           movzx(eax, al);
           st(x);
           mov(tg(x), (int)Tag::Bool);
-          jmp(done, T_NEAR);
-          L(slow);
-          emit_slow3(&jit_m_cmp, (int)ins.op, x, y, z, bail[pc]);
           L(done);
+          {
+            Op o = ins.op;
+            Xbyak::Label& b = bail[pc];
+            defer([this, o, x, y, z, &slow, &done, &b] {
+              L(slow);
+              emit_slow3(&jit_m_cmp, (int)o, x, y, z, b);
+              jmp(done, T_NEAR);
+            });
+          }
           break;
         }
 
@@ -1072,16 +1105,21 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
 
         case Op::Jump: jmp(labels[x], T_NEAR); break;
         case Op::JumpIfFalse: case Op::JumpIfTrue: {
-          Xbyak::Label slow, have;
-          guard_int(pc, x, slow);
+          Xbyak::Label& have = late_label();
+          if (needs_guard(pc, x)) {
+            Xbyak::Label& slow = late_label();
+            guard_int(pc, x, slow);
+            defer([this, x, &slow, &have] {
+              L(slow);            // any other type: ask the runtime
+              flush_all();
+              mov(rdi, r12); mov(esi, x);
+              mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_truthy);
+              call(rax);
+              movzx(eax, al);  // returns int; clear the upper half before test
+              jmp(have, T_NEAR);
+            });
+          }
           ld(rax, x);             // int-like: truthiness is payload != 0
-          jmp(have, T_NEAR);
-          L(slow);                // any other type: ask the runtime
-          flush_all();
-          mov(rdi, r12); mov(esi, x);
-          mov(rax, (std::uint64_t)(std::uintptr_t)&jit_m_truthy);
-          call(rax);
-          movzx(eax, al);   // it returns int; clear the upper half before test
           L(have);
           test(rax, rax);
           if (ins.op == Op::JumpIfFalse) jz(labels[y], T_NEAR);
@@ -1099,6 +1137,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
         default: break;
       }
     }
+
+    flush_late();  // the out-of-line slow paths, after the hot body
 
     // Bail stubs: the frame array is already authoritative, so the interpreter
     // just resumes at this pc.
@@ -1244,6 +1284,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   bool inline_lists_ = list_layout().ok;
   int list_off_ = (int)list_layout().list_off;
   std::unordered_map<int, Xbyak::Reg64> slot_reg_;
+  std::deque<Xbyak::Label> late_labels_;
+  std::vector<std::function<void()>> late_;
   std::unordered_set<int> int_params_;
   Xbyak::Label entry_bail_, osr_bail_;
   int off_ = 0;
