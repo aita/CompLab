@@ -510,6 +510,31 @@ int main() {
     check("shift count read before dest", m.out, run(src));
   }
 
+  {  // The background-compiling driver enters the same code as the synchronous
+     // one, so it has to check the same entry conditions. It was checking only
+     // that the arguments were int-*like*, and not checking the name at all.
+    auto tiered = [](const std::string& src) {
+      std::string err;
+      auto prog = compile_module(src, err);
+      VM vm;
+      TieredJIT tj(vm, 4);
+      if (prog) vm.run_code(prog->module);
+      return vm.output();
+    };
+    std::string b =
+        "def h(a, b):\n    return a & b\n"
+        "i = 0\nx = 0\nwhile i < 200000:\n    x = h(1, 3)\n    i = i + 1\n"
+        "print(h(True, True))";
+    check("tiered entry guard (bool arg)", tiered(b), run(b));
+    std::string n =
+        "def a(n):\n    if n <= 0:\n        return 0\n"
+        "    return a(n - 1) + 1\n"
+        "c = a\ni = 0\nx = 0\n"
+        "while i < 100000:\n    x = a(3)\n    i = i + 1\n"
+        "a = 0\nprint(c(20))";
+    check("tiered entry guard (rebound name)", tiered(n), run(n));
+  }
+
   {  // A body long enough to overrun a 4KB code buffer must still compile:
      // the failure mode is silent, the function just stays interpreted.
     std::string src = "def big(xs, n):\n    a = xs[0]\n";

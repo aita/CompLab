@@ -56,6 +56,7 @@ class TieredJIT {
     std::unique_ptr<MethodCode> code;
     void* fn;
     int argc;
+    std::vector<const std::string*> self_names;
   };
   struct Job {
     const CodeObject* code = nullptr;
@@ -67,10 +68,14 @@ class TieredJIT {
     const CodeObject* code = callee.obj->code;
 
     void* fn = nullptr;
+    const std::vector<const std::string*>* self_names = nullptr;
     {
       std::unique_lock lk(install_mtx_);
       auto it = compiled_.find(code);
-      if (it != compiled_.end()) fn = it->second.fn;
+      if (it != compiled_.end()) {
+        fn = it->second.fn;
+        self_names = &it->second.self_names;
+      }
     }
 
     if (!fn) {  // not ready: schedule once, keep interpreting meanwhile
@@ -83,9 +88,9 @@ class TieredJIT {
       return false;
     }
 
-    // native path: int-only entry guard, then unbox and call
-    for (int i = 0; i < argc; ++i)
-      if (!regs[arg_base + i].is_int_like()) return false;  // deopt
+    // native path: the same entry conditions the synchronous driver checks,
+    // then unbox and call
+    if (!int_entry_ok(*self_names, callee, regs, arg_base, argc)) return false;
     std::int64_t a[6] = {0};
     for (int i = 0; i < argc; ++i) a[i] = regs[arg_base + i].i;
     out = Value::integer(call_native(fn, argc, a));
@@ -118,7 +123,9 @@ class TieredJIT {
       if (Xbyak::GetError()) { Xbyak::ClearError(); continue; }
       void* fn = gen->entry_addr();
       std::unique_lock lk(install_mtx_);
-      compiled_.emplace(job.code, Entry{std::move(gen), fn, job.argc});
+      compiled_.emplace(job.code,
+                        Entry{std::move(gen), fn, job.argc,
+                              self_call_names(*job.code, *reach)});
       n_compiled++;
     }
   }

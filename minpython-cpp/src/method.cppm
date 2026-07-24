@@ -1807,6 +1807,38 @@ struct CompiledMethod {
   std::vector<const std::string*> self_names;
 };
 
+// The global names a compiled body reaches its own name through. Compiled code
+// jumps straight to its entry rather than looking the name up, so entering has
+// to confirm the name still means this function.
+inline std::vector<const std::string*> self_call_names(
+    const CodeObject& code, const std::unordered_set<int>& reach) {
+  std::vector<const std::string*> out;
+  for (int pc : reach)
+    if (code.code[pc].op == Op::LoadGlobal)
+      out.push_back(&code.names[code.code[pc].b]);
+  return out;
+}
+
+// May this compilation be entered for this call? Two things the integer tier
+// cannot express have to be checked here instead: it recurses without a lookup,
+// and it keeps values as raw int64, so a bool argument could let `a & b`
+// produce a bool it has no way to hand back.
+inline bool int_entry_ok(const std::vector<const std::string*>& self_names,
+                         const Value& callee, const Value* regs, int arg_base,
+                         int argc) {
+  for (int i = 0; i < argc; ++i)
+    if (regs[arg_base + i].tag != Tag::Int) return false;
+  if (self_names.empty()) return true;
+  Globals& glb = *callee.obj->globals;
+  for (const std::string* n : self_names) {
+    auto g = glb.find(*n);
+    if (g == glb.end() || g->second.tag != Tag::Func ||
+        g->second.obj != callee.obj)
+      return false;
+  }
+  return true;
+}
+
 inline std::int64_t call_native(void* fn, int argc, const std::int64_t* a) {
   switch (argc) {
     case 0: return ((std::int64_t (*)())fn)();
@@ -1991,30 +2023,13 @@ class MethodJIT {
       jit_dump(std::format("method(int) {}", code->name), cm->fn,
                cm->code->getSize());
       cm->argc = argc;
-      for (int pc : *reach)
-        if (code->code[pc].op == Op::LoadGlobal)
-          cm->self_names.push_back(&code->names[code->code[pc].b]);
+      cm->self_names = self_call_names(*code, *reach);
       it = compiled_.emplace(key, std::move(cm)).first;
       n_compiled++;
     }
 
-    // The compiled body recurses by calling its own entry point directly, so
-    // the name it recurses through must still resolve to this same function.
-    // Nothing it can execute rebinds a global, so checking once is enough.
-    if (!it->second->self_names.empty()) {
-      Globals& glb = *callee.obj->globals;
-      for (const std::string* n : it->second->self_names) {
-        auto g = glb.find(*n);
-        if (g == glb.end() || g->second.tag != Tag::Func ||
-            g->second.obj != callee.obj)
-          return false;   // deopt: let the interpreter do the lookup
-      }
-    }
-    // entry type guard: every argument must be an int -- not merely int-like.
-    // A bool argument would let `a & b` produce a bool, which raw int64
-    // registers cannot carry back out.
-    for (int i = 0; i < argc; ++i)
-      if (regs[arg_base + i].tag != Tag::Int) return false;  // deopt
+    if (!int_entry_ok(it->second->self_names, callee, regs, arg_base, argc))
+      return false;   // deopt: let the interpreter do it
     std::int64_t a[6] = {0};
     for (int i = 0; i < argc; ++i) a[i] = regs[arg_base + i].i;
     out = Value::integer(call_native(it->second->fn, argc, a));
