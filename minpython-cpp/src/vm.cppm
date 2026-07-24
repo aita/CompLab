@@ -445,6 +445,11 @@ class VM {
                             code->params.size(), argc));
       return Value::none();
     }
+    if (collect_feedback) {
+      auto* co = const_cast<CodeObject*>(code);
+      for (int i = 0; i < argc && i < (int)co->param_tags.size(); ++i)
+        co->param_tags[i] |= tag_bit(regs[arg_base + i]);
+    }
     if (on_call) {
       Value out;
       if (on_call(callee, regs, arg_base, argc, out)) return out;

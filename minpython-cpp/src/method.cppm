@@ -246,6 +246,17 @@ inline std::optional<std::unordered_set<int>> mixed_feasible(
   return reach;
 }
 
+// Parameters the interpreter has only ever seen as ints. Guarding these once on
+// entry is what lets the must-analysis survive a loop header: without a seed the
+// intersection with the function entry is empty, so every loop body re-guards
+// everything, every iteration.
+inline std::unordered_set<int> int_params(const CodeObject& code) {
+  std::unordered_set<int> out;
+  for (std::size_t p = 0; p < code.param_tags.size(); ++p)
+    if (only_int_like(code.param_tags[p])) out.insert((int)p);
+  return out;
+}
+
 inline bool mixed_inline_bin(Op op) {
   return op == Op::Add || op == Op::Sub || op == Op::Mul || op == Op::BitAnd ||
          op == Op::BitOr || op == Op::BitXor || op == Op::LShift ||
@@ -258,12 +269,13 @@ inline bool mixed_inline_bin(Op op) {
 // op), later uses need no guard at all. This is the cheap stand-in for the type
 // feedback a production JIT would collect from inline caches.
 inline std::unordered_map<int, std::unordered_set<int>> known_int_slots(
-    const CodeObject& code, const std::unordered_set<int>& reach) {
+    const CodeObject& code, const std::unordered_set<int>& reach,
+    const std::unordered_set<int>& seed = {}) {
   std::unordered_set<int> universe;
   for (int r = 0; r < code.n_regs; ++r) universe.insert(r);
   std::unordered_map<int, std::unordered_set<int>> in;
   for (int pc : reach) in[pc] = universe;
-  in[0].clear();  // parameters can be any type
+  in[0] = seed;  // parameters the entry guard has already pinned down
 
   auto transfer = [&](const std::unordered_set<int>& s, const Instr& ins) {
     std::unordered_set<int> o = s;
@@ -651,7 +663,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
                   VM* vm, const Object* self_obj)
       : vm_(vm), self_obj_(self_obj) {
     n_regs_ = code.n_regs;
-    known_ = mdetail::known_int_slots(code, reach);
+    int_params_ = mdetail::int_params(code);
+    known_ = mdetail::known_int_slots(code, reach, int_params_);
     allocate(code, reach);
     emit(code, reach);
     ready();
@@ -803,8 +816,18 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     using namespace Xbyak::util;
     mov(al, tg(src));
     mov(tg(dst), al);
-    ld(rax, src);
-    st(dst);
+    if (has_reg(dst) && has_reg(src)) {          // straight register copy
+      if (reg(dst).getIdx() != reg(src).getIdx()) mov(reg(dst), reg(src));
+    } else {
+      ld(rax, src);
+      st(dst);
+    }
+  }
+
+  static std::vector<int> sorted(const std::unordered_set<int>& s) {
+    std::vector<int> v(s.begin(), s.end());
+    std::sort(v.begin(), v.end());
+    return v;
   }
 
   void copy_value(int dst, int src) {
@@ -829,6 +852,17 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     mov(r12, rdi);  // frame array
     mov(rbx, rsi);  // VM*
     mov(qword[rsp + 0], rdx);  // Globals*
+    // Pin the int parameters once. Everything downstream is allowed to assume
+    // it, which is what keeps the loop bodies guard-free.
+    for (int p : sorted(int_params_)) {
+      Xbyak::Label ok;
+      mov(al, tg(p));
+      cmp(al, (int)Tag::Int);
+      je(ok, T_NEAR);
+      cmp(al, (int)Tag::Bool);
+      jne(entry_bail_, T_NEAR);
+      L(ok);
+    }
     load_all();
 
     auto pops = [&] {
@@ -842,13 +876,21 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
       const Instr& ins = code.code[pc];
       int x = ins.a, y = ins.b, z = ins.c;
       switch (ins.op) {
-        case Op::LoadConst:  // any type: copy the 16-byte Value from the pool
-          mov(rcx, (std::uint64_t)(std::uintptr_t)&code.consts[y]);
-          mov(rax, qword[rcx]);
-          mov(hi(x), rax);
-          mov(rax, qword[rcx + 8]);
-          st(x);
+        case Op::LoadConst: {
+          const Value& k = code.consts[y];
+          if (k.is_int_like()) {          // the common case: just an immediate
+            mov(rax, k.i);
+            st(x);
+            mov(tg(x), (int)k.tag);
+          } else {                        // str / None: copy the whole Value
+            mov(rcx, (std::uint64_t)(std::uintptr_t)&code.consts[y]);
+            mov(rax, qword[rcx]);
+            mov(hi(x), rax);
+            mov(rax, qword[rcx + 8]);
+            st(x);
+          }
           break;
+        }
         case Op::Move: move_value(x, y); break;
 
         case Op::LoadGlobal:
@@ -872,18 +914,26 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           }
           guard_int(pc, y, slow);
           guard_int(pc, z, slow);
-          ld(rax, y);
-          switch (ins.op) {
-            case Op::Add: with(z, [&](auto&& o){ add(rax, o); }); break;
-            case Op::Sub: with(z, [&](auto&& o){ sub(rax, o); }); break;
-            case Op::Mul: with(z, [&](auto&& o){ imul(rax, o); }); break;
-            case Op::BitAnd: with(z, [&](auto&& o){ and_(rax, o); }); break;
-            case Op::BitOr: with(z, [&](auto&& o){ or_(rax, o); }); break;
-            case Op::BitXor: with(z, [&](auto&& o){ xor_(rax, o); }); break;
-            case Op::LShift: ld(rcx, z); shl(rax, cl); break;
-            default: ld(rcx, z); sar(rax, cl); break;
+          // Two-address form: when the destination has a register of its own and
+          // is not also the right operand, accumulate straight into it.
+          Xbyak::Reg64 acc = rax;
+          if (has_reg(x) && x != z) {
+            acc = reg(x);
+            if (!(has_reg(y) && reg(y).getIdx() == acc.getIdx())) ld(acc, y);
+          } else {
+            ld(rax, y);
           }
-          st(x);
+          switch (ins.op) {
+            case Op::Add: with(z, [&](auto&& o){ add(acc, o); }); break;
+            case Op::Sub: with(z, [&](auto&& o){ sub(acc, o); }); break;
+            case Op::Mul: with(z, [&](auto&& o){ imul(acc, o); }); break;
+            case Op::BitAnd: with(z, [&](auto&& o){ and_(acc, o); }); break;
+            case Op::BitOr: with(z, [&](auto&& o){ or_(acc, o); }); break;
+            case Op::BitXor: with(z, [&](auto&& o){ xor_(acc, o); }); break;
+            case Op::LShift: ld(rcx, z); shl(acc, cl); break;
+            default: ld(rcx, z); sar(acc, cl); break;
+          }
+          if (acc.getIdx() == rax.getIdx()) st(x);
           mov(tg(x), (int)Tag::Int);
           jmp(done, T_NEAR);
           L(slow);
@@ -901,8 +951,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           }
           guard_int(pc, y, slow);
           guard_int(pc, z, slow);
-          ld(rax, y);
-          with(z, [&](auto&& o){ cmp(rax, o); });
+          if (has_reg(y)) with(z, [&](auto&& o){ cmp(reg(y), o); });
+          else { ld(rax, y); with(z, [&](auto&& o){ cmp(rax, o); }); }
           switch (ins.op) {
             case Op::Eq: sete(al); break;
             case Op::Ne: setne(al); break;
@@ -1060,6 +1110,11 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
       ret();
     }
 
+    L(entry_bail_);  // a parameter was not the type we compiled for: nothing has
+    pops();          // run yet, so the interpreter just takes the whole call
+    mov(rax, 0);
+    ret();
+
     // On-stack replacement entry. `long f(Value*, VM*, Globals*, long pc)`:
     // set up exactly like the normal entry, then jump to the requested loop
     // header. Only back-edge targets are reachable this way.
@@ -1074,14 +1129,36 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
       mov(r12, rdi);
       mov(rbx, rsi);
       mov(qword[rsp + 0], rdx);
-      load_all();
       std::vector<int> targets(osr_targets_.begin(), osr_targets_.end());
       std::sort(targets.begin(), targets.end());
       for (int t : targets) {
+        Xbyak::Label next;
         cmp(ecx, t);
-        je(labels[t], T_NEAR);
+        jne(next, T_NEAR);
+        // OSR is a third edge into this header: verify what the analysis was
+        // allowed to assume here, or hand the loop back to the interpreter.
+        auto it = known_.find(t);
+        if (it != known_.end())
+          for (int sl : sorted(it->second)) {
+            Xbyak::Label ok;
+            mov(al, tg(sl));
+            cmp(al, (int)Tag::Int);
+            je(ok, T_NEAR);
+            cmp(al, (int)Tag::Bool);
+            jne(osr_bail_, T_NEAR);
+            L(ok);
+          }
+        load_all();
+        jmp(labels[t], T_NEAR);
+        L(next);
       }
       jmp(labels[0], T_NEAR);  // unknown pc: start from the top
+
+      L(osr_bail_);            // nothing ran: resume interpreting at that pc
+      mov(rax, rcx);
+      add(rsp, 40);
+      pop(rbp); pop(r15); pop(r14); pop(r13); pop(r12); pop(rbx);
+      ret();
     }
   }
 
@@ -1167,6 +1244,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   bool inline_lists_ = list_layout().ok;
   int list_off_ = (int)list_layout().list_off;
   std::unordered_map<int, Xbyak::Reg64> slot_reg_;
+  std::unordered_set<int> int_params_;
+  Xbyak::Label entry_bail_, osr_bail_;
   int off_ = 0;
   int n_regs_ = 0;
   int osr_off_ = 0;

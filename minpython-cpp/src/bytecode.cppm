@@ -100,6 +100,9 @@ struct CodeObject {
   std::vector<Instr> code;
   std::vector<std::string> local_names;
   std::vector<SiteFeedback> feedback;  // one per instruction; filled by the VM
+  // Tags seen for each parameter across calls. A parameter that is always an
+  // int can be guarded once on entry instead of at every use.
+  std::vector<std::uint8_t> param_tags;
 };
 
 inline bool is_binop(Op op) { return op >= Op::Add && op <= Op::RShift; }
