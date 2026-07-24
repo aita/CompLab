@@ -419,6 +419,48 @@ int main() {
     check("inline region gc ran", vm.n_gc > 0 ? "y" : "n", "y");
   }
 
+  {  // regression: compiled code guards a call site by comparing the callee's
+     // address. If the function it compiled for is collected, that address can
+     // be handed to a *different* function and the guard passes for the wrong
+     // one -- so the JIT pins whatever it baked an address of.
+    std::string src =
+        "def g(x):\n    return x + 1\n"
+        "def run(n):\n    i = 0\n    t = 0\n"
+        "    while i < n:\n        t = t + g(i)\n        i = i + 1\n"
+        "    return t\n"
+        "print(run(400))\ng = 0\ndef g(x):\n    return x + 1000\n"
+        "print(run(400))";
+    std::string err;
+    auto prog = compile_module(src, err);
+    VM vm;
+    vm.gc_threshold = 1;   // collect at every allocation: recycle the address
+    MethodJIT mj(vm, 4);
+    if (prog) vm.run_code(prog->module);
+    check("baked callee pinned", vm.output(), run(src));
+  }
+  {  // regression: the integer compiler recurses by calling its own entry
+     // point, without looking the name up. Rebinding that global must stop it
+     // from being used at all.
+    std::string src =
+        "def a(n):\n    if n <= 0:\n        return 0\n"
+        "    return a(n - 1) + 1\n"
+        "c = a\nprint(a(20))\na = 0\nprint(c(20))";
+    MethodRun m = run_method(src, 2);
+    check("self-call name still bound", m.out, run(src));
+  }
+
+  {  // regression: the OSR entry's bail path unwound a stale scratch size, so
+     // a loop entered with types that no longer match what it was compiled for
+     // returned through a shifted stack and crashed, instead of handing the
+     // loop back to the interpreter. Found by tests/fuzz.py.
+    std::string src =
+        "def f(p0, p1):\n    k = 0\n    while k < 900:\n        k = k + 1\n"
+        "    return k\n"
+        "print(f('ab', 1))\nprint(f(1, 'ab'))";
+    MethodRun m = run_method(src, 4);
+    check("osr bail unwinds", m.out, run(src));
+  }
+
   {  // A body long enough to overrun a 4KB code buffer must still compile:
      // the failure mode is silent, the function just stays interpreted.
     std::string src = "def big(xs, n):\n    a = xs[0]\n";

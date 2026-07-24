@@ -149,14 +149,27 @@ class VM {
   }
   void frame_free(std::size_t base) { vtop = base; }
 
-  // Mark-sweep GC. Roots: module globals, every live interpreter frame, and the
-  // JIT frame stack's live region. Only arena objects are swept; compile-time
-  // string constants live in the Program and are never freed.
+  // Objects a JIT has baked an address into. Compiled code guards a call site
+  // by comparing the callee's address against the one it compiled for, so that
+  // address must never be handed to a different object: keeping it alive is
+  // what makes the comparison mean what it says.
+  std::vector<Value> pinned;
+  void pin(const Value& v) {
+    for (const Value& p : pinned)
+      if (p.obj == v.obj) return;
+    pinned.push_back(v);
+  }
+
+  // Mark-sweep GC. Roots: module globals, every live interpreter frame, the
+  // JIT frame stack's live region, and whatever the JITs have pinned. Only
+  // arena objects are swept; compile-time string constants live in the Program
+  // and are never freed.
   void gc() {
     for (auto& [k, v] : globals) mark(v);
     for (auto* fr : frames_)
       for (auto& v : *fr) mark(v);
     for (std::size_t k = 0; k < vtop; ++k) mark(vstack[k]);
+    for (const Value& v : pinned) mark(v);
     std::vector<std::unique_ptr<Object>> keep;
     keep.reserve(arena_.size());
     for (auto& o : arena_) {

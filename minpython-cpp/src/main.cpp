@@ -4,6 +4,7 @@
 //   minpython --jit program.mpy     attach the method JIT
 //   minpython --tiered program.mpy  ... and compile on a background thread
 //   minpython --dis program.mpy     print the disassembly and exit
+//   minpython --gc N program.mpy    collect every N allocations (testing)
 import std;
 
 import minpython;
@@ -12,16 +13,19 @@ using namespace minpython;
 
 int main(int argc, char** argv) {
   bool jit = false, tiered = false, dis = false;
+  long gc_every = 0;
   std::string path;
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
-    if (arg == "--jit") jit = true;
+    if (arg == "--gc" && i + 1 < argc) gc_every = std::atol(argv[++i]);
+    else if (arg == "--jit") jit = true;
     else if (arg == "--tiered") tiered = true;
     else if (arg == "--dis") dis = true;
     else path = arg;
   }
   if (path.empty()) {
-    std::cerr << "usage: minpython [--jit|--tiered] [--dis] program.mpy\n";
+    std::cerr << "usage: minpython [--jit|--tiered] [--dis] [--gc N] "
+                 "program.mpy\n";
     return 2;
   }
   std::ifstream in(path);
@@ -43,15 +47,14 @@ int main(int argc, char** argv) {
     return 0;
   }
   VM vm;
+  if (gc_every > 0) vm.gc_threshold = (std::size_t)gc_every;
   std::unique_ptr<MethodJIT> mj;
   std::unique_ptr<TieredJIT> ti;
   if (tiered) ti = std::make_unique<TieredJIT>(vm);
   else if (jit) mj = std::make_unique<MethodJIT>(vm);
   vm.run_code(prog->module);
-  if (vm.diag.failed) {
-    std::cerr << "MinPythonError: " << vm.diag.message << "\n";
-    return 1;
-  }
+  const bool failed = vm.diag.failed;
+  if (failed) std::cerr << "MinPythonError: " << vm.diag.message << "\n";
   if (mj)
     std::cerr << "[jit] compiled=" << mj->n_compiled
               << " mixed=" << mj->n_mixed
@@ -64,5 +67,5 @@ int main(int argc, char** argv) {
   if (vm.n_gc)
     std::cerr << "[gc] collections=" << vm.n_gc
               << " live_objects=" << vm.live_objects() << "\n";
-  return 0;
+  return failed ? 1 : 0;
 }

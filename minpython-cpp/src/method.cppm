@@ -830,6 +830,15 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     return s;
   }
   int frame_size() const { return n_regs_ + 1 + frame_extra_; }
+  // Function objects whose addresses this code compares against. They have to
+  // outlive the code: a swept object's address can be handed to a new one, and
+  // then the guard passes for the wrong function.
+  std::vector<const Object*> baked() const {
+    std::vector<const Object*> v;
+    if (self_obj_) v.push_back(self_obj_);
+    for (auto& [pc, s] : inlines_) v.push_back(s.fn);
+    return v;
+  }
 
  private:
   // Slot addressing goes through `off_`, which is 0 for the function's own body
@@ -1582,8 +1591,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
 
       L(osr_bail_);            // nothing ran: resume interpreting at that pc
       mov(rax, rcx);
-      add(rsp, 40);
-      pop(rbp); pop(r15); pop(r14); pop(r13); pop(r12); pop(rbx);
+      pops();                // must match the prologue above, not a stale size
       ret();
     }
   }
@@ -1702,6 +1710,10 @@ struct CompiledMethod {
   std::unique_ptr<MethodCode> code;
   void* fn;
   int argc;
+  // The globals the body reaches its own name through. Compiled code jumps
+  // straight to its entry rather than looking the name up, so entering has to
+  // confirm the name still means this function.
+  std::vector<const std::string*> self_names;
 };
 
 inline std::int64_t call_native(void* fn, int argc, const std::int64_t* a) {
@@ -1756,6 +1768,16 @@ class MethodJIT {
     void* fn;
   };
 
+  // Keep alive every function whose address the new code compares against.
+  void pin_baked(const MixedMethodCode& mc) {
+    for (const Object* o : mc.baked()) {
+      Value v;
+      v.tag = Tag::Func;
+      v.obj = const_cast<Object*>(o);
+      vm_.pin(v);
+    }
+  }
+
   // Run an object-capable compilation: build a tagged frame, root it, run
   // native, and finish in the interpreter if a type guard bailed.
   bool run_mixed(MixedEntry& e, const CodeObject* code, const Value& callee,
@@ -1801,6 +1823,7 @@ class MethodJIT {
         n_aborted++;
         return -1;
       }
+      pin_baked(*me->code);
       me->fn = me->code->entry_addr();
       jit_dump(std::format("method(obj,osr) {}", code->name), me->fn,
                me->code->getSize(), me->code->reg_map());
@@ -1857,6 +1880,7 @@ class MethodJIT {
           n_aborted++;
           return false;
         }
+        pin_baked(*me->code);
         me->fn = me->code->entry_addr();
         jit_dump(std::format("method(obj) {}", code->name), me->fn,
                  me->code->getSize(), me->code->reg_map());
@@ -1876,10 +1900,25 @@ class MethodJIT {
       jit_dump(std::format("method(int) {}", code->name), cm->fn,
                cm->code->getSize());
       cm->argc = argc;
+      for (int pc : *reach)
+        if (code->code[pc].op == Op::LoadGlobal)
+          cm->self_names.push_back(&code->names[code->code[pc].b]);
       it = compiled_.emplace(key, std::move(cm)).first;
       n_compiled++;
     }
 
+    // The compiled body recurses by calling its own entry point directly, so
+    // the name it recurses through must still resolve to this same function.
+    // Nothing it can execute rebinds a global, so checking once is enough.
+    if (!it->second->self_names.empty()) {
+      Globals& glb = *callee.obj->globals;
+      for (const std::string* n : it->second->self_names) {
+        auto g = glb.find(*n);
+        if (g == glb.end() || g->second.tag != Tag::Func ||
+            g->second.obj != callee.obj)
+          return false;   // deopt: let the interpreter do the lookup
+      }
+    }
     // entry type guard: every argument must be an int for the native code
     for (int i = 0; i < argc; ++i)
       if (!regs[arg_base + i].is_int_like()) return false;  // deopt

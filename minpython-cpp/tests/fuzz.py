@@ -23,7 +23,7 @@ import tempfile
 from pathlib import Path
 
 BIN = Path(__file__).resolve().parent.parent / "build" / "minpython"
-MODES = [[], ["--jit"], ["--tiered"]]
+MODES = [[], ["--jit"], ["--tiered"], ["--gc", "97", "--jit"]]
 
 INT_BIN = ["+", "-", "*", "&", "|", "^"]
 CMP = ["==", "!=", "<", "<=", ">", ">="]
@@ -86,7 +86,8 @@ class Gen:
                     args.append(self.int_expr(env, depth + 2))
             return "%s(%s)" % (name, ", ".join(args))
         # `bin`: shifts and division need their right operand tamed
-        op = r.choice(INT_BIN + ["<<", ">>", "//", "%", "*"])
+        op = r.choice(INT_BIN * 3 + ["<<", ">>", "*", "*"] +
+                      (["//", "%"] if r.random() < 0.15 else []))
         left = self.int_expr(env, depth + 1)
         if op in ("<<", ">>"):
             return "(%s %s %d)" % (left, op, r.randint(0, 8))
@@ -137,7 +138,7 @@ class Gen:
                 v = "s%d" % r.randint(0, 1)
                 out.append("%s%s = %s" % (ind, v, self.str_expr(env)))
                 env[v] = "str"
-            elif what == "newlist":
+            elif what == "newlist" and r.random() < 0.25:
                 v = "xs%d" % r.randint(0, 1)
                 out.append("%s%s = %s" % (ind, v, self.list_expr(env)))
                 env[v] = "list"
@@ -170,6 +171,27 @@ class Gen:
             out.append("%spass" % ind)
         return out
 
+    def rec_func(self, name):
+        """A self-recursive function: compiled self-calls become native ones."""
+        r = self.rng
+        kinds = ["int"] + [r.choice(["int", "list", "str"])
+                           for _ in range(r.randint(0, 1))]
+        params, env = [], {}
+        for i, k in enumerate(kinds):
+            p = "p%d" % i
+            params.append(p)
+            env[p] = k
+        rest = ", ".join(params[1:])
+        lines = ["def %s(%s):" % (name, ", ".join(params)),
+                 "    if p0 <= 0:",
+                 "        return %s" % self.int_expr(env, 2),
+                 "    v0 = %s(p0 - 1%s)" % (name, (", " + rest) if rest else "")]
+        env["v0"] = "int"
+        lines += self.stmts(env, "    ", 2, [6])
+        lines.append("    return %s" % self.int_expr(env))
+        self.funcs.append((name, kinds))
+        return lines
+
     def func(self, name):
         r = self.rng
         kinds = [r.choice(["int", "int", "int", "list", "str"])
@@ -191,7 +213,10 @@ def gen_program(seed):
     g = Gen(rng)
     lines = []
     for i in range(rng.randint(1, 3)):
-        lines += g.func("f%d" % i)
+        if rng.random() < 0.3:
+            lines += g.rec_func("f%d" % i)
+        else:
+            lines += g.func("f%d" % i)
     # Drive every function past the JIT's call threshold, and print a running
     # total rather than each result so output stays small but stays sensitive.
     lines.append("total = 0")
@@ -206,6 +231,19 @@ def gen_program(seed):
                 args.append("'ab'")
             else:
                 args.append("d")
+        lines.append("    total = total + %s(%s)" % (name, ", ".join(args)))
+    lines.append("    d = d + 1")
+    lines.append("print(total)")
+
+    # Phase two: call the same functions again with the *other* type in each
+    # position. Everything is compiled by now, so this is where a guard the
+    # compiler elided on the strength of what it had seen shows up.
+    lines.append("d = 0")
+    lines.append("while d < 3:")
+    for name, kinds in g.funcs:
+        args = []
+        for k in kinds:
+            args.append("'ab'" if k != "str" else "d")
         lines.append("    total = total + %s(%s)" % (name, ", ".join(args)))
     lines.append("    d = d + 1")
     lines.append("print(total)")
