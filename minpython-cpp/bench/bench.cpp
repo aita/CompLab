@@ -1,4 +1,4 @@
-// Benchmark: a hot integer loop on the interpreter vs the tracing JIT.
+// Benchmark: a hot integer loop on the interpreter vs the method JIT.
 import std;
 
 import minpython;
@@ -36,13 +36,13 @@ int main() {
 
   double jit = time_ms([&] {
     VM vm;
-    TracingJIT tj(vm, /*threshold=*/50);
+    MethodJIT mj(vm, /*threshold=*/50);
     vm.run_code(prog->module);
   });
 
   std::cout << "collatz(300000):\n"
             << "  interpreter " << interp << " ms\n"
-            << "  tracing JIT " << jit << " ms  ("
+            << "  method JIT  " << jit << " ms  ("
             << (interp / jit) << "x)\n";
   return 0;
 }

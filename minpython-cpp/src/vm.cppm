@@ -3,8 +3,8 @@
 // One run_frame call executes one function activation; a CALL recurses into
 // another run_frame, so the host C++ stack is the call stack. The back-edge of
 // every `while` is an unconditional JUMP to a lower pc -- the only place a loop
-// re-enters -- so that is where the profiler counts and where on_backedge lets a
-// tracing JIT take over. The base VM only counts; it never changes behaviour.
+// re-enters -- so that is where the profiler counts and where on_backedge lets
+// the JIT take over. The base VM only counts; it never changes behaviour.
 //
 // Runtime errors are latched into `diag` (this project has no exceptions); the
 // dispatch loop bails the moment a latch is set, unwinding every active frame.
@@ -102,7 +102,7 @@ class VM {
   bool collect_feedback = false;  // record per-site types for the optimizing JIT
 
   // Back-edge hook: (code, target pc, regs, globals) -> resume pc, or <0 to keep
-  // interpreting from the target. The seam a tracing JIT overrides.
+  // interpreting from the target. The seam on-stack replacement hooks into.
   // Returning kBackedgeDone means the hook ran the rest of the function in
   // native code and `out` holds its return value.
   static constexpr long kBackedgeDone = -2;

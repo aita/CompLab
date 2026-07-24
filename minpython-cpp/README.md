@@ -1,7 +1,9 @@
 # minpython-cpp
 
 `jit-expt/minpython/`（Python 実装のレジスタ VM ＋トレーシング JIT）の **C++ 移植版**。
-自己完結型のフロントエンド（字句解析・構文解析・コンパイル）と、[xbyak](https://github.com/herumi/xbyak) で x86-64 を吐く**トレーシング JIT** を持つ。
+自己完結型のフロントエンド（字句解析・構文解析・コンパイル）と、[xbyak](https://github.com/herumi/xbyak) で x86-64 を吐く **method JIT**（関数単位コンパイラ）を持つ。
+
+> 移植当初はトレーシング JIT だったが、method JIT が全ワークロードで上回った時点で削除した（経緯は[下記](#トレーシング-jit-を外した経緯)）。
 
 姉妹プロジェクト `Smalltalk/cpp` と同様に **C++23 モジュール**（`minpython` を partition に分割）で構成し、clang++ / CMake / ninja でビルドする。標準ライブラリは **`import std;`**（`#include` は xbyak のみ）。**例外は使わない**（`-fno-exceptions -fno-rtti`）—— エラーはラッチ `Diag` で伝播し、xbyak も `XBYAK_NO_EXCEPTION` モードで使う。
 
@@ -14,10 +16,13 @@ cmake -G Ninja -B build -DCMAKE_BUILD_TYPE=Release
 ninja -C build
 ctest --test-dir build            # ユニットテスト
 
-./build/minpython examples/fib.mpy         # インタプリタで実行
-./build/minpython --jit examples/collatz.mpy   # JIT を有効化
-./build/minpython --dis examples/fib.mpy       # 逆アセンブル
-./build/mp_bench                               # interp vs JIT ベンチ
+./build/minpython examples/fib.mpy            # インタプリタで実行
+./build/minpython --jit examples/collatz.mpy  # JIT を有効化
+./build/minpython --tiered examples/fib.mpy   # JIT をバックグラウンドスレッドでコンパイル
+./build/minpython --dis examples/fib.mpy      # 逆アセンブル
+./build/mp_bench                              # interp vs JIT ベンチ
+
+MINPYTHON_JIT_DUMP=1 ./build/minpython --jit examples/collatz.mpy  # 生成コードを見る
 ```
 
 ## 対応する言語
@@ -44,37 +49,29 @@ offset 8:  payload         int64（Int/Bool）または Object*（Str/List/Func�
 
 Lua 風のレジスタ機械。`x = a + b` は 1 命令 `ADD dst, a, b`。`while` の後方ジャンプ（back-edge）だけがループ再入の場所なので、そこでプロファイルを取り、`on_backedge` フックで JIT に制御を渡す。
 
-### トレーシング JIT（xbyak）
+### JIT（xbyak）
 
-LuaJIT を簡略化した形:
+ネイティブへの入口は 2 つ:
 
-1. **プロファイル** —— back-edge ごとにカウント。閾値を超えたら記録開始。
-2. **記録** —— 1 イテレーションを、その時点の実レジスタ値で分岐方向を確定しながら単一直線の「ALU ステップ列＋制御ガード」に落とす。整数コアで扱えないもの（呼び出し・オブジェクト演算・`//` `%` `**`・非 int 定数）は**中断**してインタプリタに任せる。
-3. **コード生成** —— 各ステップを、レジスタ配列上で直接演算する x86-64 に落とす（メモリオペランド方式）。
+- **呼び出し回数**が閾値を超えたら、その関数の本体全体（両分岐込み）を機械語化して `on_call` から直接呼ぶ。
+- ループしか持たない関数のために **back-edge** もカウントし、ホットになったら **OSR**（第 2 の入口）で実行中のループへ native のまま入る。
+
+コンパイラは 2 つある。int だけで完結する関数は専用の `MethodCode`（値を linear-scan でレジスタに載せる）、str/list を触る関数はタグ付きフレーム上で動く `MixedMethodCode` が受け持つ。生成コードは `MINPYTHON_JIT_DUMP=1` で objdump 経由のダンプが出る（レジスタマップ付き）—— 以下の最適化はどれもこのダンプを見ながら決めた。
 
 #### ネイティブ型ガード
 
 Python 版は「リージョン入口で unbox（int64 化）」する設計上、型ガードは Python 側（`run_raw`）でしか行えなかった。C++ 版は値が**タグ付き struct の配列**としてメモリにあるので、**型ガードそのものを機械語で書ける**:
 
 ```asm
-    cmp byte [regs + slot*16], Int    ; ← 入口の型ガード（ネイティブ）
-    jne deopt
+    cmp byte [regs + slot*16], Int    ; ← 型ガード（ネイティブ）
+    jne slow
 ```
 
-ライブイン（トレース内で書く前に読むレジスタ）が int でなくなっていれば、トレースは `-1` を返して**インタプリタへ deopt**する。値はレジスタ配列に常に反映されているのでスナップショットは不要 —— ガード離脱は「その時点の pc をインタプリタに返す」だけ。
+フレーム配列が**そのまま状態**なのでスナップショットは要らない —— ガードを外れたら「その時点の pc をインタプリタに返す」だけで続きが実行できる。
 
-例: `x = x + x` は int なら倍化、str なら連結。int で記録・native 実行されるが、同じ関数を str で呼ぶと入口の型ガードが機械語で外れて deopt し、インタプリタが連結を行う（結果は常にインタプリタと一致）。
+例: `x = x + x` は int なら倍化、str なら連結。int でコンパイルされるが、同じ関数を str で呼ぶとガードが機械語で外れ、汎用ヘルパが連結を行う（結果は常にインタプリタと一致）。
 
-#### str / list も JIT する（mixed トレース）
-
-オブジェクト演算を含むループも JIT できる（Python 版にはない）。トレースに `len` / 添字が現れたら **mixed** 扱いにして、専用のコード生成を使う:
-
-- **整数演算はネイティブ inline**、`Subscr` / `Len` は**ランタイムヘルパ呼び出し**（ヒープ確保や `std::string`/`vector` は機械語に inline できないため）
-- **per-op ネイティブ型ガード** —— 入口で `xs` が List か（`cmp byte[..], List; jne deopt`）、各 `xs[i]` の**結果が記録時の型か**を機械語で検査。異なれば deopt してインタプリタが処理する（結果は常に一致）
-- 値は**callee-saved レジスタに常駐**させる（共有 linear-scan で割り当て。ヘルパ呼び出しを跨いで生き残る）。配列ベースと `VM*` も callee-saved（`r12`/`rbx`）
-- **GC 安全は「safepoint プロトコル」で担保**（stack map は使わない、下記）
-
-#### GC safepoint プロトコル（register map を使わない理由）
+#### GC safepoint プロトコル（stack map を使わない理由）
 
 GC が動きうるのは**ヘルパ呼び出しの瞬間だけ**。そこで:
 
@@ -84,24 +81,23 @@ GC が動きうるのは**ヘルパ呼び出しの瞬間だけ**。そこで:
 
 これにより **safepoint ごとの stack map / register map もネイティブフレームのアンワインドも不要**になる（HotSpot の OopMap 相当の機構を持たずに precise GC を保てる）。代償は safepoint での書き戻しコスト。
 
-例: `while i < len(xs): t = t + xs[i]` が JIT され interp 比 **~2.6x**（レジスタ常駐化前は ~2.1x）。異種リスト `[1, True, 3]` では Bool 要素で per-op 型ガードが外れて deopt。型ガード失敗時は**ループ先頭ではなくガードした命令の次の pc へ復帰**する（先頭に戻すと同一イテレーションで既に書いたローカルを二重適用してしまう —— 実際にバグらせて回帰テストに固定済み）。str 添字（毎回 1 文字 Object を確保）のループで GC を強制発火させても、生存オブジェクト数まで interp と一致。
+str 添字（毎回 1 文字 Object を確保）のループで GC を強制発火させても、生存オブジェクト数までインタプリタと一致する。ガード失敗時は**ガードした命令の次の pc へ復帰**する（ループ先頭に戻すと同一イテレーションで既に書いたローカルを二重適用してしまう —— 実際にバグらせて回帰テストに固定済み）。
 
-まだ非対応: str/list の連結（`+`）と `MakeList` はトレースを中断する。
+#### レジスタ割り当て
 
-#### レジスタ割り当て（共有 linear-scan）
+int コンパイラは Python 版と同じ **linear-scan**（`regalloc.cppm`、Poletto & Sarkar）でライブ区間に割り当て、あふれたらスタックにスピルする。オブジェクト対応コンパイラの方は**関数全体で所有する貪欲割り当て**を使う —— こちらは safepoint での一括書き戻し／再ロード（下記）が「スロットとレジスタは 1 対 1」を前提にしているので、区間ごとにレジスタを共有する linear-scan とは噛み合わない（共有させた結果 2 つのスロットが同じレジスタを持ち、出力が壊れた。逆アセンブラを入れた直後にレジスタマップを見て判明した）。
 
-ループ搬送値はメモリ往復せず**機械語レジスタに常駐**する。割り当ては Python 版と同じ **linear-scan**（`regalloc.cppm`、Poletto & Sarkar）で、tracing JIT と method JIT が**同じアロケータを共有**する（レジスタは抽象インデックスで扱い両 JIT 非依存）。tracing 側はループ搬送 slot を全区間ライブにして再利用衝突を防ぐ。タグは常にメモリ管理なので bool/int の区別はタダで正確。
+#### int 特化コンパイラ
 
-### method JIT（関数コンパイラ）
+int だけで完結し自己再帰しかしない関数（`mdetail::feasible`）は、値を callee-saved レジスタ（再帰 `call` を跨いで生存）に linear-scan で割り当て、あふれたらスタックにスピルする。**直接自己再帰は native `call`** になる。
 
-tracing JIT はループ back-edge でしか発火しないので、`fib_rec` のようなループの無い再帰関数には効かない。method JIT がそこを埋める: 関数が**呼ばれた回数**が閾値を超えたら、両分岐を含めて本体全体を機械語化し、**直接自己再帰は native `call`** になる。int 特化・自己再帰のみ（`mdetail::feasible`）、値は callee-saved レジスタ（再帰 call を跨いで生存）に linear-scan で割り当て、あふれたらスタックにスピル。
+#### オブジェクト対応コンパイラ
 
-#### オブジェクト対応の method コンパイラ
-
-str/list を触る関数は別のコンパイラが担当する（タグ付きフレーム上で関数全体を機械語化）:
+str/list を触る関数はタグ付きフレーム上で機械語化する:
 
 - **型が合わなければ「遅い経路」をネイティブのまま呼ぶ** —— int の速い経路をインラインで持ち、外れたら汎用ヘルパ（`op_binop`/`op_compare`/`op_unary`/truthiness）を呼んで**そのまま実行を継続**する。インタプリタに関数ごと落ちない。これにより文字列連結のような処理もネイティブ実行のまま進む。
-- **冗長な型ガードを削除** —— CFG 前向き must 解析で「既に int と判明したスロット」を求め、再ガードを省く（インラインキャッシュ型フィードバックの安価な代用）。
+- **冗長な型ガードを削除** —— CFG 前向き must 解析で「既に int と判明したスロット」を求め、再ガードを省く。入口で int 引数を一度ガードしておくことがこの解析の種になる（種が無いとループヘッダで交わりが空になり、毎イテレーション全再ガードになる）。
+- **冗長なタグストアを削除** —— タグ付きフレームなので素朴に書くと結果ごとにタグバイトを書く。だが**書こうとしているバイトは既にそこにある**ことがほとんどで、整数ループではそれがメモリトラフィックの大半だった。「各スロットのメモリ上の正確なタグ」を追う 2 つ目の must 解析（`mem_tags`）を入れ、既知なら書かない。**no-op になるストアしか消さない＝メモリは 1 バイトも変わらない**ので、GC・bail・flush 側は解析の存在を知らなくてよい。純粋整数ループの本体は 29 命令 6 ストアから **21 命令 2 ストア・ロード 0** になった。
 - **自己再帰は native `call`** —— 呼び出し先の同一性をガードし、VM 値スタックからフレームをバンプ確保して自分の入口を直接呼ぶ。非自己呼び出しは VM 経由なので**相互再帰も動く**。
 - 型ガードが外れて続行できない場合のみ pc を返し、**フレーム配列がそのまま状態**なのでインタプリタがその pc から続きを実行する（deopt 機構は不要）。
 
@@ -113,19 +109,31 @@ str/list を触る関数は別のコンパイラが担当する（タグ付き�
 
 Python 版の baseline（stencil/copy-and-patch）は「Python でバイト列を吐くのが遅いので memcpy ベースの段が速い」ための tier。C++ は xbyak が µs でコンパイルするので、baseline は**コンパイル速度の利点が無く、コード品質が低いだけ**。実測でも call-bound の fib で baseline は method より遅かったので**外した**（tiered は method の単段バックグラウンド版に簡約）。
 
-#### 未実装（Python 版にはあるもの）
+### 暴走再帰の境界
 
-トレーシングのサイドトレース・LICM・SSA IR、copy-and-patch baseline。tracing のガードが記録経路から外れると（例: collatz の奇偶分岐）その回はインタプリタに戻る。
+ネストした呼び出しはインタプリタでは C++ の再帰、コンパイル済みコードでは本物の `call` なので、**どちらもマシンスタックを無制限に食う**（実際 3 モードとも segfault していた）。VM 構築時のスタック位置から予算を取り、`do_call` と両コンパイラの入口で検査する。深さのカウントではなく予算にしたのは、実際に尽きる資源がそちらだから —— ネイティブフレームはインタプリタのそれよりずっと小さいので、コンパイル済み段が正当に深くまで進める。
 
-## ベンチ（同一プログラム、Python 版と比較）
+### トレーシング JIT を外した経緯
+
+当初はトレーシング JIT と method JIT を併走させていた。method JIT は再帰（fib 22x）・分岐の多いループ（collatz 7x）・list ループ（2.6x）で勝っていたが、**純粋整数ループだけ 1.6x 負けていた**。
+
+逆アセンブラ（`MINPYTHON_JIT_DUMP=1`）で両者のループ本体を並べると、method 側は **29 命令、trace 側は 37 命令** —— 命令数では勝っている。効いていたのはストア数で、上記のタグストア削除で 2 ストアまで落として逆転した。最後に残った 1 敗（直線的な算術関数）は「遅い」のではなく**一度もコンパイルされていなかった**: xbyak の既定コードバッファ 4KB を溢れ、それがコンパイル失敗として黙ってブラックリスト行きになっていた（当該関数は実測 14KB）。AutoGrow にして全勝したので、トレーシング側を削除した。
+
+### 未実装（Python 版にはあるもの）
+
+SSA IR・LICM・インライン展開・copy-and-patch baseline。
+
+## ベンチ
 
 ```
-SUM s(3e6)  [trace jit]   C++ jit 12ms  / Py jit  65ms   → C++ 5.3x
-COLLATZ(8e4)[trace jit]   C++ jit 140ms / Py jit 3917ms  → C++ 28x
-FIB(30) rec [method jit]  C++ jit  7ms  / Py jit  67ms   → C++ 9.7x
+                      interp     --jit
+SUM      s(5e6)       226.5ms     8.5ms   26.6x
+COLLATZ  (1e5)        563.4ms    25.0ms   22.5x
+FIB(32)  再帰         406.6ms    19.0ms   21.4x
+LIST-SUM (8 x 2e5)     77.6ms     9.4ms    8.3x
 ```
 
-いずれも全実装で出力一致。差は主にランタイムの重さ（Python は境界の boxing・deopt が重い）。tracing の純粋整数ループは interp 比 ~20x、method JIT の再帰も ~20x。
+いずれも出力はインタプリタと完全一致（全ワークロードで差分テスト済み）。list ループの倍率が低いのは、`Subscr` / `Len` がヘルパ呼び出しのまま（＝ safepoint で書き戻しが入る）ため。
 
 ## レイアウト
 
@@ -139,12 +147,12 @@ src/
   compiler.cppm   AST -> レジスタ bytecode（Program が所有）
   vm.cppm         レジスタ dispatch ループ + back-edge/on_call フック + GC
   regalloc.cppm   共有 linear-scan アロケータ
-  jit.cppm        xbyak トレーシング JIT（記録・codegen・driver）
-  method.cppm     method JIT（reachable/liveness/regalloc/self-recursion）
+  disasm.cppm     生成コードのダンプ（MINPYTHON_JIT_DUMP=1）
+  method.cppm     method JIT（解析・codegen・OSR・driver）
   tiered.cppm     非同期（バックグラウンド）method JIT
   minpython.cppm  primary module interface
-  main.cpp        CLI（--jit / --method / --tiered / --dis）
-tests/            アサーション式テスト（interp + 各 JIT 差分・GC）
+  main.cpp        CLI（--jit / --tiered / --dis）
+tests/            アサーション式テスト（interp と JIT の差分・GC・再帰境界）
 bench/            interp vs JIT ベンチ
 third_party/xbyak vendored（ヘッダオンリー）
 ```

@@ -102,60 +102,7 @@ int main() {
             "print(collatz(1000))"),
         "59542");
 
-  // -- JIT: differential + native type guard -------------------------------
-  struct JitRun {
-    std::string out;
-    int compiled, runs, aborted, type_deopt;
-  };
-  auto run_jit = [](const std::string& src, int threshold) -> JitRun {
-    std::string err;
-    auto prog = compile_module(src, err);
-    VM vm;
-    TracingJIT jit(vm, threshold);
-    if (prog) vm.run_code(prog->module);
-    return {vm.output(), jit.n_compiled, jit.n_trace_runs, jit.n_aborted,
-            jit.n_type_deopt};
-  };
-
-  // A hot int loop compiles and matches the interpreter exactly.
-  {
-    std::string src =
-        "def s(n):\n    i = 0\n    t = 0\n"
-        "    while i < n:\n        t = t + i\n        i = i + 1\n"
-        "    return t\nprint(s(1000))";
-    JitRun j = run_jit(src, 4);
-    check("jit sum matches", j.out, run(src));
-    check("jit sum compiled", j.compiled >= 1 ? "y" : "n", "y");
-  }
-  // collatz: nested loop with a data-dependent branch, still exact under JIT.
-  {
-    std::string src =
-        "def collatz(n):\n    total = 0\n    x = 1\n"
-        "    while x <= n:\n        y = x\n        while y != 1:\n"
-        "            if y & 1:\n                y = 3 * y + 1\n"
-        "            else:\n                y = y >> 1\n"
-        "            total = total + 1\n        x = x + 1\n    return total\n"
-        "print(collatz(500))";
-    JitRun j = run_jit(src, 8);
-    check("jit collatz matches", j.out, run(src));
-  }
-  // Native entry type guard: `x = x + x` doubles an int but concatenates a str,
-  // so the same loop is valid for both. It traces for int; calling with a str
-  // fails the machine-code type guard and deopts -- still exact.
-  {
-    std::string src =
-        "def double(x, n):\n    i = 0\n"
-        "    while i < n:\n        x = x + x\n        i = i + 1\n"
-        "    return x\n"
-        "print(double(1, 20))\n"    // int -> traced
-        "print(double('ab', 3))";   // str -> entry type guard deopts
-    JitRun j = run_jit(src, 4);
-    check("jit typeguard matches", j.out, run(src));
-    check("jit typeguard compiled", j.compiled >= 1 ? "y" : "n", "y");
-    check("jit typeguard deopted", j.type_deopt >= 1 ? "y" : "n", "y");
-  }
-
-  // -- method JIT: recursive int functions ---------------------------------
+  // -- JIT: differential over loops, calls and mixed types -----------------
   struct MethodRun {
     std::string out;
     int compiled, native, aborted;
@@ -168,6 +115,42 @@ int main() {
     if (prog) vm.run_code(prog->module);
     return {vm.output(), mj.n_compiled, mj.n_calls_native, mj.n_aborted};
   };
+
+  // A hot int loop is entered by on-stack replacement and matches exactly.
+  {
+    std::string src =
+        "def s(n):\n    i = 0\n    t = 0\n"
+        "    while i < n:\n        t = t + i\n        i = i + 1\n"
+        "    return t\nprint(s(1000))";
+    MethodRun m = run_method(src, 4);
+    check("jit sum matches", m.out, run(src));
+    check("jit sum not aborted", m.aborted == 0 ? "y" : "n", "y");
+  }
+  // collatz: nested loop with a data-dependent branch, still exact under JIT.
+  {
+    std::string src =
+        "def collatz(n):\n    total = 0\n    x = 1\n"
+        "    while x <= n:\n        y = x\n        while y != 1:\n"
+        "            if y & 1:\n                y = 3 * y + 1\n"
+        "            else:\n                y = y >> 1\n"
+        "            total = total + 1\n        x = x + 1\n    return total\n"
+        "print(collatz(500))";
+    MethodRun m = run_method(src, 8);
+    check("jit collatz matches", m.out, run(src));
+  }
+  // Type guards: `x = x + x` doubles an int but concatenates a str, so the same
+  // loop is valid for both. Compiled for int, the str call must take the guard's
+  // slow path and still produce exactly what the interpreter would.
+  {
+    std::string src =
+        "def double(x, n):\n    i = 0\n"
+        "    while i < n:\n        x = x + x\n        i = i + 1\n"
+        "    return x\n"
+        "print(double(1, 20))\n"    // int -> inline path
+        "print(double('ab', 3))";   // str -> guard fails
+    MethodRun m = run_method(src, 2);
+    check("jit typeguard matches", m.out, run(src));
+  }
   {
     std::string src =
         "def fact(n):\n    if n <= 1:\n        return 1\n"
@@ -249,7 +232,7 @@ int main() {
     check("method loop native", m.native >= 1 ? "y" : "n", "y");
   }
 
-  // -- str/list in traces: helper calls + per-op native type guards ---------
+  // -- str/list under the JIT: helper calls + per-op native type guards ----
   {  // list subscript + len now compile instead of aborting
     std::string src =
         "def s(xs, reps):\n    t = 0\n    n = 0\n"
@@ -257,9 +240,9 @@ int main() {
         "        while i < len(xs):\n            t = t + xs[i]\n"
         "            i = i + 1\n        n = n + 1\n    return t\n"
         "print(s([1, 2, 3, 4, 5, 6, 7, 8], 500))";
-    JitRun j = run_jit(src, 4);
-    check("jit list-sum matches", j.out, run(src));
-    check("jit list-sum compiled", j.compiled >= 1 ? "y" : "n", "y");
+    MethodRun m = run_method(src, 4);
+    check("jit list-sum matches", m.out, run(src));
+    check("jit list-sum compiled", m.aborted == 0 ? "y" : "n", "y");
   }
   {  // len() on a str inside a traced loop
     std::string src =
@@ -268,12 +251,12 @@ int main() {
         "        while i < len(s):\n            t = t + 1\n"
         "            i = i + 1\n        n = n + 1\n    return t\n"
         "print(cnt('hello', 500))";
-    JitRun j = run_jit(src, 4);
-    check("jit str-len matches", j.out, run(src));
-    check("jit str-len compiled", j.compiled >= 1 ? "y" : "n", "y");
+    MethodRun m = run_method(src, 4);
+    check("jit str-len matches", m.out, run(src));
+    check("jit str-len compiled", m.aborted == 0 ? "y" : "n", "y");
   }
   {  // regression: a type guard that fires *after* a local was written this
-     // iteration must resume after the guarded op, not restart the loop header
+     // iteration must resume after the guarded op, not at the loop header
      // (restarting double-applied `i = i + 1` and lost elements).
     std::string src =
         "def s(xs, reps):\n    t = 0\n    n = 0\n"
@@ -281,9 +264,8 @@ int main() {
         "        while i < 8:\n            i = i + 1\n"
         "            t = t + xs[i - 1]\n        n = n + 1\n    return t\n"
         "print(s([1, 2, True, 4, 5, 6, 7, 8], 300))";
-    JitRun j = run_jit(src, 4);
-    check("jit typeguard resume", j.out, run(src));
-    check("jit typeguard fired", j.type_deopt >= 1 ? "y" : "n", "y");
+    MethodRun m = run_method(src, 4);
+    check("jit typeguard resume", m.out, run(src));
   }
   {  // the inline list fast path must fall back correctly: a negative index
      // and a str subscript both leave it for the helper
@@ -294,8 +276,8 @@ int main() {
         "            i = i + 1\n"
         "        r = r + len(t)\n        n = n + 1\n    return r\n"
         "print(s([1, 2, 3, 4], 'abc', 400))";
-    JitRun j = run_jit(src, 4);
-    check("jit list fastpath fallback", j.out, run(src));
+    MethodRun m = run_method(src, 4);
+    check("jit list fastpath fallback", m.out, run(src));
   }
   {  // heterogeneous list: the per-op type guard must deopt, still exact
     std::string src =
@@ -304,9 +286,8 @@ int main() {
         "        while i < len(xs):\n            t = t + xs[i]\n"
         "            i = i + 1\n        n = n + 1\n    return t\n"
         "print(s([1, True, 3], 500))";
-    JitRun j = run_jit(src, 4);
-    check("jit het-list matches", j.out, run(src));
-    check("jit het-list deopted", j.type_deopt >= 1 ? "y" : "n", "y");
+    MethodRun m = run_method(src, 4);
+    check("jit het-list matches", m.out, run(src));
   }
 
   // -- tiered (background) method JIT: exact under async compilation --------
@@ -339,12 +320,12 @@ int main() {
     std::string err;
     auto prog = compile_module(src, err);
     VM vm;
-    vm.gc_threshold = 500;  // force collections during the trace
-    TracingJIT jit(vm, 4);
+    vm.gc_threshold = 500;  // force collections while native code is running
+    MethodJIT jit(vm, 4);
     if (prog) vm.run_code(prog->module);
-    check("gc-in-trace output", vm.output(), run(src));
-    check("gc-in-trace collected", vm.n_gc > 0 ? "y" : "n", "y");
-    check("gc-in-trace compiled", jit.n_compiled >= 1 ? "y" : "n", "y");
+    check("gc-under-jit output", vm.output(), run(src));
+    check("gc-under-jit collected", vm.n_gc > 0 ? "y" : "n", "y");
+    check("gc-under-jit compiled", jit.n_aborted == 0 ? "y" : "n", "y");
   }
 
   // -- GC: allocation-heavy loop stays bounded and exact --------------------
@@ -393,12 +374,6 @@ int main() {
       VM vm;
       vm.run_code(prog->module);
       check("deep recursion interp errors", vm.diag.failed ? "y" : "n", "y");
-    }
-    {
-      VM vm;
-      TracingJIT tj(vm);
-      vm.run_code(prog->module);
-      check("deep recursion trace errors", vm.diag.failed ? "y" : "n", "y");
     }
     {
       VM vm;

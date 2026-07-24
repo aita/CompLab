@@ -3,7 +3,7 @@
 // A function's named locals (params + every assigned name, minus `global`s) get
 // stable low registers 0..n_locals-1; everything above is a temporary stack that
 // expressions push onto and operators pop. No liveness -- correctness first; the
-// trace JIT is where cleverness pays off.
+// JIT is where cleverness pays off.
 //
 // A Program owns the module CodeObject plus every nested function CodeObject and
 // every string-constant Object, so raw pointers in const pools stay valid for

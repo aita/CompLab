@@ -1,15 +1,15 @@
 // Method JIT partition — a port of minpython/jit/method.py.
 //
-// The tracing JIT only fires on hot `while` back-edges, so a loop-free function
-// -- most importantly a recursive one like fib_rec -- never gets native code.
-// This compiler fills that gap: when a function is *called* often enough it
-// compiles the whole body, both arms of every branch, to machine code, with
-// direct self-recursion becoming a native `call`.
+// When a function is *called* often enough this compiles its whole body -- both
+// arms of every branch -- to machine code, with direct self-recursion becoming
+// a native `call`. Functions that are all loop and no call are reached the
+// other way, by on-stack replacement from a hot back-edge.
 //
-// int-specialised like the traces: the interpreter->native boundary (on_call)
-// guards that the arguments are ints before entering; inside, everything is int.
-// Values live in callee-saved registers (so they survive the recursive call)
-// assigned by the shared linear-scan allocator, spilling to the stack frame.
+// MethodCode is int-specialised: the interpreter->native boundary (on_call)
+// guards that the arguments are ints before entering, and inside everything is
+// an int. Values live in callee-saved registers (so they survive the recursive
+// call) assigned by the linear-scan allocator, spilling to the stack frame.
+// MixedMethodCode below handles everything else, on a tagged frame.
 module;
 #define XBYAK_NO_EXCEPTION
 #include "xbyak/xbyak.h"
@@ -1512,7 +1512,7 @@ class MethodJIT {
   explicit MethodJIT(VM& vm, int threshold = 10)
       : vm_(vm), threshold_(threshold) {
     vm_.collect_feedback = true;
-    // Take the back-edge hook too, unless a tracing JIT already owns it: a hot
+    // Take the back-edge hook too, unless something else already owns it: a hot
     // loop in a function that is only *called* once never reaches the call
     // threshold, so the only way in is on-stack replacement.
     if (!vm_.on_backedge)

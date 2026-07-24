@@ -29,13 +29,12 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # No exceptions / RTTI (matching the sibling Smalltalk build). The frontend
 # reports errors through a latched Diag instead of throwing, and xbyak is built
-# in its XBYAK_NO_EXCEPTION mode (see jit.cppm).
+# in its XBYAK_NO_EXCEPTION mode (see method.cppm).
 add_compile_options(-fno-exceptions -fno-rtti)
 
 # The interpreter + JIT are one module `minpython`, split into partitions that
 # mirror the Python minpython/ layout. xbyak (the JIT assembler) is header-only
-# and vendored under third_party/; it uses exceptions, so this project keeps them
-# enabled (unlike the sibling Smalltalk build).
+# and vendored under third_party/.
 add_library(mp STATIC)
 target_sources(mp
   PUBLIC
@@ -49,7 +48,6 @@ target_sources(mp
       src/vm.cppm
       src/regalloc.cppm
       src/disasm.cppm
-      src/jit.cppm
       src/method.cppm
       src/tiered.cppm
       src/minpython.cppm

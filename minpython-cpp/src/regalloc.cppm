@@ -1,12 +1,11 @@
 // Regalloc partition — linear-scan register allocation (Poletto & Sarkar),
 // a port of minpython/jit/regalloc.py, shared by both function compilers.
 //
-// The tracing JIT allocates over a trace's slots; the method JIT allocates over
-// a function's VM registers. They differ only in how the live intervals are
-// built, so each builds its own Interval list and hands it here. This module is
-// just the scan -- it knows nothing about either value space or the concrete
-// register set: registers are abstract indices [0, n_regs), and the caller maps
-// them to real machine registers.
+// The caller builds the live intervals over whatever value space it has -- the
+// integer method compiler uses a function's VM registers -- and hands the list
+// here. This module is just the scan: it knows nothing about that value space
+// or the concrete register set. Registers are abstract indices [0, n_regs), and
+// the caller maps them to real machine registers.
 module;
 
 export module minpython:regalloc;
