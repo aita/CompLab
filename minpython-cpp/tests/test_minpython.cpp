@@ -461,6 +461,42 @@ int main() {
     check("osr bail unwinds", m.out, run(src));
   }
 
+  {  // regression: parameters are live from *before* the first instruction.
+     // Starting their intervals at 0 let the scan hand one parameter's
+     // register to another that also started at 0, and `return a < b`
+     // compiled to `cmp rbx, rbx` -- always false.
+    std::string src =
+        "def f(a, b):\n    return a < b\n"
+        "i = 0\nwhile i < 40:\n    i = i + 1\n    x = f(1, 2)\n"
+        "print(f(1, 2))\nprint(f(5, 2))";
+    MethodRun m = run_method(src, 4);
+    check("two params keep two registers", m.out, run(src));
+  }
+  {  // `&`, `|` and `^` are closed over bool -- True & False is False, not 0.
+     // The integer tier cannot carry a tag at all, so it declines such a
+     // function; the object tier computes the result tag from the operands'.
+    std::string src =
+        "def g(a, b, n):\n    i = 0\n    r = 0\n"
+        "    while i < n:\n        r = a & b\n        i = i + 1\n"
+        "    return r\n"
+        "print(g(True, True, 900))\nprint(g(True, False, 900))\n"
+        "print(g(3, 5, 900))\nprint(g(True, 1, 900))";
+    MethodRun m = run_method(src, 4);
+    check("bool closed under bitops (jit)", m.out, run(src));
+  }
+  check("bool closed under bitops",
+        run("print(True & True)\nprint(True | False)\nprint(True ^ True)\n"
+            "print(True & 1)\nprint(True + True)\nprint(True << 1)"),
+        "True\nTrue\nFalse\n1\n2\n2");
+  {  // the integer tier must decline anything whose result could be a bool
+    std::string src =
+        "def h(a, b):\n    return a & b\n"
+        "i = 0\nwhile i < 40:\n    i = i + 1\n    x = h(1, 2)\n"
+        "print(h(True, True))";
+    MethodRun m = run_method(src, 4);
+    check("int tier declines bool result", m.out, run(src));
+  }
+
   {  // A body long enough to overrun a 4KB code buffer must still compile:
      // the failure mode is silent, the function just stays interpreted.
     std::string src = "def big(xs, n):\n    a = xs[0]\n";

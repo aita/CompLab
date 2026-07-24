@@ -312,7 +312,10 @@ def main():
                 continue
             fails += 1
             small = shrink(src, tmp)
-            mode, want, got = disagreement(small, tmp)
+            # Re-check rather than trust: shrinking runs the program many more
+            # times, and a flaky or timing-dependent case can stop reproducing.
+            again = disagreement(small, tmp) or d
+            mode, want, got = again
             print("=" * 60)
             print("seed %d: %s disagrees" % (seed, mode))
             print(small)

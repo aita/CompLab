@@ -30,6 +30,12 @@ inline std::int64_t py_mod(std::int64_t a, std::int64_t b) {
   if (r != 0 && ((r < 0) != (b < 0))) r += b;
   return r;
 }
+// The operators under which bool is closed: `&`, `|`, `^` on two bools give a
+// bool, every other int operator gives an int.
+inline bool bool_closed(Op op) {
+  return op == Op::BitAnd || op == Op::BitOr || op == Op::BitXor;
+}
+
 inline std::int64_t py_pow(std::int64_t a, std::int64_t e) {
   std::int64_t r = 1;
   while (e) {
@@ -384,6 +390,12 @@ class VM {
       case Op::RShift: z = x >> y; break;
       default: break;
     }
+    // `&`, `|` and `^` are the one place bool is closed under the operator:
+    // True & True is True, but True + True is 2 and True << 1 is 2. Python's
+    // bool.__and__ does this, so the reference implementation gets it for free
+    // from operator.and_; here it has to be spelled out.
+    if (bool_closed(op) && l.tag == Tag::Bool && r.tag == Tag::Bool)
+      return Value::boolean(z != 0);
     return Value::integer(z);
   }
 

@@ -119,6 +119,63 @@ inline bool self_call_regs(const CodeObject& code,
 // The v1 gate. Returns the reachable set if `code` is in the subset, else empty
 // optional: int arithmetic, if, return, direct self-recursion, no loops /
 // globals / print / // / % / **, <= n_arg_regs params.
+// Which slots definitely hold an Int rather than a Bool. The integer compiler
+// keeps values as raw int64 with no tag at all, so its result is handed back as
+// an Int -- which is wrong for `return a < b`, where the interpreter says True.
+// Parameters count as Int because the entry guard insists on it.
+inline bool int_result_only(const CodeObject& code,
+                            const std::unordered_set<int>& reach, int argc) {
+  std::unordered_set<int> universe;               // optimistic: shrink to fit
+  for (int r = 0; r < code.n_regs; ++r) universe.insert(r);
+  std::unordered_map<int, std::unordered_set<int>> in;
+  for (int pc : reach) in[pc] = universe;
+  std::unordered_set<int> entry;
+  for (int p = 0; p < argc; ++p) entry.insert(p);
+  in[0] = entry;
+
+  auto transfer = [&](const std::unordered_set<int>& s, const Instr& ins) {
+    std::unordered_set<int> o = s;
+    Op op = ins.op;
+    if (op == Op::LoadConst) {
+      if (code.consts[ins.b].tag == Tag::Int) o.insert(ins.a);
+      else o.erase(ins.a);
+    } else if (op == Op::Move) {
+      if (s.count(ins.b)) o.insert(ins.a); else o.erase(ins.a);
+    } else if (is_cmpop(op) || op == Op::Not) {
+      o.erase(ins.a);                 // a bool, by definition
+    } else if (bool_closed(op)) {
+      if (s.count(ins.b) && s.count(ins.c)) o.insert(ins.a);
+      else o.erase(ins.a);            // bool & bool is a bool
+    } else if (is_binop(op) || op == Op::Neg || op == Op::Invert ||
+               op == Op::Call) {
+      o.insert(ins.a);                // +, -, *, shifts and our own result
+    }
+    return o;
+  };
+
+  bool changed = true;
+  std::vector<int> asc(reach.begin(), reach.end());
+  std::sort(asc.begin(), asc.end());
+  while (changed) {
+    changed = false;
+    for (int pc : asc) {
+      auto out = transfer(in[pc], code.code[pc]);
+      for (int s : successors(code, pc)) {
+        auto it = in.find(s);
+        if (it == in.end()) continue;
+        std::unordered_set<int> merged;
+        for (int v : it->second)
+          if (out.count(v)) merged.insert(v);
+        if (merged != it->second) { it->second = std::move(merged); changed = true; }
+      }
+    }
+  }
+  for (int pc : reach)
+    if (code.code[pc].op == Op::Return && !in[pc].count(code.code[pc].a))
+      return false;
+  return true;
+}
+
 inline std::optional<std::unordered_set<int>> feasible(const CodeObject& code,
                                                        int n_arg_regs) {
   if ((int)code.params.size() > n_arg_regs) return std::nullopt;
@@ -143,6 +200,8 @@ inline std::optional<std::unordered_set<int>> feasible(const CodeObject& code,
     if (ins.op == Op::LoadGlobal && !callee_regs.count(ins.a))
       return std::nullopt;  // a real global, not a self-call
   }
+  if (!int_result_only(code, reach, (int)code.params.size()))
+    return std::nullopt;    // could return a bool, which this tier cannot say
   return reach;
 }
 
@@ -378,7 +437,19 @@ inline std::unordered_map<int, TagMap> mem_tags(
     } else if (op == Op::Len) {
       set(Tag::Int);             // both the inline path and the helper agree
     } else if (mixed_inline_bin(op) || is_cmpop(op)) {
-      if (sure) set(is_cmpop(op) ? Tag::Bool : Tag::Int); else s.erase(ins.a);
+      if (!sure) {
+        s.erase(ins.a);
+      } else if (is_cmpop(op)) {
+        set(Tag::Bool);
+      } else if (!bool_closed(op)) {
+        set(Tag::Int);
+      } else {
+        // bool & bool is a bool, so only knowing both operand tags settles it.
+        auto b = s.find(ins.b), c = s.find(ins.c);
+        if (b == s.end() || c == s.end()) s.erase(ins.a);
+        else set(b->second == (int)Tag::Bool && c->second == (int)Tag::Bool
+                     ? Tag::Bool : Tag::Int);
+      }
     } else if (is_unaryop(op)) {
       if (sure) set(op == Op::Not ? Tag::Bool : Tag::Int); else s.erase(ins.a);
     } else if (op == Op::JumpIfFalse || op == Op::JumpIfTrue ||
@@ -513,10 +584,13 @@ class MethodCode : public Xbyak::CodeGenerator {
     arg_regs_ = {rdi, rsi, rdx, rcx, r8, r9};
 
     // Live-range linear scan over the function's VM registers. Parameters are
-    // live from entry, so their intervals start at 0.
+    // live from *before* the first instruction, not at it. Starting them at 0
+    // let the scan retire one parameter in favour of another that also started
+    // at 0 -- `def f(a, b): return a < b` put both in the same register and
+    // compiled to `cmp rbx, rbx`.
     auto ranges = mdetail::live_ranges(code, reach);
     for (int p = 0; p < argc; ++p)
-      if (ranges.count(p)) ranges[p].first = 0;
+      if (ranges.count(p)) ranges[p].first = -1;
     std::vector<Interval> intervals;
     for (auto& [r, se] : ranges) intervals.push_back({se.first, se.second, r});
     alloc_ = linear_scan(intervals, (int)pool_.size());
@@ -1286,7 +1360,21 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
               default: ld(rcx, z); sar(acc, cl); break;
             }
             if (acc.getIdx() == rax.getIdx()) st(x);
-            set_tag(pc, x, Tag::Int);
+            if (!bool_closed(ins.op)) {
+              set_tag(pc, x, Tag::Int);
+            } else if (auto ty = mem_tag(pc, y), tz = mem_tag(pc, z); ty && tz) {
+              set_tag(pc, x, *ty == Tag::Bool && *tz == Tag::Bool ? Tag::Bool
+                                                                  : Tag::Int);
+            } else {
+              // Guards leave both tags Int(1) or Bool(2), so ((y & z) >> 1) + 1
+              // is Bool exactly when both were, and Int otherwise. Written
+              // after the payload, so x may safely be y or z.
+              mov(al, tg(y));
+              and_(al, tg(z));
+              shr(al, 1);
+              add(al, 1);
+              mov(tg(x), al);
+            }
             L(done);
             {
               Op o = ins.op;
@@ -1919,9 +2007,11 @@ class MethodJIT {
           return false;   // deopt: let the interpreter do the lookup
       }
     }
-    // entry type guard: every argument must be an int for the native code
+    // entry type guard: every argument must be an int -- not merely int-like.
+    // A bool argument would let `a & b` produce a bool, which raw int64
+    // registers cannot carry back out.
     for (int i = 0; i < argc; ++i)
-      if (!regs[arg_base + i].is_int_like()) return false;  // deopt
+      if (regs[arg_base + i].tag != Tag::Int) return false;  // deopt
     std::int64_t a[6] = {0};
     for (int i = 0; i < argc; ++i) a[i] = regs[arg_base + i].i;
     out = Value::integer(call_native(it->second->fn, argc, a));
