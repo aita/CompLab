@@ -535,6 +535,18 @@ int main() {
     check("tiered entry guard (rebound name)", tiered(n), run(n));
   }
 
+  {  // A local read before it is assigned is None, and the integer tier has no
+     // way to say None -- it returned whatever was in the register. The
+     // int-result analysis declines the function, since it cannot prove the
+     // returned slot holds an Int on the path that never wrote it.
+    std::string src =
+        "def f(n):\n    if n > 0:\n        x = 5\n    return x\n"
+        "i = 0\nt = 0\nwhile i < 40:\n    t = t + f(1)\n    i = i + 1\n"
+        "print(f(1))\nprint(f(-1))";
+    MethodRun m = run_method(src, 4);
+    check("unassigned local stays None", m.out, run(src));
+  }
+
   {  // A body long enough to overrun a 4KB code buffer must still compile:
      // the failure mode is silent, the function just stays interpreted.
     std::string src = "def big(xs, n):\n    a = xs[0]\n";
