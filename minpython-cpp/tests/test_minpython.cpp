@@ -367,6 +367,34 @@ int main() {
     check("gc bounded", vm.live_objects() < 3000 ? "y" : "n", "y");
   }
 
+  {  // Runaway recursion must be an error in every tier, not a segfault. The
+     // compiled tiers recurse on the machine stack, where only the entry
+     // point's own budget check stands between them and the guard page.
+    std::string src =
+        "def down(n):\n    if n == 0:\n        return 0\n"
+        "    return 1 + down(n - 1)\nprint(down(100000000))";
+    std::string err;
+    auto prog = compile_module(src, err);
+    check("deep recursion compiles", prog ? "y" : "n", "y");
+    {
+      VM vm;
+      vm.run_code(prog->module);
+      check("deep recursion interp errors", vm.diag.failed ? "y" : "n", "y");
+    }
+    {
+      VM vm;
+      TracingJIT tj(vm);
+      vm.run_code(prog->module);
+      check("deep recursion trace errors", vm.diag.failed ? "y" : "n", "y");
+    }
+    {
+      VM vm;
+      MethodJIT mj(vm, 2);
+      vm.run_code(prog->module);
+      check("deep recursion method errors", vm.diag.failed ? "y" : "n", "y");
+    }
+  }
+
   std::cout << passes << " passed, " << fails << " failed\n";
   return fails ? 1 : 0;
 }

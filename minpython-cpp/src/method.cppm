@@ -431,6 +431,12 @@ inline std::unordered_map<int, TagMap> mem_tags(
 // They work on the frame array (a GC root), so allocation inside them is safe.
 // Returning 0 means the VM latched an error and the native code must bail.
 
+// A native entry point found the machine stack nearly spent. Latch the error
+// and let the interpreter unwind; nothing of the callee has run.
+inline void jit_stack_exhausted(VM* vm) {
+  vm->diag.fail("maximum recursion depth exceeded");
+}
+
 inline int jit_m_subscr(VM* vm, Value* regs, int a, int b, int c) {
   regs[a] = vm->op_subscr(regs[b], regs[c]);
   return vm->diag.failed ? 0 : 1;
@@ -494,7 +500,7 @@ inline bool is_self_call(const CodeObject& code, int pc) {
 class MethodCode : public Xbyak::CodeGenerator {
  public:
   MethodCode(const CodeObject& code, const std::unordered_set<int>& reach,
-             int argc) {
+             int argc, VM* vm) : vm_(vm) {
     using namespace Xbyak::util;
     pool_ = {rbx, r12, r13, r14, r15};
     arg_regs_ = {rdi, rsi, rdx, rcx, r8, r9};
@@ -613,6 +619,12 @@ class MethodCode : public Xbyak::CodeGenerator {
     L(entry_);
     push(rbp);
     mov(rbp, rsp);
+    // Self-recursion here is a real `call`, so the machine stack is the only
+    // thing bounding it. Nothing has been clobbered yet, so the too-deep path
+    // can just unwind.
+    mov(rax, (std::uint64_t)vm_->stack_limit);
+    cmp(rsp, rax);
+    jb(deep_, T_NEAR);
     if (framesize) sub(rsp, framesize);
     for (int i = 0; i < (int)used_callee.size(); ++i)
       mov(save_mem(i), used_callee[i]);
@@ -630,6 +642,16 @@ class MethodCode : public Xbyak::CodeGenerator {
       pop(rbp);
       ret();
     };
+    Xbyak::Label body;
+    jmp(body, T_NEAR);
+    L(deep_);                 // out of line: never taken until it matters
+    mov(rdi, (std::uint64_t)(std::uintptr_t)vm_);
+    mov(rax, (std::uint64_t)(std::uintptr_t)&jit_stack_exhausted);
+    call(rax);
+    xor_(eax, eax);           // the caller unwinds on the latched error
+    pop(rbp);
+    ret();
+    L(body);
 
     for (int pc = 0; pc < (int)code.code.size(); ++pc) {
       if (!reach.count(pc)) continue;
@@ -744,7 +766,8 @@ class MethodCode : public Xbyak::CodeGenerator {
   std::vector<Xbyak::Reg64> arg_regs_;
   Alloc alloc_;
   int save_n_ = 0;
-  Xbyak::Label entry_;
+  VM* vm_ = nullptr;
+  Xbyak::Label entry_, deep_;
 };
 
 // The object-capable method compiler.
@@ -993,6 +1016,11 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     L(entry_);
     push(rbx); push(r12); push(r13); push(r14); push(r15); push(rbp);
     sub(rsp, 24);
+    // Same machine-stack bound as the integer compiler; entry_bail_ hands the
+    // whole frame back to the interpreter, which counts its own depth.
+    mov(rax, (std::uint64_t)vm_->stack_limit);
+    cmp(rsp, rax);
+    jb(entry_bail_, T_NEAR);
     mov(r12, rdi);  // frame array
     mov(rbx, rsi);  // VM*
     mov(qword[rsp + 0], rdx);  // Globals*
@@ -1608,7 +1636,7 @@ class MethodJIT {
         return run_mixed(*slot, code, callee, regs, arg_base, argc, out);
       }
       auto cm = std::make_unique<CompiledMethod>();
-      cm->code = std::make_unique<MethodCode>(*code, *reach, argc);
+      cm->code = std::make_unique<MethodCode>(*code, *reach, argc, &vm_);
       if (Xbyak::GetError()) {
         Xbyak::ClearError();
         blacklist_.insert(key);

@@ -114,7 +114,7 @@ class TieredJIT {
       }
       auto reach = mdetail::feasible(*job.code, 6);
       if (!reach) continue;
-      auto gen = std::make_unique<MethodCode>(*job.code, *reach, job.argc);
+      auto gen = std::make_unique<MethodCode>(*job.code, *reach, job.argc, &vm_);
       if (Xbyak::GetError()) { Xbyak::ClearError(); continue; }
       void* fn = gen->entry_addr();
       std::unique_lock lk(install_mtx_);

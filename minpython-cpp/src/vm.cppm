@@ -82,6 +82,20 @@ inline bool value_equal(const Value& a, const Value& b) {
 
 class VM {
  public:
+  // Native code recurses on the machine stack, where nothing bounds it and
+  // running off the end is a segfault rather than an error. Record roughly
+  // where the stack was when the VM was built; compiled entry points refuse to
+  // start once rsp has fallen this far below it, and hand the call back to the
+  // interpreter, whose own depth limit turns it into a clean error.
+  static constexpr std::uintptr_t kNativeStackBudget = 4u << 20;
+  std::uintptr_t stack_limit = 0;
+  VM() {
+    char probe = 0;
+    auto here = (std::uintptr_t)&probe;
+    stack_limit = here > kNativeStackBudget ? here - kNativeStackBudget : 0;
+    (void)probe;
+  }
+
   Globals globals;
   Diag diag;
   bool profile = true;
@@ -449,6 +463,18 @@ class VM {
       auto* co = const_cast<CodeObject*>(code);
       for (int i = 0; i < argc && i < (int)co->param_tags.size(); ++i)
         co->param_tags[i] |= tag_bit(regs[arg_base + i]);
+    }
+    // A nested call is a nested C++ call, so runaway recursion would take the
+    // machine stack down with it. Bound it by the same budget the compiled
+    // entry points use, and report it rather than crashing. Native frames are
+    // much smaller than interpreter ones, so a compiled tier gets further into
+    // a deep recursion before it trips -- the budget is the honest resource,
+    // not a portable depth count.
+    char probe = 0;
+    if ((std::uintptr_t)&probe < stack_limit) {
+      diag.fail(std::format("maximum recursion depth exceeded calling {}()",
+                            code->name));
+      return Value::none();
     }
     if (on_call) {
       Value out;
