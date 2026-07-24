@@ -263,6 +263,16 @@ inline bool mixed_inline_bin(Op op) {
          op == Op::RShift;
 }
 
+// Does the recorded feedback say this site is worth an inline integer path?
+// No feedback at all (never executed, or collection off) -> speculate int.
+inline bool int_site(const CodeObject& code, int pc, bool two) {
+  if (pc >= (int)code.feedback.size()) return true;
+  const SiteFeedback& f = code.feedback[pc];
+  if (f.tags_b == 0 && f.tags_c == 0) return true;
+  if (!only_int_like(f.tags_b)) return false;
+  return !two || f.tags_c == 0 || only_int_like(f.tags_c);
+}
+
 // Which slots are *provably* int-like on entry to each pc -- a forward "must"
 // analysis (intersection at merges). The object-capable compiler uses it to drop
 // redundant type guards: once a value has been guarded (or produced by an int
@@ -277,7 +287,14 @@ inline std::unordered_map<int, std::unordered_set<int>> known_int_slots(
   for (int pc : reach) in[pc] = universe;
   in[0] = seed;  // parameters the entry guard has already pinned down
 
-  auto transfer = [&](const std::unordered_set<int>& s, const Instr& ins) {
+  // A guard that fails does not end the compiled region: it jumps to an
+  // out-of-line slow path that calls the interpreter's helper and then rejoins.
+  // So "we guarded it here" says nothing about the merge point *after* the
+  // instruction -- only about the fast path, which the slow path merges into.
+  // An inline result is therefore known only when the slow path is provably
+  // unreachable, i.e. when every operand was already known.
+  auto transfer = [&](const std::unordered_set<int>& s, int pc) {
+    const Instr& ins = code.code[pc];
     std::unordered_set<int> o = s;
     Op op = ins.op;
     if (op == Op::LoadConst) {
@@ -285,18 +302,21 @@ inline std::unordered_map<int, std::unordered_set<int>> known_int_slots(
       else o.erase(ins.a);
     } else if (op == Op::Move) {
       if (s.count(ins.b)) o.insert(ins.a); else o.erase(ins.a);
-    } else if (op == Op::LoadGlobal || op == Op::Call || op == Op::Subscr) {
-      o.erase(ins.a);            // result type unknown
     } else if (op == Op::Len) {
       o.insert(ins.a);           // always an int
     } else if (mixed_inline_bin(op) || is_cmpop(op)) {
-      o.insert(ins.b); o.insert(ins.c);  // guarded here, so known after
-      o.insert(ins.a);
+      if (int_site(code, pc, true) && s.count(ins.b) && s.count(ins.c))
+        o.insert(ins.a);
+      else
+        o.erase(ins.a);
     } else if (is_unaryop(op)) {
-      o.insert(ins.b);
-      o.insert(ins.a);
-    } else if (op == Op::JumpIfFalse || op == Op::JumpIfTrue) {
-      o.insert(ins.a);
+      if (s.count(ins.b)) o.insert(ins.a); else o.erase(ins.a);
+    } else if (op == Op::JumpIfFalse || op == Op::JumpIfTrue ||
+               op == Op::StoreGlobal || op == Op::Jump || op == Op::Return ||
+               op == Op::Print) {
+      // no destination register
+    } else {
+      o.erase(ins.a);            // Call / Subscr / MakeList / ... : unknown
     }
     return o;
   };
@@ -307,7 +327,7 @@ inline std::unordered_map<int, std::unordered_set<int>> known_int_slots(
   while (changed) {
     changed = false;
     for (int pc : asc) {
-      auto out = transfer(in[pc], code.code[pc]);
+      auto out = transfer(in[pc], pc);
       for (int s : successors(code, pc)) {
         auto it = in.find(s);
         if (it == in.end()) continue;
@@ -315,6 +335,90 @@ inline std::unordered_map<int, std::unordered_set<int>> known_int_slots(
         for (int v : it->second)
           if (out.count(v)) merged.insert(v);
         if (merged != it->second) { it->second = std::move(merged); changed = true; }
+      }
+    }
+  }
+  return in;
+}
+
+// Which *exact* tag the frame array is known to already hold for each slot, on
+// entry to each pc. Absent slot = unknown. A forward must-analysis again, but
+// over exact tags rather than the int-like/not question above.
+//
+// This exists to kill redundant tag stores. Frames are tagged, so a naive
+// compiler writes a tag byte after every single result -- and in a tight
+// integer loop that is most of the memory traffic, even though the byte being
+// written is nearly always the byte that is already there. Skipping a store
+// whose value the array already holds leaves memory bit-for-bit identical, so
+// nothing else -- GC, bail-out, flush -- needs to know this pass ran.
+using TagMap = std::unordered_map<int, int>;
+
+inline std::unordered_map<int, TagMap> mem_tags(
+    const CodeObject& code, const std::unordered_set<int>& reach,
+    const std::unordered_map<int, std::unordered_set<int>>& known) {
+  auto is_known = [&](int pc, int slot) {
+    auto it = known.find(pc);
+    return it != known.end() && it->second.count(slot) > 0;
+  };
+
+  auto transfer = [&](TagMap s, int pc) {
+    const Instr& ins = code.code[pc];
+    Op op = ins.op;
+    auto set = [&](Tag t) { s[ins.a] = (int)t; };
+    // Same slow-path-rejoin caveat as known_int_slots: an inline result has a
+    // statically known tag only when the slow path cannot be reached.
+    bool sure = int_site(code, pc, true) && is_known(pc, ins.b) &&
+                (is_cmpop(op) || mixed_inline_bin(op) ? is_known(pc, ins.c)
+                                                      : true);
+    if (op == Op::LoadConst) {
+      set(code.consts[ins.b].tag);
+    } else if (op == Op::Move) {
+      auto it = s.find(ins.b);
+      if (it != s.end()) s[ins.a] = it->second; else s.erase(ins.a);
+    } else if (op == Op::Len) {
+      set(Tag::Int);             // both the inline path and the helper agree
+    } else if (mixed_inline_bin(op) || is_cmpop(op)) {
+      if (sure) set(is_cmpop(op) ? Tag::Bool : Tag::Int); else s.erase(ins.a);
+    } else if (is_unaryop(op)) {
+      if (sure) set(op == Op::Not ? Tag::Bool : Tag::Int); else s.erase(ins.a);
+    } else if (op == Op::JumpIfFalse || op == Op::JumpIfTrue ||
+               op == Op::StoreGlobal || op == Op::Jump || op == Op::Return ||
+               op == Op::Print) {
+      // no destination register
+    } else {
+      s.erase(ins.a);
+    }
+    return s;
+  };
+
+  // Optimistic init: unvisited blocks are top, and top meets to the other side.
+  std::unordered_map<int, TagMap> in;
+  std::unordered_set<int> seen{0};
+  in[0] = {};   // entry: parameters carry whatever the caller passed
+
+  std::vector<int> asc(reach.begin(), reach.end());
+  std::sort(asc.begin(), asc.end());
+  bool changed = true;
+  while (changed) {
+    changed = false;
+    for (int pc : asc) {
+      if (!seen.count(pc)) continue;
+      TagMap out = transfer(in[pc], pc);
+      for (int s : successors(code, pc)) {
+        if (!reach.count(s)) continue;
+        if (!seen.count(s)) {
+          seen.insert(s);
+          in[s] = out;
+          changed = true;
+          continue;
+        }
+        TagMap& cur = in[s];
+        TagMap merged;
+        for (auto& [slot, t] : cur) {
+          auto it = out.find(slot);
+          if (it != out.end() && it->second == t) merged.emplace(slot, t);
+        }
+        if (merged != cur) { cur = std::move(merged); changed = true; }
       }
     }
   }
@@ -665,6 +769,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
     n_regs_ = code.n_regs;
     int_params_ = mdetail::int_params(code);
     known_ = mdetail::known_int_slots(code, reach, int_params_);
+    mem_ = mdetail::mem_tags(code, reach, known_);
     allocate(code, reach);
     emit(code, reach);
     ready();
@@ -765,6 +870,26 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   // the interpreter, which knows what `+` on two strings means.
   // Does this site still need a runtime type check, or has the analysis already
   // pinned the slot down?
+  // What the frame array is already known to hold for `slot` on entry to `pc`.
+  // Only valid for the function's own body: an inlined region's pcs are the
+  // callee's, so the analysis does not apply (off_ != 0).
+  std::optional<Tag> mem_tag(int pc, int slot) const {
+    if (off_ != 0) return std::nullopt;
+    auto it = mem_.find(pc);
+    if (it == mem_.end()) return std::nullopt;
+    auto s = it->second.find(slot);
+    if (s == it->second.end()) return std::nullopt;
+    return (Tag)s->second;
+  }
+  // Write a slot's tag -- unless the array demonstrably holds that byte already,
+  // which in a tight loop is nearly always. Eliding leaves memory unchanged, so
+  // no other part of the runtime can tell the difference.
+  void set_tag(int pc, int slot, Tag t) {
+    if (mem_tag(pc, slot) == t) { n_tags_elided_++; return; }
+    n_tags_++;
+    mov(tg(slot), (int)t);
+  }
+
   bool needs_guard(int pc, int slot) const {
     auto it = known_.find(pc);
     return !(it != known_.end() && it->second.count(slot));
@@ -789,11 +914,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   // Does the recorded feedback say this site is worth an inline integer path?
   // No feedback at all (never executed, or collection off) -> speculate int.
   static bool int_site(const CodeObject& code, int pc, bool two) {
-    if (pc >= (int)code.feedback.size()) return true;
-    const SiteFeedback& f = code.feedback[pc];
-    if (f.tags_b == 0 && f.tags_c == 0) return true;
-    if (!only_int_like(f.tags_b)) return false;
-    return !two || f.tags_c == 0 || only_int_like(f.tags_c);
+    return mdetail::int_site(code, pc, two);
   }
   // Has this site ever seen a List? If not, the inline list path is dead weight.
   static bool list_site(const CodeObject& code, int pc) {
@@ -819,10 +940,14 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
 
   // Move between VM slots, honouring hoisting: the tag travels through memory
   // (it always lives there), the payload through the register file.
-  void move_value(int dst, int src) {
+  void move_value(int pc, int dst, int src) {
     using namespace Xbyak::util;
-    mov(al, tg(src));
-    mov(tg(dst), al);
+    if (auto t = mem_tag(pc, src)) {
+      set_tag(pc, dst, *t);      // constant: no round trip through memory
+    } else {
+      mov(al, tg(src));
+      mov(tg(dst), al);
+    }
     if (has_reg(dst) && has_reg(src)) {          // straight register copy
       if (reg(dst).getIdx() != reg(src).getIdx()) mov(reg(dst), reg(src));
     } else {
@@ -900,7 +1025,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           if (k.is_int_like()) {          // the common case: just an immediate
             if (has_reg(x)) mov(reg(x), k.i);   // straight into its register
             else { mov(rax, k.i); mov(val(x), rax); }
-            mov(tg(x), (int)k.tag);
+            set_tag(pc, x, k.tag);
           } else {                        // str / None: copy the whole Value
             mov(rcx, (std::uint64_t)(std::uintptr_t)&code.consts[y]);
             mov(rax, qword[rcx]);
@@ -910,7 +1035,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           }
           break;
         }
-        case Op::Move: move_value(x, y); break;
+        case Op::Move: move_value(pc, x, y); break;
 
         case Op::LoadGlobal:
           flush_all();
@@ -954,7 +1079,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
             default: ld(rcx, z); sar(acc, cl); break;
           }
           if (acc.getIdx() == rax.getIdx()) st(x);
-          mov(tg(x), (int)Tag::Int);
+          set_tag(pc, x, Tag::Int);
           L(done);
           {
             Op o = ins.op;
@@ -990,7 +1115,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           }
           movzx(eax, al);
           st(x);
-          mov(tg(x), (int)Tag::Bool);
+          set_tag(pc, x, Tag::Bool);
           L(done);
           {
             Op o = ins.op;
@@ -1012,7 +1137,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
           else if (ins.op == Op::Invert) not_(rax);
           else if (ins.op == Op::Not) { test(rax, rax); sete(al); movzx(eax, al); }
           st(x);
-          mov(tg(x), ins.op == Op::Not ? (int)Tag::Bool : (int)Tag::Int);
+          set_tag(pc, x, ins.op == Op::Not ? Tag::Bool : Tag::Int);
           jmp(done, T_NEAR);
           L(slow);
           flush_all();
@@ -1039,7 +1164,7 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
             sub(rax, rdx);
             sar(rax, 4);
             st(x);
-            mov(tg(x), (int)Tag::Int);
+            set_tag(pc, x, Tag::Int);
             jmp(done, T_NEAR);
           }
           L(slow);
@@ -1175,11 +1300,25 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
         Xbyak::Label next;
         cmp(ecx, t);
         jne(next, T_NEAR);
-        // OSR is a third edge into this header: verify what the analysis was
-        // allowed to assume here, or hand the loop back to the interpreter.
+        // OSR is a third edge into this header, and neither analysis modelled
+        // it -- so verify here what they were allowed to assume, or hand the
+        // loop back to the interpreter. Paid once per OSR entry.
+        std::unordered_set<int> exact;
+        auto mt = mem_.find(t);
+        if (mt != mem_.end()) {
+          std::vector<std::pair<int, int>> v(mt->second.begin(),
+                                             mt->second.end());
+          std::sort(v.begin(), v.end());
+          for (auto& [sl, tag] : v) {
+            exact.insert(sl);
+            cmp(tg(sl), tag);
+            jne(osr_bail_, T_NEAR);
+          }
+        }
         auto it = known_.find(t);
         if (it != known_.end())
           for (int sl : sorted(it->second)) {
+            if (exact.count(sl)) continue;   // pinned exactly just above
             Xbyak::Label ok;
             mov(al, tg(sl));
             cmp(al, (int)Tag::Int);
@@ -1296,6 +1435,8 @@ class MixedMethodCode : public Xbyak::CodeGenerator {
   VM* vm_ = nullptr;
   const Object* self_obj_ = nullptr;
   std::unordered_map<int, std::unordered_set<int>> known_;
+  std::unordered_map<int, mdetail::TagMap> mem_;
+  int n_tags_ = 0, n_tags_elided_ = 0;
 
  public:
   int n_guards_ = 0, n_guards_elided_ = 0;
