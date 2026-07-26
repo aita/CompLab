@@ -1,0 +1,15 @@
+[package]
+name = "copypatch"
+version = "0.1.0"
+edition = "2021"
+description = "A tiny dynamically-typed language with a bytecode VM and a copy-and-patch baseline JIT"
+
+[dependencies]
+nom = "7.1"
+libc = "0.2"
+
+[build-dependencies]
+object = { version = "0.36", default-features = false, features = ["read_core", "elf", "std"] }
+
+[profile.release]
+debug = true
