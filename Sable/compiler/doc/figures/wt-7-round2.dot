@@ -1,7 +1,9 @@
 // The graph the second round of the worked example starts from, after the
 // spilled v0 has been rewritten.  doc/regalloc.md section 7, step 7.
-// Straight out of tests/walkthrough.exe, like the wt-1..6 panels; the layout
-// is its own because this is a different graph -- v0 is isolated now.
+// Straight out of tests/walkthrough.exe, like the wt-1..6 panels, with one
+// thing left off: v0 lives at 0(sp) now and is in none of the instructions, so
+// it is not a node.  The allocator still has a row for the index and colours
+// it at the end, which means nothing; see doc/regalloc.md step 8.
 // Render with ./render.sh (needs graphviz).
 graph wt2 {
   layout = neato;
@@ -20,7 +22,6 @@ graph wt2 {
   v9 [label = <v9<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">2</FONT>>, fillcolor = "#dafbe1", color = "#1a7f37", penwidth = 2 pos = "2.95,0.95!"];
   v7 [label = <v7<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "2.15,-0.95!"];
   v6 [label = <v6<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">2</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "3.6,-2.55!"];
-  v0 [label = <v0<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">0</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "-3.5,2.3!"];
   v8 [label = <v8<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">0</FONT>>, fillcolor = "#dafbe1", color = "#1a7f37", penwidth = 2 pos = "-2.3,2.9!"];
   v1 -- v2;
   v1 -- v3;
