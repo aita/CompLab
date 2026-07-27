@@ -42,6 +42,13 @@ type report = {
 let no_report () =
   { rounds = 0; moves_total = 0; moves_coalesced = 0; spill_slots = 0; spilled = [] }
 
+(* Set by a tool that wants to watch the loop run.  doc/regalloc.md walks
+   through one function step by step out of this, and tests/walkthrough.ml is
+   what produces it. *)
+let trace : (string -> unit) ref = ref (fun _ -> ())
+let say fmt = Printf.ksprintf (fun s -> !trace s) fmt
+let name = Riscv.name_of_reg
+
 let pick set = Bitset.min_elt set
 
 let allocate ?(report = no_report ()) (func : Riscv.func) =
@@ -60,6 +67,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
 
   let rec round () =
     report.rounds <- report.rounds + 1;
+    say "--- round %d" report.rounds;
     if report.rounds > 32 then
       failwith "Regalloc: allocation failed to converge (this is a compiler bug)";
     let n = func.Riscv.num_regs in
@@ -168,6 +176,14 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
           (List.rev b.body))
       func.Riscv.blocks;
     let moves = Array.of_list (List.rev !moves) in
+    (* The graph itself, for whoever is watching: the figures in
+       doc/regalloc.md are drawn from this rather than worked out by hand. *)
+    for u = Riscv.num_physical to n - 1 do
+      let ns = Bitset.fold (fun r acc -> name r :: acc) interfere.(u) [] in
+      say "graph %s degree %d: %s" (name u) degree.(u)
+        (String.concat " " (List.rev ns))
+    done;
+    Array.iteri (fun i (d, s) -> say "graph move %d: %s -- %s" i (name d) (name s)) moves;
 
     (* ------------------------------------------------------- primitives *)
     (* The neighbours still in the graph, and the moves still live.  Both used
@@ -221,6 +237,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
 
     let simplify () =
       let node = pick simplify_worklist in
+      say "simplify %s (degree %d)" (name node) degree.(node);
       Bitset.remove simplify_worklist node;
       select_stack := node :: !select_stack;
       stacked.(node) <- true;
@@ -277,23 +294,30 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
       let x = alias_of dst and y = alias_of src in
       let u, v = if precoloured y then (y, x) else (x, y) in
       if u = v then begin
+        say "coalesce %s = %s already, move dropped" (name u) (name v);
         incr coalesced_count;
         add_to_worklist u
       end
       else if precoloured v || interferes u v then begin
         (* The two ends are live at the same time, or both are machine
            registers: this move has to stay. *)
+        say "constrained %s -- %s, move stays" (name u) (name v);
         add_to_worklist u;
         add_to_worklist v
       end
       else if
         (precoloured u && george u v) || ((not (precoloured u)) && briggs u v)
       then begin
+        say "coalesce %s and %s into %s (%s)" (name u) (name v) (name u)
+          (if precoloured u then "George" else "Briggs");
         incr coalesced_count;
         combine u v;
         add_to_worklist u
       end
-      else Bitset.add active_moves m
+      else begin
+        say "postpone the move %s -- %s, neither test passes" (name u) (name v);
+        Bitset.add active_moves m
+      end
     in
 
     let freeze_moves u =
@@ -314,6 +338,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
     in
     let freeze () =
       let node = pick freeze_worklist in
+      say "freeze %s (degree %d): give up its moves" (name node) degree.(node);
       Bitset.remove freeze_worklist node;
       Bitset.add simplify_worklist node;
       freeze_moves node
@@ -337,6 +362,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
           spill_worklist None
         |> Option.get
       in
+      say "select_spill %s (degree %d, cost %.2f)" (name node) degree.(node) (cost node);
       Bitset.remove spill_worklist node;
       Bitset.add simplify_worklist node;
       freeze_moves node
@@ -355,10 +381,14 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
               let w = alias_of w in
               if coloured.(w) || precoloured w then Bitset.remove available colour.(w))
             interfere.(node);
-          if Bitset.is_empty available then Bitset.add spilled_nodes node
+          if Bitset.is_empty available then begin
+            say "assign %s: no colour left -- it spills" (name node);
+            Bitset.add spilled_nodes node
+          end
           else begin
             coloured.(node) <- true;
-            colour.(node) <- pick available
+            colour.(node) <- pick available;
+            say "assign %s -> %s" (name node) (name colour.(node))
           end)
         !select_stack;
       for node = 0 to n - 1 do
@@ -384,6 +414,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
       apply_colours colour
     end
     else begin
+      say "rewrite: spilled values get stack slots, the round starts over";
       rewrite spilled_nodes;
       round ()
     end

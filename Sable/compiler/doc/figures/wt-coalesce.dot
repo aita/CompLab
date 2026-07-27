@@ -1,0 +1,39 @@
+// One state of the worked example in doc/regalloc.md, section 4.  K is 3.
+// The graph, the degrees and the order of the steps all come from
+// tests/walkthrough.exe; nothing here was worked out by hand.
+//
+// The wt-*.dot files share the style block below; keep them in step.
+// Render with ./render.sh (needs graphviz).
+graph wt {
+  layout = neato;
+  overlap = false;
+  splines = true;
+  bgcolor = "transparent";
+  sep = "+8";
+  node [shape = circle, style = filled, fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 11, width = 0.62, fixedsize = true];
+  edge [color = "#57606a", dir = none, fontname = "Helvetica", fontsize = 9];
+  v0 [label = <v0<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">4</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "0,1.5!"];
+  v1 [label = <v1<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">5</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "1.7,1.5!"];
+  v2 [label = <v2<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "-0.9,0.2!"];
+  v3 [label = <v3<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "0.5,0!"];
+  v5 [label = <v54<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#0969da", penwidth = 2 pos = "1.6,3!"];
+  v6 [label = <<FONT COLOR="#8c959f">v6</FONT>>, style = "filled,dashed", fillcolor = "#ffffff", color = "#c9d1d9" pos = "3.4,2.4!"];
+  v7 [label = <v7<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">2</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "3,3.6!"];
+  v0 -- v1 [color = "#57606a"];
+  v0 -- v2 [color = "#57606a"];
+  v0 -- v3 [color = "#57606a"];
+  v0 -- v5 [color = "#57606a"];
+  v0 -- v5 [color = "#57606a"];
+  v1 -- v2 [color = "#57606a"];
+  v1 -- v3 [color = "#57606a"];
+  v1 -- v5 [color = "#57606a"];
+  v1 -- v5 [color = "#57606a"];
+  v1 -- v6 [color = "#d8dee4", style = dashed];
+  v1 -- v7 [color = "#57606a"];
+  v2 -- v3 [color = "#57606a"];
+  v5 -- v7 [color = "#57606a"];
+  v6 -- v7 [color = "#d8dee4", style = dashed];
+  v7 -- v0 [style = dashed, color = "#0969da", label = "mv", fontcolor = "#0969da"];
+}

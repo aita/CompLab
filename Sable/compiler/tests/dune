@@ -236,3 +236,13 @@
  (alias runtest)
  (action
   (diff errors.expected errors.out)))
+
+; The worked example in doc/regalloc.md.  Not part of `dune test`: it exists so
+; the document can be regenerated, and it drives the allocator directly rather
+; than through the compiler, with a machine too small for the command line.
+(executable
+ (name walkthrough)
+ (modules walkthrough)
+ (libraries sable)
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))

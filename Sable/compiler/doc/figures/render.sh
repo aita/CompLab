@@ -16,6 +16,8 @@
 set -e
 cd "$(dirname "$0")"
 for source in *.dot; do
+  # `dot` honours a `layout = neato` line inside the file, so one
+  # command covers both engines.
   dot -Tpng -Gdpi=144 "$source" -o "${source%.dot}.png"
   echo "${source%.dot}.png"
 done

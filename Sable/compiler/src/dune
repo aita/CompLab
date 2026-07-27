@@ -1,5 +1,19 @@
+; The passes are a library so that something other than the command line can
+; drive them -- tests/walkthrough.ml runs the allocator on its own, on a
+; machine smaller than `-nregs` will allow.  `wrapped false` keeps the module
+; names flat, so `Regalloc` is `Regalloc` from either side.
+(library
+ (name sable)
+ (wrapped false)
+ (modules
+  (:standard \ sablec))
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
+
 (executable
  (name sablec)
+ (modules sablec)
+ (libraries sable)
  (flags
   (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
 
