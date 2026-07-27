@@ -83,6 +83,22 @@ let rec free_vars = function
     Ident.Set.add y
       (Ident.Set.diff (free_vars e) (Ident.Set.of_list (List.map fst xts)))
 
+(* Build `let x = e1 in e2` associated to the right: if e1 binds anything
+   itself, those bindings come out in front rather than nesting inside.
+
+   Every binding this module makes goes through here, so the form it hands on
+   never has a `let` as the right-hand side of a `let`.  That is one of the two
+   conditions A-normal form asks for, and the one worth having: no pass after
+   this has to walk into a binding position looking for more bindings.  (The
+   other condition, that a conditional only appears in tail position, is not
+   met and does not need to be -- selection emits a join block.) *)
+let rec let_bind xt e1 e2 =
+  match e1 with
+  | Let (yt, a, b) -> Let (yt, a, let_bind xt b e2)
+  | Let_rec (fds, b) -> Let_rec (fds, let_bind xt b e2)
+  | Let_tuple (yts, y, b) -> Let_tuple (yts, y, let_bind xt b e2)
+  | _ -> Let (xt, e1, e2)
+
 (* [insert_let (e, t) k] names [e] unless it is already a variable, then
    continues with that name. *)
 let insert_let (e, t) k =
@@ -91,7 +107,7 @@ let insert_let (e, t) k =
   | _ ->
     let x = Ident.fresh "t" in
     let body, t' = k x in
-    (Let ((x, t), e, body), t')
+    (let_bind (x, t) e body, t')
 
 let external_result name =
   match List.assoc_opt name Typing.externals with
@@ -141,7 +157,7 @@ let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
   | Syntax.Let ((x, t), e1, e2) ->
     let e1', _ = normalize_exp env e1 in
     let e2', t2 = normalize_exp (Ident.Map.add x t env) e2 in
-    (Let ((x, t), e1', e2'), t2)
+    (let_bind (x, t) e1' e2', t2)
   | Syntax.Var x -> (Var x, Ident.Map.find x env)
   | Syntax.Let_rec (fds, body) ->
     let env =

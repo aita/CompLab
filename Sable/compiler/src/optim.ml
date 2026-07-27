@@ -1,11 +1,7 @@
 (* A small optimizer on A-normal form.
 
-   Three passes, run a few times over:
+   Two passes, run a few times over:
 
-     flatten_lets   `let x = (let y = e1 in e2) in e3` becomes
-                    `let y = e1 in let x = e2 in e3`, undoing the nesting the
-                    A-normalizer introduces and putting more of the program
-                    within reach of the other two passes.
      propagate      copy propagation, constant folding, and folding a branch
                     whose operands are both known.
      eliminate      drop a `let` whose name is unused and whose right-hand side
@@ -17,26 +13,6 @@
    trees Match_compile emits shed the field loads their branch never reads. *)
 
 open Anf
-
-(* ------------------------------------------------------- flatten_lets *)
-
-let rec flatten_lets = function
-  | If_eq (x, y, e1, e2) -> If_eq (x, y, flatten_lets e1, flatten_lets e2)
-  | If_le (x, y, e1, e2) -> If_le (x, y, flatten_lets e1, flatten_lets e2)
-  | Let (xt, e1, e2) ->
-    (* Push the outer binding past everything the inner expression binds. *)
-    let rec rebuild = function
-      | Let (yt, e3, e4) -> Let (yt, e3, rebuild e4)
-      | Let_rec (fds, e) -> Let_rec (fds, rebuild e)
-      | Let_tuple (yts, z, e) -> Let_tuple (yts, z, rebuild e)
-      | e -> Let (xt, e, flatten_lets e2)
-    in
-    rebuild (flatten_lets e1)
-  | Let_rec (fds, e) ->
-    Let_rec
-      (List.map (fun fd -> { fd with body = flatten_lets fd.body }) fds, flatten_lets e)
-  | Let_tuple (xts, y, e) -> Let_tuple (xts, y, flatten_lets e)
-  | e -> e
 
 (* ---------------------------------------------------------- propagate *)
 
@@ -83,8 +59,9 @@ let rec propagate env exp =
     | Int n ->
       (* Keep the binding -- some uses may still need a register -- but
          remember the value.  If every use folds, elimination collects it. *)
-      Let ((x, t), e1, propagate { env with consts = Ident.Map.add x n env.consts } e2)
-    | _ -> Let ((x, t), e1, propagate env e2))
+      Anf.let_bind (x, t) e1
+        (propagate { env with consts = Ident.Map.add x n env.consts } e2)
+    | _ -> Anf.let_bind (x, t) e1 (propagate env e2))
   | Let_rec (fds, e) ->
     Let_rec
       (List.map (fun fd -> { fd with body = propagate env fd.body }) fds, propagate env e)
@@ -124,7 +101,7 @@ let rec eliminate exp =
     let e1, free1, impure1 = eliminate e1 in
     let e2, free2, impure2 = eliminate e2 in
     if impure1 || Ident.Set.mem x free2 then
-      ( Let ((x, t), e1, e2),
+      ( Anf.let_bind (x, t) e1 e2,
         Ident.Set.union free1 (Ident.Set.remove x free2),
         impure1 || impure2 )
     else (e2, free2, impure2)
@@ -168,12 +145,17 @@ let eliminate exp = let e, _, _ = eliminate exp in e
 
 (* ------------------------------------------------------------- driver *)
 
-(* A fixed number of rounds rather than a fixed point: the terms carry mutable
+(* `flatten_lets` used to run here, re-associating what A-normalization left
+   nested.  Anf.let_bind builds every binding associated in the first place and
+   the two passes below rebuild theirs through it, so there is nothing left to
+   repair.
+
+   A fixed number of rounds rather than a fixed point: the terms carry mutable
    type variables, so structural equality on them is not something to lean on,
    and the passes converge in two or three rounds anyway. *)
 let optimize ~rounds exp =
   let rec loop n exp =
     if n <= 0 then exp
-    else loop (n - 1) (eliminate (propagate nothing_known (flatten_lets exp)))
+    else loop (n - 1) (eliminate (propagate nothing_known exp))
   in
   loop rounds exp
