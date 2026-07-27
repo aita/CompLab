@@ -7,8 +7,8 @@
 
 前者は [Maranget の *Warnings for pattern matching*][warnings]、後者は同じ著者の
 [*Compiling pattern matching to good decision trees*][trees] に従っています。
-2つのパスは行列を操作する部品を共有していて、`specialize`・`default_matrix`・
-`complete_signature` は `match_check.ml` に置いて `match_compile.ml` から使います。
+2つのパスは行列を操作する部品を共有します。`specialize`・`default_matrix`・
+`complete_signature` は `match_check.ml` に置き、`match_compile.ml` から使います。
 
 例はすべて実際にコンパイラに通したものです。題材は主にこれを使います。
 
@@ -77,8 +77,8 @@ let rec scan seen = function
 `score` は `match (c, s) with` なので、最初の列はタプル1つです。タプルの
 コンストラクタは1つしかないので `complete_signature` は即座に完全と答え、
 **判定を1つも出さずに**2列（`colour` と `shape`）へ開きます。`colour` の列には
-`Red`・`Green`・`Blue` が、`shape` の列には `Dot`・`Circle`・`Rect` が全部出るので、
-どちらも完全です — つまりこの `match` に既定の枝は要りません。
+`Red`・`Green`・`Blue` が、`shape` の列には `Dot`・`Circle`・`Rect` が全部出ます。
+どちらも完全なので、この `match` に既定の枝は要りません。
 
 ## 3. 反例を返す
 
@@ -175,8 +175,8 @@ Warning: this match is not exhaustive; no case matches 2
    it is necessary, so the work is never wasted. *)
 ```
 
-列の選び方はこれだけです。先頭行が見ている列はそのケースに当たるためにどのみち
-調べることになるので、この選び方が無駄になることはありません（Maranget が挙げる
+列の選び方はこれだけです。先頭行が見ている列は、そのケースに当たるためにどのみち
+調べることになります。だからこの選び方が無駄になることはありません（Maranget が挙げる
 ヒューリスティクスのうち一番単純なもの。§9）。
 
 枝ごとに、露出したフィールドを新しい名前に束縛します（`branch`、`match_compile.ml:124`）。
@@ -339,9 +339,9 @@ $ echo $?
 
 - **列の選び方のヒューリスティクスがありません。** 最左の、先頭行が見ている列を
   取るだけです。Maranget の論文は必要性（necessity）に基づく指標をいくつか比較して
-  います。ただし [Scott と Ramsey の測定][heuristics]によれば、人が書いたプログラム
-  では「ほとんどの場合どの指標でも木の大きさは同じ、違っても数％」で、差が出るのは
-  機械生成されたコード（そこでは2〜20倍）です。ここは差し替えやすい場所で、
+  います。ただし [Scott と Ramsey の測定][heuristics]によれば、人が書いた
+  プログラムでは「ほとんどの場合どの指標でも木の大きさは同じ、違っても数％」。差が
+  出るのは機械生成されたコードで、そこでは2〜20倍になります。ここは差し替えやすい場所で、
   `build` の `col` を決める8行（`match_compile.ml:111`）だけが関係します。
 - **タグを毎回読み直します。** `test_for`（`match_compile.ml:82`）が判定ごとに
   `Field (Var occ, 0, _)` を作るので、同じ値のタグが連鎖の各段で `ld` されます。
