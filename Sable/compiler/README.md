@@ -64,6 +64,8 @@ walk (insert (insert Leaf 2) 1); print_newline ()
 | types | `int`, `bool`, `unit`, `string`, `'a list`, tuples, arrays, functions, `type t = A \| B of int * t` |
 | binding | `let`, `let rec ... and ...`, `let (a, b) = e`, `fun x y -> e` |
 | modules | `module M = struct ... end in e`, nested, `M.x`, `M.N.x`, `open M in e` |
+| signatures | `module type S = sig val f : int * int -> bool end in e`, sealing with `module M : S = ...` |
+| functors | `module F (X : S) = struct ... end in e`, applied as `module M = F (Arg)` |
 | control | `if`/`then`/`else` (the `else` may be left out when the branch is `unit`), `e1; e2`, `begin`/`end` |
 | matching | `match e with p -> e \| ...`, over literals, wildcards, variables, tuples, lists and constructors, nested |
 | operators | `+ - * / mod`, `= <> < <= > >=`, `&& \|\| not`, unary `-`, `::`, `^` |
@@ -290,12 +292,17 @@ the same.
 Deliberate, and each one is a place the project could go next.
 
 - No garbage collector; the heap is a bump allocator.
-- Modules are namespaces: there are no signatures and no functors, so nothing
-  can be hidden or abstracted. Sealing a structure would need the inferred
-  scheme checked against a declared one with the signature's variables held
-  rigid, which is a real piece of work and is not here.
-- `type` declarations are global and come before the program, so a module cannot
-  declare one; its constructors would be global anyway.
+- Functors are elaborated, not compiled: `F (Arg)` re-resolves the body with the
+  parameter bound to that argument, so each application costs a copy of the
+  definitions. That is defunctorization, as MLton does it, and it is why
+  functors need no runtime representation. It also means the body is checked per
+  application rather than once, and sees the argument's real types rather than
+  the signature's view of them.
+- Signatures declare values only. `type` declarations are global and come before
+  the program, so a module cannot declare a type — which also means a signature
+  has nothing to make abstract, and there is no sharing to express.
+- Functors take one structure argument and return a structure; no currying, and
+  no functors inside functors.
 - `String.length`, `String.concat`, `String.equal` and `Array.make` are
   recognized by the lexer as whole tokens, so a user module named `String` or
   `Array` cannot override those particular spellings.

@@ -15,6 +15,16 @@ type error in the tail of `::`:
 the constructor `Pair` expects 2 argument(s) but is given 1
 --- duplicate_pattern_var.sbl
 the variable `x` is bound twice in the pattern `Pair (x, x)`
+--- functor_hidden.sbl
+the module `X` has no value `other`
+--- functor_missing.sbl
+the argument of `F` does not match its signature: it has no value `g`
+--- functor_too_specific.sbl
+type error in a signature:
+  expected: ('a -> 'a list)
+  but got:  (int -> int list)
+--- functor_unapplied.sbl
+`F` is a functor; it has to be applied before its contents are used
 --- module_as_value.sbl
 `M.N` is a module, not a value
 --- module_member.sbl
@@ -27,6 +37,8 @@ values as arguments instead.
 type error at the top level (a program must have type unit):
   expected: unit
   but got:  int
+--- sealed.sbl
+the module `M` has no value `hidden`
 --- syntax.sbl
 errors/syntax.sbl:1:18: syntax error at `in'
 --- too_many_args.sbl

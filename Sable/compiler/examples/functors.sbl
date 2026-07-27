@@ -1,0 +1,112 @@
+(* Functors.
+
+   There is no separate compilation here and every application is visible, so
+   `F (Arg)` is elaborated: the functor's body is re-resolved with its parameter
+   bound to that argument, giving the application its own copy of the
+   definitions.  This is defunctorization, the same thing MLton does to a whole
+   program.  Functors therefore need no runtime representation, and nothing
+   after name resolution knows they existed.
+
+   The argument is checked against the signature first, with the signature's own
+   `'a` held rigid: a value has to be at least as general as the signature asks
+   for, never less.
+
+   Functions are uncurried, and so are their types: a two-argument function is
+   `int * int -> bool`, not `int -> int -> bool`, which would be a function
+   returning a function. *)
+
+module type Ordered = sig
+  val below : int * int -> bool
+  val name : string
+end in
+
+(* `<=` compiles to one machine comparison, so it fixes the type of what it
+   compares; an ordering in this language is over `int`, not over `'a`. *)
+module Ascending = struct
+  let name = "ascending"
+  let rec below a b = a <= b
+end in
+
+module Descending = struct
+  let name = "descending"
+  let rec below a b = b <= a
+end in
+
+module Sorting (Order : Ordered) = struct
+  let label = Order.name
+
+  let rec insert x l =
+    match l with
+    | [] -> [ x ]
+    | y :: rest -> if Order.below x y then x :: l else y :: insert x rest
+
+  let rec sort l = match l with [] -> [] | x :: rest -> insert x (sort rest)
+
+  let rec sorted l =
+    match l with
+    | [] -> true
+    | _ :: [] -> true
+    | a :: b :: rest -> if Order.below a b then sorted (b :: rest) else false
+end in
+
+module Up = Sorting (Ascending) in
+module Down = Sorting (Descending) in
+
+let rec show l =
+  match l with
+  | [] -> print_newline ()
+  | x :: rest -> (print_int x; print_char 32; show rest)
+in
+let rec flag b = print_int (if b then 1 else 0); print_char 32 in
+
+let numbers = [ 5; 3; 9; 1; 7 ] in
+print_string Up.label; print_char 32; print_string Down.label; print_newline ();
+show (Up.sort numbers);
+show (Down.sort numbers);
+flag (Up.sorted (Up.sort numbers));
+flag (Down.sorted (Up.sort numbers));
+flag (Down.sorted (Down.sort numbers));
+print_newline ();
+
+(* An argument written on the spot. *)
+module Reversed = Sorting (struct
+  let name = "reversed"
+  let rec below a b = b <= a
+end) in
+show (Reversed.sort numbers);
+
+(* A signature that really is polymorphic.  The argument's `wrap` has to work
+   for every type -- `let rec wrap x = x + 0` would be rejected here -- and the
+   body may then use it at more than one. *)
+module type Wrapper = sig
+  val wrap : 'a -> 'a list
+end in
+
+module Singleton = struct
+  let rec wrap x = [ x ]
+end in
+
+module Pairing (W : Wrapper) = struct
+  let rec two x y = (W.wrap x, W.wrap y)
+end in
+
+module P = Pairing (Singleton) in
+let (texts, more_numbers) = P.two "text" 7 in
+let rec show_strings l =
+  match l with
+  | [] -> print_newline ()
+  | s :: rest -> (print_string s; print_char 32; show_strings rest)
+in
+show_strings texts;
+show more_numbers;
+
+(* Sealing: the signature hides everything it does not mention, so `step` is
+   not reachable as `Counter.step`. *)
+module Counter : sig
+  val next : int -> int
+end = struct
+  let step = 2
+  let rec next n = n + step
+end in
+print_int (Counter.next (Counter.next 0));
+print_newline ()

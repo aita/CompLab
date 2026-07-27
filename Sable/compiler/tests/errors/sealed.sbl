@@ -1,0 +1,5 @@
+module M : sig val visible : int end = struct
+  let visible = 1
+  let hidden = 2
+end in
+print_int M.hidden

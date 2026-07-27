@@ -1,0 +1,4 @@
+module type S = sig val f : int -> int val g : int -> int end in
+module A = struct let rec f x = x end in
+module F (X : S) = struct let rec go n = X.f n end in
+module M = F (A) in print_int (M.go 1)

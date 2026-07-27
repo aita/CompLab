@@ -62,6 +62,7 @@ let check_arity name expected got =
    one-shot `let rec` whose body is the function's own name. *)
 let rec is_value = function
   | Unit | Bool _ | Int _ | Str _ | Var _ | Nil -> true
+  | Annot (e, _) -> is_value e
   | Cons (head, tail) -> is_value head && is_value tail
   | Tuple es -> List.for_all is_value es
   | Constr (_, es) -> List.for_all is_value es
@@ -223,7 +224,12 @@ let rec infer_exp env exp =
     Types.assign info.scrutinee_type tscrutinee;
     Types.assign info.result_type tresult;
     tresult
-  | Qualified _ | Module _ | Open _ ->
+  | Annot (e, declared) ->
+    (* The value must be at least as general as the signature asks for; the
+       signature's own variables are rigid, so they refuse to be pinned down. *)
+    unify_in "in a signature" declared (infer_exp env e);
+    declared
+  | Qualified _ | Module _ | Open _ | Module_type _ | Functor _ ->
     failwith "Typing: modules should have been resolved away by Modules"
   | Field _ | Match_failure _ ->
     failwith "Typing: compiler-generated node reached the type checker"

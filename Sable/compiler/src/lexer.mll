@@ -24,11 +24,14 @@ let () =
       ("match", MATCH);
       ("with", WITH);
       ("array", ARRAY_KW);
+      ("list", LIST_KW);
       ("begin", BEGIN);
       ("end", END);
       ("module", MODULE);
       ("struct", STRUCT);
       ("open", OPEN);
+      ("sig", SIG);
+      ("val", VAL);
       ("true", BOOL true);
       ("false", BOOL false);
     ]
@@ -74,6 +77,7 @@ rule token = parse
   | '(' { LPAREN }
   | ')' { RPAREN }
   | ',' { COMMA }
+  | ':' { COLON }
   | ';' { SEMICOLON }
   | '.' { DOT }
   | '+' { PLUS }
@@ -91,6 +95,7 @@ rule token = parse
   | "&&" { AMPAMP }
   | "||" { BARBAR }
   | '|' { BAR }
+  | '\'' (lower alnum*) as name { TYPEVAR name }
   | (upper alnum*) as name { UIDENT name }
   | (lower alnum*) as name
       { if name = "_" then UNDERSCORE

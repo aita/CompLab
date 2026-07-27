@@ -30,8 +30,12 @@ type t =
   | Str_get of t * t (* s.[i], the byte as an integer *)
   | Nil
   | Cons of t * t
+  | Annot of t * Types.t (* generated: `(e : ty)`, how a signature is checked *)
   | Qualified of string list * Ident.t (* M.x, M.N.x -- resolved away by Modules *)
-  | Module of string * item list * t (* module M = struct .. end in e *)
+  | Module of string * module_exp * t (* module M = <me> in e *)
+  | Module_type of string * signature * t (* module type S = sig .. end in e *)
+  | Functor of string * string * signature * item list * t
+    (* module F (X : S) = struct .. end in e *)
   | Open of string list * t (* open M in e *)
   | Constr of string * t list (* a fully applied constructor *)
   | Match of match_info * t * case list
@@ -40,11 +44,23 @@ type t =
 
 (* The contents of a `struct`.  Modules are a naming discipline and nothing
    else, so these become ordinary nested `let`s; see Modules. *)
+and module_exp =
+  | Mod_struct of item list
+  | Mod_path of string list
+  | Mod_apply of string list * module_exp (* F (Arg) *)
+  | Mod_sealed of module_exp * signature (* (me : S) *)
+
+(* Only `val` items: this language has no module-level type declarations, so a
+   signature has nothing to make abstract. *)
+and signature = Sig_name of string | Sig_values of (Ident.t * Types.t) list
+
 and item =
   | Item_let of (Ident.t * Types.t) * t
   | Item_let_tuple of (Ident.t * Types.t) list * t
   | Item_let_rec of fundef list
-  | Item_module of string * item list
+  | Item_module of string * module_exp
+  | Item_module_type of string * signature
+  | Item_functor of string * string * signature * item list
   | Item_open of string list
 
 and case = { pat : pattern; action : t }

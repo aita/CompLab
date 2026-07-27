@@ -1,0 +1,2 @@
+module F (X : sig val x : int end) = struct let y = X.x end in
+print_int F.y

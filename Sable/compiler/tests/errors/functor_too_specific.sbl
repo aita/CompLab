@@ -1,0 +1,5 @@
+(* `wrap` has to work for every type; this one only works on integers. *)
+module type S = sig val wrap : 'a -> 'a list end in
+module A = struct let rec wrap x = [ x + 0 ] end in
+module F (X : S) = struct let rec go v = X.wrap v end in
+module M = F (A) in print_int 0

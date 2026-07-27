@@ -72,21 +72,27 @@ let nil_label = "sable_list_nil"
 (* The read-only block standing for a constant constructor. *)
 let const_label c = Printf.sprintf "sable_const_%s_%s" c.owner c.cname
 
+(* Every named type a written type mentions has to exist. *)
+let rec check_type where t =
+  match t with
+  | Types.Named n when not (Hashtbl.mem decls n) ->
+    raise (Error (Printf.sprintf "unknown type `%s` %s" n where))
+  | Types.Fun (ts, r) ->
+    List.iter (check_type where) ts;
+    check_type where r
+  | Types.Tuple ts -> List.iter (check_type where) ts
+  | Types.Array t | Types.List t -> check_type where t
+  | _ -> ()
+
 (* A declaration may mention types declared later (or itself), so the check
    that every name resolves happens once all declarations are in. *)
 let check_wellformed () =
-  let rec check where t =
-    match t with
-    | Types.Named n when not (Hashtbl.mem decls n) ->
-      raise
-        (Error (Printf.sprintf "unknown type `%s` in the declaration of `%s`" n where))
-    | Types.Fun (ts, r) ->
-      List.iter (check where) ts;
-      check where r
-    | Types.Tuple ts -> List.iter (check where) ts
-    | Types.Array t -> check where t
-    | _ -> ()
-  in
   Hashtbl.iter
-    (fun _ d -> List.iter (fun c -> List.iter (check d.tyname) c.arg_types) d.constrs)
+    (fun _ d ->
+      List.iter
+        (fun c ->
+          List.iter
+            (check_type (Printf.sprintf "in the declaration of `%s`" d.tyname))
+            c.arg_types)
+        d.constrs)
     decls

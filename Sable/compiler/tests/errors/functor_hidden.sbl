@@ -1,0 +1,5 @@
+(* The body may only use what the signature declares. *)
+module type S = sig val f : int -> int end in
+module A = struct let rec f x = x let rec other x = x end in
+module F (X : S) = struct let rec go n = X.other n end in
+module M = F (A) in print_int (M.go 1)

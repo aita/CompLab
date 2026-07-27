@@ -13,10 +13,23 @@ let lambda args body =
   let f = Ident.fresh "fun" in
   Let_rec ([ { name = typed f; args; body } ], Var f)
 
+(* Variables inside one `val` declaration share a name; the table is cleared
+   between declarations by the sig_items rule below. *)
+let signature_vars : (string, Types.t) Hashtbl.t = Hashtbl.create 8
+
+let signature_variable name =
+  match Hashtbl.find_opt signature_vars name with
+  | Some t -> t
+  | None ->
+    let t = Types.fresh_rigid () in
+    Hashtbl.replace signature_vars name t;
+    t
+
 let base_type = function
   | "int" -> Types.Int
   | "bool" -> Types.Bool
   | "unit" -> Types.Unit
+  | "string" -> Types.String
   | name -> Types.Named name
 
 (* `Node (l, v, r)` parses as an application of `Node` to one parenthesized
@@ -48,13 +61,14 @@ let constr_pattern_args name args =
 %token <string> STRING
 %token <string> UIDENT
 %token LET IN REC AND IF THEN ELSE FUN NOT ARRAY_MAKE
-%token TYPE OF MATCH WITH BAR UNDERSCORE ARRAY_KW
+%token TYPE OF MATCH WITH BAR UNDERSCORE ARRAY_KW LIST_KW
 %token PLUS MINUS AST SLASH PERCENT
 %token EQUAL LESS_GREATER LESS GREATER LESS_EQUAL GREATER_EQUAL
 %token AMPAMP BARBAR
 %token LPAREN RPAREN COMMA SEMICOLON DOT LESS_MINUS ARROW
 %token LBRACKET RBRACKET COLONCOLON CARET STRING_LENGTH
-%token BEGIN END MODULE STRUCT OPEN
+%token BEGIN END MODULE STRUCT OPEN SIG VAL COLON
+%token <string> TYPEVAR
 %token EOF
 
 %right prec_let prec_match
@@ -110,9 +124,16 @@ type_args:
   | simple_type { [ $1 ] }
   | simple_type AST type_args { $1 :: $3 }
 
+(* A signature's type expression.  Each `'a` is a variable of that signature
+   alone, so the same spelling in two `val`s is two different variables. *)
+signature_type:
+  | type_expr { $1 }
+
 simple_type:
+  | TYPEVAR { signature_variable $1 }
   | IDENT { base_type $1 }
   | simple_type ARRAY_KW { Types.Array $1 }
+  | simple_type LIST_KW { Types.List $1 }
   | LPAREN type_expr RPAREN { $2 }
 
 type_expr:
@@ -163,8 +184,14 @@ exp:
   | FUN formal_args ARROW exp %prec prec_let { lambda $2 $4 }
   | LET IDENT EQUAL exp IN exp %prec prec_let { Let (typed $2, $4, $6) }
   | LET REC fundefs IN exp %prec prec_let { Let_rec ($3, $5) }
-  | MODULE UIDENT EQUAL STRUCT items END IN exp %prec prec_let
-      { Module ($2, $5, $8) }
+  | MODULE UIDENT EQUAL module_exp IN exp %prec prec_let { Module ($2, $4, $6) }
+  | MODULE UIDENT COLON signature EQUAL module_exp IN exp %prec prec_let
+      { Module ($2, Mod_sealed ($6, $4), $8) }
+  | MODULE UIDENT LPAREN UIDENT COLON signature RPAREN EQUAL STRUCT items END IN exp
+      %prec prec_let
+      { Functor ($2, $4, $6, $10, $13) }
+  | MODULE TYPE UIDENT EQUAL signature IN exp %prec prec_let
+      { Module_type ($3, $5, $7) }
   | OPEN long_name IN exp %prec prec_let { Open ($2, $4) }
   | LET LPAREN tuple_pat RPAREN EQUAL exp IN exp %prec prec_let
       { Let_tuple ($3, $6, $8) }
@@ -190,6 +217,25 @@ long_name:
   | UIDENT { [ $1 ] }
   | long_name DOT UIDENT { $1 @ [ $3 ] }
 
+module_exp:
+  | STRUCT items END { Mod_struct $2 }
+  | long_name { Mod_path $1 }
+  | long_name LPAREN module_exp RPAREN { Mod_apply ($1, $3) }
+  | LPAREN module_exp COLON signature RPAREN { Mod_sealed ($2, $4) }
+
+signature:
+  | UIDENT { Sig_name $1 }
+  | SIG sig_items END { Sig_values $2 }
+
+sig_items:
+  | (* empty *) { [] }
+  | VAL IDENT COLON start_declaration signature_type sig_items { ($2, $5) :: $6 }
+
+(* An empty rule, so that the reset runs before this declaration's type is
+   parsed rather than after the whole tail of the signature. *)
+start_declaration:
+  | (* empty *) { Hashtbl.reset signature_vars }
+
 items:
   | (* empty *) { [] }
   | item items { $1 :: $2 }
@@ -198,7 +244,12 @@ item:
   | LET IDENT EQUAL exp { Item_let (typed $2, $4) }
   | LET LPAREN tuple_pat RPAREN EQUAL exp { Item_let_tuple ($3, $6) }
   | LET REC fundefs { Item_let_rec $3 }
-  | MODULE UIDENT EQUAL STRUCT items END { Item_module ($2, $5) }
+  | MODULE UIDENT EQUAL module_exp { Item_module ($2, $4) }
+  | MODULE UIDENT COLON signature EQUAL module_exp
+      { Item_module ($2, Mod_sealed ($6, $4)) }
+  | MODULE UIDENT LPAREN UIDENT COLON signature RPAREN EQUAL STRUCT items END
+      { Item_functor ($2, $4, $6, $10) }
+  | MODULE TYPE UIDENT EQUAL signature { Item_module_type ($3, $5) }
   | OPEN long_name { Item_open $2 }
 
 fundefs:

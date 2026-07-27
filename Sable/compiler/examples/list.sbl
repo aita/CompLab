@@ -1,8 +1,9 @@
-(* A list type, and the higher-order functions that go with it.  Every function
-   passed here is a closure, so this exercises indirect calls as much as it does
-   pattern matching. *)
+(* A list type declared by hand, and the higher-order functions that go with
+   it.  The language has built-in polymorphic lists now (see lists.sbl); this
+   one stays because it exercises datatypes, and because `chain` is a concrete
+   type where `'a list` is not. *)
 
-type list = Nil | Cons of int * list
+type chain = Nil | Cons of int * chain
 
 let rec range lo hi = if lo > hi then Nil else Cons (lo, range (lo + 1) hi) in
 

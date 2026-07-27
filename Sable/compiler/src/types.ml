@@ -26,6 +26,7 @@ type t =
   | Fun of t list * t (* uncurried: all arguments are applied at once *)
   | Tuple of t list
   | Array of t
+  | Rigid of int (* a signature's own variable: unifies with nothing else *)
   | Var of var ref
 
 and var =
@@ -42,6 +43,10 @@ let current_level = ref 0
 let enter_level () = incr current_level
 let leave_level () = decr current_level
 let next_id = ref 0
+
+let fresh_rigid () =
+  incr next_id;
+  Rigid !next_id
 
 let fresh_var () =
   incr next_id;
@@ -73,6 +78,9 @@ let rec unify t1 t2 =
   let a = repr t1 and b = repr t2 in
   match (a, b) with
   | Unit, Unit | Bool, Bool | Int, Int | String, String -> ()
+  (* A signature says `'a`, so the value supplied has to work for every type,
+     not merely for one the checker happens to pick. *)
+  | Rigid x, Rigid y when x = y -> ()
   | Named x, Named y when x = y -> ()
   | List e1, List e2 -> unify e1 e2
   | Array e1, Array e2 -> unify e1 e2
@@ -175,6 +183,7 @@ let to_string t =
       "(" ^ String.concat " * " (List.map show args) ^ " -> " ^ show result ^ ")"
     | Tuple ts -> "(" ^ String.concat " * " (List.map show ts) ^ ")"
     | Array t -> show t ^ " array"
+    | Rigid id -> name_of id
     | Var { contents = Unbound (id, _) } -> name_of id
     | Var _ -> assert false
   in
