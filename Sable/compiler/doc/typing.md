@@ -162,7 +162,7 @@ $ ./sable a.sbl
 `occurs_and_lower` が働いて推論結果の変数がすべてレベル0まで落ち、一般化で何も
 量化されなくなります。
 
-![レベルと書き込み専用のスロット](./figures/levels.svg)
+![レベルと書き込み専用のスロット](./figures/levels.png)
 
 そこで推論は自前の変数で行い、最後に `Types.assign`（`types.ml:102`）で流し込みます。
 

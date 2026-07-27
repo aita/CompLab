@@ -179,7 +179,7 @@ around a condition, commas where it has spaces.
 
 ## The pipeline
 
-![the passes](doc/figures/pipeline.svg)
+![the passes](doc/figures/pipeline.png)
 
 | pass | file | what it does |
 |---|---|---|
@@ -446,5 +446,5 @@ sable         compile + link + run under qemu
 ```
 
 The figures are generated: edit `doc/figures/*.dot` and run
-`doc/figures/render.sh`, which needs graphviz. The SVGs are committed so that
+`doc/figures/render.sh`, which needs graphviz. The PNGs are committed so that
 the documents render without it.
