@@ -1,0 +1,37 @@
+// One state of the second round of the worked example, doc/regalloc.md
+// section 7.  K is 3.  Straight out of tests/walkthrough.exe.
+//
+// v0 is not here: it lives at 0(sp) from the rewrite onwards and appears in no
+// instruction, so it is not a node.  (The allocator still keeps a row for the
+// index and colours it, which means nothing -- see step 8.)
+//
+// The wt-7..10 files share this layout; keep them in step.
+// Render with ./render.sh (needs graphviz).
+graph wt {
+  layout = neato;
+  overlap = false;
+  splines = true;
+  bgcolor = "transparent";
+  node [shape = circle, style = filled, fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 11, width = 0.62, fixedsize = true];
+  edge [color = "#57606a", dir = none, fontname = "Helvetica", fontsize = 9];
+  v1 [label = <v1<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "0,0!"];
+  v2 [label = <<FONT COLOR="#8c959f">v2</FONT>>, style = "filled,dashed", fillcolor = "#ffffff", color = "#c9d1d9" pos = "-2,-0.9!"];
+  v3 [label = <<FONT COLOR="#8c959f">v3</FONT>>, style = "filled,dashed", fillcolor = "#ffffff", color = "#c9d1d9" pos = "-2,0.6!"];
+  v4 [label = <v4<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">1</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "-0.4,2.1!"];
+  v5 [label = <v5<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">2</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "1.5,1!"];
+  v7 [label = <v7・v9<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">2</FONT>>, fillcolor = "#f6f8fa", color = "#0969da", penwidth = 2, width = 0.88, fontsize = 10 pos = "2.4,-0.5!"];
+  v6 [label = <<FONT COLOR="#8c959f">v6</FONT>>, style = "filled,dashed", fillcolor = "#ffffff", color = "#c9d1d9" pos = "4,-2.2!"];
+  v8 [label = <<FONT COLOR="#8c959f">v8</FONT>>, style = "filled,dashed", fillcolor = "#ffffff", color = "#c9d1d9" pos = "-2.7,2.2!"];
+  v1 -- v2 [color = "#d8dee4", style = dashed];
+  v1 -- v3 [color = "#d8dee4", style = dashed];
+  v1 -- v4 [color = "#57606a"];
+  v1 -- v5 [color = "#57606a"];
+  v1 -- v6 [color = "#d8dee4", style = dashed];
+  v1 -- v7 [color = "#57606a"];
+  v2 -- v3 [color = "#d8dee4", style = dashed];
+  v5 -- v7 [color = "#57606a"];
+  v6 -- v7 [color = "#d8dee4", style = dashed];
+  v5 -- v4 [style = dashed, color = "#0969da", label = "mv v5, v4", fontcolor = "#0969da"];
+}
