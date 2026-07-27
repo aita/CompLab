@@ -33,5 +33,5 @@ graph wt {
   v2 -- v3 [color = "#57606a"];
   v5 -- v7 [color = "#57606a"];
   v6 -- v7 [color = "#d8dee4", style = dashed];
-  v7 -- v0 [style = dotted, color = "#c9d1d9", label = "諦めた mv", fontcolor = "#8c959f"];
+  v7 -- v0 [style = dotted, color = "#c9d1d9", label = "諦めた mv v7, v0", fontcolor = "#8c959f"];
 }

@@ -33,6 +33,6 @@ graph wt2 {
   v5 -- v7;
   v5 -- v9;
   v6 -- v7;
-  v7 -- v9 [style = dashed, color = "#0969da", label = "mv", fontcolor = "#0969da"];
-  v5 -- v4 [style = dashed, color = "#0969da", label = "mv", fontcolor = "#0969da"];
+  v7 -- v9 [style = dashed, color = "#0969da", label = "mv v7, v9", fontcolor = "#0969da"];
+  v5 -- v4 [style = dashed, color = "#0969da", label = "mv v5, v4", fontcolor = "#0969da"];
 }

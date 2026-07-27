@@ -36,6 +36,6 @@ graph wt {
   v2 -- v3 [color = "#57606a"];
   v5 -- v7 [color = "#57606a"];
   v6 -- v7 [color = "#57606a"];
-  v7 -- v0 [style = dashed, color = "#0969da", label = "mv", fontcolor = "#0969da"];
-  v5 -- v4 [style = dashed, color = "#0969da", label = "mv", fontcolor = "#0969da"];
+  v7 -- v0 [style = dashed, color = "#0969da", label = "mv v7, v0", fontcolor = "#0969da"];
+  v5 -- v4 [style = dashed, color = "#0969da", label = "mv v5, v4", fontcolor = "#0969da"];
 }
