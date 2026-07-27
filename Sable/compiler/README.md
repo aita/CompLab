@@ -241,11 +241,12 @@ This is the part the rest of the compiler exists to feed.
 Instruction selection emits code in which every value has its own virtual
 register, and hands the allocator a graph whose nodes are registers and whose
 edges join values that are live at the same time. The 25 machine registers are
-pre-coloured nodes of infinite degree. Then, following Appel's formulation of
-Chaitin–Briggs with iterated coalescing:
+pre-coloured nodes of infinite degree. Then, following [George and Appel's
+iterated coalescing][iterated] over [Chaitin's][chaitin] colouring and
+[Briggs'][briggs] conservative merge:
 
 - **simplify** — remove a node with fewer than K neighbours and push it on a
-  stack. Kempe's observation is that such a node can always be coloured later,
+  stack. [Kempe's][kempe] observation is that such a node can always be coloured later,
   whatever happens to the rest of the graph.
 - **coalesce** — merge the two ends of a `mv` when Briggs' or George's test
   proves the merge cannot make the graph harder to colour. The move then
@@ -368,7 +369,7 @@ Deliberate, and each one is a place the project could go next.
 - No garbage collector; the heap is a bump allocator.
 - Functors are elaborated, not compiled: `F (Arg)` re-resolves the body with the
   parameter bound to that argument, so each application costs a copy of the
-  definitions. That is defunctorization, as MLton does it, and it is why
+  definitions. That is [defunctorization][elsman], as MLton does it, and it is why
   functors need no runtime representation. It also means the body is checked per
   application rather than once, and sees the argument's real types rather than
   the signature's view of them.
@@ -396,6 +397,30 @@ Deliberate, and each one is a place the project could go next.
 - Allocation is a call into the runtime. Inlining the bump pointer would save
   the call and, more to the point, stop every allocation from destroying the
   caller-saved registers and forcing values onto the stack.
+
+## References
+
+Each of the two write-ups carries the reading its own half rests on:
+[the pipeline](doc/pipeline.md#参考文献) for inference, pattern matching, ANF
+and modules, and [register allocation](doc/regalloc.md#参考文献) for the
+colouring. The four the code follows most closely:
+
+- L. George, A. W. Appel, [*Iterated register coalescing*][iterated],
+  ACM TOPLAS 18(3), 1996 — the allocator.
+- L. Maranget, [*Warnings for pattern matching*][warnings], JFP 17(3), 2007 —
+  exhaustiveness and redundancy, with a witness.
+- O. Kiselyov, [*Efficient and Insightful Generalization*][levels] — Rémy's
+  levels, which is how `let` generalizes here.
+- M. Elsman, [*Static interpretation of modules*][elsman], ICFP 1999 — modules
+  and functors resolved away before the type checker sees them.
+
+[iterated]: https://doi.org/10.1145/229542.229546
+[chaitin]: https://dl.acm.org/doi/10.1145/872726.806984
+[briggs]: https://doi.org/10.1145/177492.177575
+[kempe]: https://archive.org/details/jstor-2369235
+[warnings]: https://doi.org/10.1017/S0956796807006223
+[levels]: https://okmij.org/ftp/ML/generalization.html
+[elsman]: https://doi.org/10.1145/317636.317800
 
 ## Layout
 

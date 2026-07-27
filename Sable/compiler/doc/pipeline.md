@@ -81,7 +81,8 @@ end in
 
 同じ理屈でファンクタも扱えます。分割コンパイルがなく適用がすべて静的に見えているので、
 `F (Arg)` は**本体をパラメータに引数を束縛して再解決する** — つまり適用ごとに定義の複製を
-作ります。MLton が全プログラムに対して行う defunctorization と同じやり方です。
+作ります。MLton が全プログラムに対して行う defunctorization と同じやり方で、その正しさは
+[Elsman の静的解釈][elsman]が扱っています。
 
 代償は**適用ごとのコード複製**で、得られるのは「ファンクタが実行時表現を一切持たず、名前解決の
 後ろのパスが何も知らなくてよい」ことです。真の ML との違いも正直に書いておくと、本体は
@@ -148,8 +149,8 @@ type error in a function application:
 
 ## 3. 型推論 — `typing.ml`
 
-Hindley–Milner に**レベル方式の一般化**（Rémy の方法、OCaml 自身が使っているもの）を
-載せています。
+[Hindley–Milner][damas] に**レベル方式の一般化**（Rémy の方法、OCaml 自身が使っている
+もの。[Kiselyov の解説][levels]が読みやすい）を載せています。
 
 構文解析器は束縛子・パターン変数・`match` のそれぞれに空の型変数を付けておき、推論は
 それを埋めていく1回のボトムアップ走査です。単一化は破壊的（`Types.unify` が `ref` に書き
@@ -166,7 +167,7 @@ Hindley–Milner に**レベル方式の一般化**（Rémy の方法、OCaml �
 問わない表現を選んであるので、要素を覗かない関数は要素の型を気にせずに済みます。`length`
 は1つコンパイルされるだけで `int list` にも `string list` にも `int list list` にも効きます。
 
-制約が2つあります。**一般化するのは構文的な値だけ**です（値制限）。これがないと、可変配列に
+制約が2つあります。**一般化するのは構文的な値だけ**です（[値制限][valuerestriction]）。これがないと、可変配列に
 入れた多相な値に整数を書いてポインタとして読み出せてしまいます。もう1つ、**比較の被演算子は
 最外レベルに固定して量化しない**ようにしています。`=` は機械語1命令に落ちるので、そう比較
 できる型に決まってもらわないと困るからです。
@@ -221,8 +222,8 @@ $ ./sable -S tests/cases/patterns.sbl | grep '\.globl'
 
 ## 6. A正規化 — `anf.ml`
 
-**中間結果すべてに `let` で名前を付ける**変換です（A-normal form。MinCaml が K正規形と
-呼ぶものと同じです）。
+**中間結果すべてに `let` で名前を付ける**変換です（[A-normal form][anf]。MinCaml が
+K正規形と呼ぶものと同じです）。
 
 これがバックエンド全体の欲しい形です。機械語命令が食う部分式はすでに変数になっている
 ので命令選択が評価順を発明せずに済み、そして**変数の生存区間がそのまま「レジスタに置いて
@@ -571,6 +572,47 @@ sable_const_Nil_3:
 ヒープは `runtime/sable_runtime.c` のバンプアロケータで、解放はしません。GC を入れるには
 コンパイラがポインタの在処を記述する必要があり、それはこのコンパイラが取り組んでいる
 主題とは別のプロジェクトです。
+
+## 参考文献
+
+型検査から命令選択までの各パスが拠っているもの。レジスタ割り付けのものは
+[そちらの文書](regalloc.md#参考文献)にあります。
+
+- L. Damas, R. Milner, [*Principal type-schemes for functional programs*][damas],
+  POPL 1982. 推論そのもの。
+- O. Kiselyov, [*Efficient and Insightful Generalization*][levels]. Rémy の
+  レベル方式による一般化の解説。`types.ml` の `level` はこれです。
+- A. K. Wright, [*Simple imperative polymorphism*][valuerestriction],
+  LISP and Symbolic Computation 8(4), 1995. 値制限。
+- L. Maranget, [*Warnings for pattern matching*][warnings],
+  JFP 17(3), 2007（[PDF][warnings-pdf]）。`match_check.ml` の usefulness 判定 —
+  網羅性と到達不能ケースを1つのアルゴリズムで、しかも反例つきで出す方法。
+- L. Maranget, [*Compiling pattern matching to good decision trees*][trees],
+  ML Workshop 2008（[PDF][trees-pdf]）。`match_compile.ml` の行列アルゴリズム。
+  列の選び方のヒューリスティクスまでは追っていません（本文のとおり最左を取ります）。
+- C. Flanagan, A. Sabry, B. F. Duba, M. Felleisen,
+  [*The essence of compiling with continuations*][anf], PLDI 1993. A正規形。
+- M. Elsman, [*Static interpretation of modules*][elsman], ICFP 1999.
+  モジュールとファンクタを実行時表現なしに解決する方法とその正しさ。
+- R. Tarjan, [*Depth-first search and linear graph algorithms*][tarjan],
+  SIAM J. Comput. 1(2), 1972. brace form が隣り合う関数を強連結成分に切るのに使います。
+- E. Sumii, [*MinCaml: a simple and efficient compiler for a minimal functional
+  language*][mincaml], FDPE 2005（[PDF][mincaml-pdf]）。フロントエンドの並び —
+  A正規化・α変換・最適化・クロージャ変換と、既知関数の楽観的な判定 — はこれに倣って
+  います。バックエンドは別物で、こちらは AST を辿るのではなく制御フローグラフを作ります。
+
+[damas]: https://doi.org/10.1145/582153.582176
+[levels]: https://okmij.org/ftp/ML/generalization.html
+[valuerestriction]: https://doi.org/10.1007/BF01018828
+[warnings]: https://doi.org/10.1017/S0956796807006223
+[warnings-pdf]: http://moscova.inria.fr/~maranget/papers/warn/warn.pdf
+[trees]: https://doi.org/10.1145/1411304.1411311
+[trees-pdf]: http://moscova.inria.fr/~maranget/papers/ml05e-maranget.pdf
+[anf]: https://doi.org/10.1145/155090.155113
+[elsman]: https://doi.org/10.1145/317636.317800
+[tarjan]: https://doi.org/10.1137/0201010
+[mincaml]: https://doi.org/10.1145/1085114.1085122
+[mincaml-pdf]: https://esumii.github.io/min-caml/paper.pdf
 
 ## 呼び出し規約
 

@@ -4,8 +4,9 @@
 それを実行できるものに変えるのが `regalloc.ml` で、このコンパイラの他の部分はここに食わせる
 ために存在しています。
 
-理論は Chaitin と Briggs、実装の形は Appel の *Modern Compiler Implementation* 11章の
-反復合体（iterated register coalescing）に従っています。
+理論は [Chaitin][chaitin] と [Briggs ら][briggs]、実装の形は
+[George と Appel の反復合体][iterated]（iterated register coalescing）、およびそれを
+教科書の形にした Appel の *Modern Compiler Implementation* 11章に従っています。
 
 以下、題材は[パイプライン解説](pipeline.md)と同じ `doc/sum.sbl` です。
 
@@ -71,7 +72,7 @@ s0–s11 12本   呼ばれた側が保存する義務を負う
 
 ## 3. Kempe の観察 — simplify と select
 
-グラフを K 色で塗るのは一般には難しい問題ですが、Kempe の観察が実用を可能にします。
+グラフを K 色で塗るのは一般には難しい問題ですが、[Kempe][kempe] の観察が実用を可能にします。
 
 > **隣接が K 未満の節点は、残りのグラフに何が起きようと必ず塗れる。**
 
@@ -284,6 +285,28 @@ sable_main:       1 round(s), 26/26 moves coalesced, 0 spill slot(s)
 
 いずれも「入れれば良くなるがアルゴリズムの骨格は変わらない」種類のもので、骨格のほうを読める
 ようにするのがこの実装の目的です。
+
+## 参考文献
+
+- A. B. Kempe, *On the geographical problem of the four colours*, American Journal
+  of Mathematics 2(3), 1879. 「隣接が K 未満の節点は必ず塗れる」の出どころ。
+  [PDF][kempe]（Internet Archive）
+- G. J. Chaitin, *Register allocation and spilling via graph coloring*,
+  SIGPLAN Notices 17(6), 1982. グラフ彩色によるレジスタ割り付けそのもの。[ACM][chaitin]
+- P. Briggs, K. D. Cooper, L. Torczon,
+  [*Improvements to graph coloring register allocation*][briggs],
+  ACM TOPLAS 16(3), 1994. 保守的合体（Briggs の判定）と楽観的スピル。
+- L. George, A. W. Appel, [*Iterated register coalescing*][iterated],
+  ACM TOPLAS 18(3), 1996. **この実装が従っているアルゴリズム。** George の判定と、
+  simplify・合体・freeze を交互に回す形。
+- A. W. Appel, *Modern Compiler Implementation in ML*, Cambridge University
+  Press, 1998, 11章. 上の論文を擬似コードに落としたもので、`regalloc.ml` の
+  worklist の構成はこれに対応します（読まれない集合を落とした点は本文のとおり）。
+
+[kempe]: https://archive.org/details/jstor-2369235
+[chaitin]: https://dl.acm.org/doi/10.1145/872726.806984
+[briggs]: https://doi.org/10.1145/177492.177575
+[iterated]: https://doi.org/10.1145/229542.229546
 
 ## 実装の地図
 
