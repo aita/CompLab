@@ -70,7 +70,11 @@ let all_decls () = List.rev_map (fun n -> Hashtbl.find decls n) !order
 let nil_label = "sable_list_nil"
 
 (* The read-only block standing for a constant constructor. *)
-let const_label c = Printf.sprintf "sable_const_%s_%s" c.owner c.cname
+let const_label c =
+  (* Internal names carry their module path and a number, neither of which
+     belongs in a symbol. *)
+  let clean = String.map (fun ch -> if ch = '.' then '_' else ch) in
+  Printf.sprintf "sable_const_%s_%s" (clean c.owner) (clean c.cname)
 
 (* Every named type a written type mentions has to exist. *)
 let rec check_type where t =

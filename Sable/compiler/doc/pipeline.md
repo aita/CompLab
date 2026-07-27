@@ -99,6 +99,41 @@ Let ((fresh "signature", _), Annot (Var 実際の名前, 宣言された型), �
 たまたま渡した引数にあった余分なメンバーに依存したファンクタが書けてしまい、シグネチャで
 縛る意味がなくなります。
 
+### 型宣言と抽象型
+
+`type` はモジュールの中にも書けます。値と同じくパスを含む一意な名前へ改名し、グローバルな
+`Datatype` 表にその名前で登録します。コンストラクタも同様です。だから2つのモジュールが
+それぞれ `type t` を持っても衝突しません。
+
+**この言語のユーザー定義型はすべて公称型（`Named`）**なので、抽象化は「コンストラクタを
+公開しないこと」に尽きます。隠すべき型等式が存在せず、`with type t = ...` も要りません。
+
+```
+module Counter : sig            外から見えるのは Counter.t という
+  type t                        コンストラクタのない型と、3つの値だけ。
+  val start : t                 Counter.Count は存在しない。
+  val bump : t -> t
+  val value : t -> int
+end = struct
+  type t = Count of int
+  ...
+end
+```
+
+シグネチャ側の `type t` は**穴**です。定義された場所で他の型名は解決しておき、抽象名だけ
+未解決のまま残して、照合の時点で相手の構造体が持つ内部名に差し替えます。これがこの言語に
+必要な型共有のすべてです。ファンクタのパラメータも同じ扱いなので、`Fold (E)` の本体からは
+`E.t` の中身が見えません — 実際に `match v with Total n -> ...` と書くと
+`unknown constructor` になります。
+
+同じシグネチャで封印した2つの構造体は、内部名が違うので**別の型**になります。
+
+```
+type error in a function application:
+  expected: (B.t -> int)
+  but got:  (A.t -> 'a)
+```
+
 ## 3. 型推論 — `typing.ml`
 
 Hindley–Milner に**レベル方式の一般化**（Rémy の方法、OCaml 自身が使っているもの）を

@@ -261,7 +261,7 @@ let rec compile exp =
   | Constr (name, args) -> Constr (name, List.map compile args)
   | Field (e, i, t) -> Field (compile e, i, t)
   | Annot (e, t) -> Annot (compile e, t)
-  | Qualified _ | Module _ | Open _ | Module_type _ | Functor _ ->
+  | Type_decl _ | Qualified _ | Module _ | Open _ | Module_type _ | Functor _ ->
     failwith "Match_compile: modules should have been resolved away by Modules"
   | Match_failure _ -> exp
   | Match (info, scrutinee, cases) ->

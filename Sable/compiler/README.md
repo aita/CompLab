@@ -63,8 +63,8 @@ walk (insert (insert Leaf 2) 1); print_newline ()
 |---|---|
 | types | `int`, `bool`, `unit`, `string`, `'a list`, tuples, arrays, functions, `type t = A \| B of int * t` |
 | binding | `let`, `let rec ... and ...`, `let (a, b) = e`, `fun x y -> e` |
-| modules | `module M = struct ... end in e`, nested, `M.x`, `M.N.x`, `open M in e` |
-| signatures | `module type S = sig val f : int * int -> bool end in e`, sealing with `module M : S = ...` |
+| modules | `module M = struct ... end in e`, nested, `M.x`, `M.N.x`, `M.A`, `M.t`, `open M in e` |
+| signatures | `module type S = sig type t val f : t -> int end in e`, sealing with `module M : S = ...` |
 | functors | `module F (X : S) = struct ... end in e`, applied as `module M = F (Arg)` |
 | control | `if`/`then`/`else` (the `else` may be left out when the branch is `unit`), `e1; e2`, `begin`/`end` |
 | matching | `match e with p -> e \| ...`, over literals, wildcards, variables, tuples, lists and constructors, nested |
@@ -104,7 +104,7 @@ than continuing with a wrong answer.
 | pass | file | what it does |
 |---|---|---|
 | lexing, parsing | `lexer.mll`, `parser.mly` | ocamllex and menhir |
-| name resolution | `modules.ml` | modules into path-carrying names and nested `let`s |
+| name resolution | `modules.ml` | modules, functors and type declarations into path-carrying names |
 | type inference | `typing.ml` | let-polymorphism, generalized by levels |
 | match checking | `match_check.ml` | usefulness: exhaustiveness and redundancy |
 | match compilation | `match_compile.ml` | `match` into a decision tree |
@@ -298,9 +298,12 @@ Deliberate, and each one is a place the project could go next.
   functors need no runtime representation. It also means the body is checked per
   application rather than once, and sees the argument's real types rather than
   the signature's view of them.
-- Signatures declare values only. `type` declarations are global and come before
-  the program, so a module cannot declare a type — which also means a signature
-  has nothing to make abstract, and there is no sharing to express.
+- Type declarations are not parameterized: there is `type tree = ...`, not
+  `type 'a tree = ...`. Built-in lists are the only polymorphic data type.
+- Sealing hides constructors, which is all abstraction needs here because every
+  user type is nominal — there is no type equation to hide and so no `with type
+  t = ...` to write. Two structures sealed by the same signature still have
+  distinct types.
 - Functors take one structure argument and return a structure; no currying, and
   no functors inside functors.
 - `String.length`, `String.concat`, `String.equal` and `Array.make` are

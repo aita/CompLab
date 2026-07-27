@@ -1,0 +1,6 @@
+module A : sig type t val make : int -> t end = struct type t = T of int let rec make n = T n end in
+module B : sig type t val use : t -> int end = struct
+  type t = U of int
+  let rec use v = match v with U n -> n
+end in
+print_int (B.use (A.make 1))

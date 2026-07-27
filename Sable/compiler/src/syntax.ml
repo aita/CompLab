@@ -32,6 +32,7 @@ type t =
   | Cons of t * t
   | Annot of t * Types.t (* generated: `(e : ty)`, how a signature is checked *)
   | Qualified of string list * Ident.t (* M.x, M.N.x -- resolved away by Modules *)
+  | Type_decl of type_decl * t (* type t = A | B in e *)
   | Module of string * module_exp * t (* module M = <me> in e *)
   | Module_type of string * signature * t (* module type S = sig .. end in e *)
   | Functor of string * string * signature * item list * t
@@ -50,14 +51,19 @@ and module_exp =
   | Mod_apply of string list * module_exp (* F (Arg) *)
   | Mod_sealed of module_exp * signature (* (me : S) *)
 
-(* Only `val` items: this language has no module-level type declarations, so a
-   signature has nothing to make abstract. *)
-and signature = Sig_name of string | Sig_values of (Ident.t * Types.t) list
+and signature = Sig_name of string | Sig_items of sig_item list
+
+(* `type t` with no definition is an abstract type: the signature promises the
+   name exists without saying what its constructors are. *)
+and sig_item = Sig_type of string | Sig_val of Ident.t * Types.t
+
+and type_decl = { tname : string; tconstrs : (string * Types.t list) list }
 
 and item =
   | Item_let of (Ident.t * Types.t) * t
   | Item_let_tuple of (Ident.t * Types.t) list * t
   | Item_let_rec of fundef list
+  | Item_type of type_decl
   | Item_module of string * module_exp
   | Item_module_type of string * signature
   | Item_functor of string * string * signature * item list
@@ -110,9 +116,9 @@ let rec string_of_pattern = function
   | Ptuple ps -> "(" ^ String.concat ", " (List.map string_of_pattern ps) ^ ")"
   | Pnil -> "[]"
   | Pcons (head, tail) -> string_of_pattern head ^ " :: " ^ string_of_pattern tail
-  | Pconstr (c, []) -> c
+  | Pconstr (c, []) -> Ident.display c
   | Pconstr (c, ps) ->
-    c ^ " (" ^ String.concat ", " (List.map string_of_pattern ps) ^ ")"
+    Ident.display c ^ " (" ^ String.concat ", " (List.map string_of_pattern ps) ^ ")"
 
 (* Variables bound by a pattern, left to right. *)
 let rec pattern_vars = function

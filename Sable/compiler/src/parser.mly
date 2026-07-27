@@ -43,11 +43,10 @@ let constr_args name args =
 
 (* `M`, `M.N`: a dotted run of capitalised names.  Keeping the constructor case
    and the module-path case behind one nonterminal is what stops the parser
-   having to choose between them the moment it sees a dot. *)
-let value_of_path path =
-  match path with
-  | [ name ] -> Constr (name, [])
-  | _ -> failwith (Printf.sprintf "`%s` is a module, not a value" (String.concat "." path))
+   having to choose between them the moment it sees a dot.  Which one it is --
+   and how many arguments a constructor takes -- is Modules' business, so the
+   name travels as written and the arguments are left alone. *)
+let dotted path = String.concat "." path
 
 let constr_pattern_args name args =
   match (Datatype.find_constr name, args) with
@@ -96,16 +95,16 @@ let constr_pattern_args name args =
 %%
 
 program:
-  | type_decls exp EOF { $2 }
+  | type_decls exp EOF { List.fold_right (fun d body -> Type_decl (d, body)) $1 $2 }
 
 (* ------------------------------------------------------------- datatypes *)
 
 type_decls:
-  | (* empty *) { () }
-  | type_decl type_decls { () }
+  | (* empty *) { [] }
+  | type_decl type_decls { $1 :: $2 }
 
 type_decl:
-  | TYPE IDENT EQUAL opt_bar constr_decls { Datatype.declare $2 $5 }
+  | TYPE IDENT EQUAL opt_bar constr_decls { { tname = $2; tconstrs = $5 } }
 
 opt_bar:
   | (* empty *) { () }
@@ -132,6 +131,7 @@ signature_type:
 simple_type:
   | TYPEVAR { signature_variable $1 }
   | IDENT { base_type $1 }
+  | long_name DOT IDENT { Types.Named (dotted ($1 @ [ $3 ])) }
   | simple_type ARRAY_KW { Types.Array $1 }
   | simple_type LIST_KW { Types.List $1 }
   | LPAREN type_expr RPAREN { $2 }
@@ -151,7 +151,7 @@ simple_exp:
   | INT { Int $1 }
   | STRING { Str $1 }
   | IDENT { Var $1 }
-  | long_name { value_of_path $1 }
+  | long_name { Constr (dotted $1, []) }
   | LBRACKET RBRACKET { Nil }
   | LBRACKET list_body RBRACKET { List.fold_right (fun e rest -> Cons (e, rest)) $2 Nil }
   | simple_exp DOT LPAREN exp RPAREN { Get ($1, $4) }
@@ -197,7 +197,7 @@ exp:
       { Let_tuple ($3, $6, $8) }
   | exp actual_args %prec prec_app
       { match $1 with
-        | Constr (c, []) -> Constr (c, constr_args c $2)
+        | Constr (c, []) -> Constr (c, $2)
         | f -> App (f, $2) }
   | elems %prec prec_tuple { Tuple $1 }
   | ARRAY_MAKE simple_exp simple_exp %prec prec_app { Array ($2, $3) }
@@ -225,11 +225,13 @@ module_exp:
 
 signature:
   | UIDENT { Sig_name $1 }
-  | SIG sig_items END { Sig_values $2 }
+  | SIG sig_items END { Sig_items $2 }
 
 sig_items:
   | (* empty *) { [] }
-  | VAL IDENT COLON start_declaration signature_type sig_items { ($2, $5) :: $6 }
+  | TYPE IDENT sig_items { Sig_type $2 :: $3 }
+  | VAL IDENT COLON start_declaration signature_type sig_items
+      { Sig_val ($2, $5) :: $6 }
 
 (* An empty rule, so that the reset runs before this declaration's type is
    parsed rather than after the whole tail of the signature. *)
@@ -244,6 +246,7 @@ item:
   | LET IDENT EQUAL exp { Item_let (typed $2, $4) }
   | LET LPAREN tuple_pat RPAREN EQUAL exp { Item_let_tuple ($3, $6) }
   | LET REC fundefs { Item_let_rec $3 }
+  | type_decl { Item_type $1 }
   | MODULE UIDENT EQUAL module_exp { Item_module ($2, $4) }
   | MODULE UIDENT COLON signature EQUAL module_exp
       { Item_module ($2, Mod_sealed ($6, $4)) }
@@ -309,7 +312,7 @@ constr_pattern:
 
 applied_pattern:
   | simple_pattern { $1 }
-  | UIDENT simple_pattern { Pconstr ($1, constr_pattern_args $1 $2) }
+  | long_name simple_pattern { Pconstr (dotted $1, [ $2 ]) }
 
 simple_pattern:
   | UNDERSCORE { Pwild (Types.fresh_var ()) }
@@ -318,7 +321,7 @@ simple_pattern:
   | MINUS INT { Pint (- $2) }
   | BOOL { Pbool $1 }
   | LPAREN RPAREN { Punit }
-  | UIDENT { Pconstr ($1, []) }
+  | long_name { Pconstr (dotted $1, []) }
   | LBRACKET RBRACKET { Pnil }
   | LBRACKET pattern_list RBRACKET
       { List.fold_right (fun p rest -> Pcons (p, rest)) $2 Pnil }

@@ -51,11 +51,12 @@ let unify_in where expected actual =
 let lookup_constr name =
   match Datatype.find_constr name with
   | Some c -> c
-  | None -> fail "unknown constructor `%s`" name
+  | None -> fail "unknown constructor `%s`" (Ident.display name)
 
 let check_arity name expected got =
   if expected <> got then
-    fail "the constructor `%s` expects %d argument(s) but is given %d" name expected got
+    fail "the constructor `%s` expects %d argument(s) but is given %d" (Ident.display name)
+      expected got
 
 (* Generalizing an arbitrary expression is unsound once mutable state is in the
    language, so only these are generalized.  `fun x -> e` reaches here as a
@@ -103,7 +104,7 @@ let rec infer_pattern pat expected =
     let c = lookup_constr name in
     check_arity name (List.length c.Datatype.arg_types) (List.length ps);
     unify_in
-      (Printf.sprintf "in the pattern `%s`" name)
+      (Printf.sprintf "in the pattern `%s`" (Ident.display name))
       expected
       (Types.Named c.Datatype.owner);
     List.concat (List.map2 infer_pattern ps c.Datatype.arg_types)
@@ -207,7 +208,7 @@ let rec infer_exp env exp =
     List.iteri
       (fun i (arg, t) ->
         unify_in
-          (Printf.sprintf "in argument %d of `%s`" (i + 1) name)
+          (Printf.sprintf "in argument %d of `%s`" (i + 1) (Ident.display name))
           t (infer_exp env arg))
       (List.combine args c.Datatype.arg_types);
     Types.Named c.Datatype.owner
@@ -229,7 +230,7 @@ let rec infer_exp env exp =
        signature's own variables are rigid, so they refuse to be pinned down. *)
     unify_in "in a signature" declared (infer_exp env e);
     declared
-  | Qualified _ | Module _ | Open _ | Module_type _ | Functor _ ->
+  | Type_decl _ | Qualified _ | Module _ | Open _ | Module_type _ | Functor _ ->
     failwith "Typing: modules should have been resolved away by Modules"
   | Field _ | Match_failure _ ->
     failwith "Typing: compiler-generated node reached the type checker"

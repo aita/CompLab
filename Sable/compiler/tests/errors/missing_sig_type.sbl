@@ -1,0 +1,4 @@
+module type E = sig type t val zero : t end in
+module A = struct let zero = 0 end in
+module F (X : E) = struct let y = X.zero end in
+module M = F (A) in print_int 0

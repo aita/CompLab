@@ -100,13 +100,56 @@ in
 show_strings texts;
 show more_numbers;
 
-(* Sealing: the signature hides everything it does not mention, so `step` is
-   not reachable as `Counter.step`. *)
+(* An abstract type.  The signature says `type t` without saying what it is, so
+   outside the module `Counter.t` is a type with no constructors: it can be
+   passed around and handed back, and nothing else.  Every user type here is
+   nominal, so making one abstract is exactly a matter of not exporting its
+   constructors -- there is no type equation to hide. *)
 module Counter : sig
-  val next : int -> int
+  type t
+  val start : t
+  val bump : t -> t
+  val value : t -> int
 end = struct
-  let step = 2
-  let rec next n = n + step
+  type t = Count of int
+  let start = Count 0
+  let rec bump c = match c with Count n -> Count (n + 1)
+  let rec value c = match c with Count n -> n
 end in
-print_int (Counter.next (Counter.next 0));
+print_int (Counter.value (Counter.bump (Counter.bump Counter.start)));
+print_newline ();
+
+(* A functor over an abstract type: one body, two representations.  Inside
+   `Fold`, `E.t` has no constructors, so the body cannot depend on how either
+   argument represents its values. *)
+module type Element = sig
+  type t
+  val zero : t
+  val combine : t * t -> t
+  val render : t -> string
+end in
+
+module Counting = struct
+  type t = Total of int
+  let zero = Total 0
+  let rec combine a b = match (a, b) with Total x, Total y -> Total (x + y)
+  let rec render v = match v with Total x -> "total " ^ (if x = 0 then "0" else "n")
+end in
+
+module Joining = struct
+  type t = Text of string
+  let zero = Text ""
+  let rec combine a b = match (a, b) with Text x, Text y -> Text (x ^ y)
+  let rec render v = match v with Text s -> s
+end in
+
+module Fold (E : Element) = struct
+  let rec total l = match l with [] -> E.zero | x :: rest -> E.combine x (total rest)
+  let rec show l = E.render (total l)
+end in
+
+module Numbers = Fold (Counting) in
+module Strings = Fold (Joining) in
+print_string (Numbers.show [ Counting.Total 1; Counting.Total 2 ]); print_char 32;
+print_string (Strings.show [ Joining.Text "ab"; Joining.Text "cd" ]);
 print_newline ()

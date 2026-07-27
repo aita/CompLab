@@ -15,6 +15,14 @@ type error in the tail of `::`:
 the constructor `Pair` expects 2 argument(s) but is given 1
 --- duplicate_pattern_var.sbl
 the variable `x` is bound twice in the pattern `Pair (x, x)`
+--- abstract_in_functor.sbl
+unknown constructor `T`
+--- abstract_type.sbl
+the module `M` has no constructor `T`
+--- distinct_abstract.sbl
+type error in a function application:
+  expected: (B.t -> int)
+  but got:  (A.t -> 'a)
 --- functor_hidden.sbl
 the module `X` has no value `other`
 --- functor_missing.sbl
@@ -25,6 +33,8 @@ type error in a signature:
   but got:  (int -> int list)
 --- functor_unapplied.sbl
 `F` is a functor; it has to be applied before its contents are used
+--- missing_sig_type.sbl
+the argument of `F` does not match its signature: it has no type `t`
 --- module_as_value.sbl
 `M.N` is a module, not a value
 --- module_member.sbl

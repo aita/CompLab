@@ -1,0 +1,6 @@
+(* Sealing hides the constructors, which is what makes the type abstract. *)
+module M : sig type t val make : int -> t end = struct
+  type t = T of int
+  let rec make n = T n
+end in
+print_int (match M.make 1 with M.T n -> n)

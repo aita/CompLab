@@ -178,7 +178,7 @@ let to_string t =
     | Int -> "int"
     | String -> "string"
     | List t -> show t ^ " list"
-    | Named n -> n
+    | Named n -> Ident.display n
     | Fun (args, result) ->
       "(" ^ String.concat " * " (List.map show args) ^ " -> " ^ show result ^ ")"
     | Tuple ts -> "(" ^ String.concat " * " (List.map show ts) ^ ")"
