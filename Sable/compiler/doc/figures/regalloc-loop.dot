@@ -1,5 +1,11 @@
 // What `work ()` in regalloc.ml does, and the outer loop around it.  The
 // cascade of tests is the `if ... else if ...` chain in the source, in order.
+//
+// The two return paths run in lanes of their own: a column of point nodes,
+// one per rank, tied together by constrained edges and put in one `group`.
+// That is what makes dot draw them as straight verticals instead of letting
+// each hop wander around whatever box happens to be in the way.
+//
 // Render with ./render.sh (needs graphviz).
 digraph regalloc {
   rankdir = TB;
@@ -11,8 +17,16 @@ digraph regalloc {
         fontname = "Helvetica", fontsize = 11, margin = "0.16,0.09"];
   edge [color = "#57606a", fontcolor = "#57606a",
         fontname = "Helvetica", fontsize = 9];
-  { node [shape = diamond, fillcolor = "#ffffff", margin = "0.02,0.01"];
+
+  // ------------------------------------------------ the cascade, one column
+  { node [group = "spine"]; build; select; done; }
+  { node [shape = diamond, fillcolor = "#ffffff", margin = "0.02,0.01",
+          group = "spine"];
     q1; q2; q3; q4; q5; }
+  // Where the inner loop rejoins: after build, before the first test.
+  { node [shape = point, width = 0.06, style = filled,
+          color = "#8c959f", fillcolor = "#8c959f", group = "spine"];
+    top; }
 
   build [label = "build\nthe interference graph, from liveness"];
   q1 [label = "anything\ntrivially colourable?"];
@@ -31,7 +45,24 @@ digraph regalloc {
   done     [label = "apply the colouring\ndelete the moves that became mv x, x",
             fillcolor = "#ffffff", color = "#0969da", penwidth = 2];
 
-  build -> q1;
+  // ------------------------------------------------------------- the lanes
+  // b1..b4 are real junctions -- a step joins the lane there -- so they are
+  // drawn.  The outer lane joins nothing on the way past, so its nodes are
+  // corners only and stay invisible.
+  { node [shape = point, width = 0.06, style = filled,
+          color = "#8c959f", fillcolor = "#8c959f", group = "inner"];
+    b1; b2; b3; b4; }
+  // The corner the inner lane turns at, so the last hop is two straight
+  // segments rather than one long diagonal.
+  { node [shape = point, width = 0.01, style = filled,
+          color = "#8c959f", fillcolor = "#8c959f", group = "inner"]; b0; }
+  { node [shape = point, width = 0.01, style = filled,
+          color = "#cf222e", fillcolor = "#cf222e", group = "outer"];
+    c0; c1; c2; c3; c4; c5; c6; }
+
+  // ---------------------------------------------------------- the flow down
+  build -> top [dir = none];
+  top -> q1;
   q1 -> q2 [label = "  no"];
   q2 -> q3 [label = "  no"];
   q3 -> q4 [label = "  no"];
@@ -39,11 +70,19 @@ digraph regalloc {
   select -> q5;
   q5 -> done [label = "  yes"];
 
-  { rank = same; q1; simplify; }
-  { rank = same; q2; coalesce; }
-  { rank = same; q3; freeze; }
-  { rank = same; q4; spill; }
-  { rank = same; q5; rewrite; }
+  { rank = same; top; b0; c0; }
+  { rank = same; q1; simplify; b1; c1; }
+  { rank = same; q2; coalesce; b2; c2; }
+  { rank = same; q3; freeze;   b3; c3; }
+  { rank = same; q4; spill;    b4; c4; }
+  { rank = same; select; c5; }
+  { rank = same; q5; rewrite; c6; }
+
+  // Flat edges fix the left-to-right order within a rank: the inner lane
+  // stays inside the outer one whatever the boxes do.
+  edge [style = invis];
+  b0 -> c0; b1 -> c1; b2 -> c2; b3 -> c3; b4 -> c4;
+  edge [style = solid];
 
   q1 -> simplify [label = "  yes"];
   q2 -> coalesce [label = "  yes"];
@@ -51,10 +90,24 @@ digraph regalloc {
   q4 -> spill [label = "  yes"];
   q5 -> rewrite [label = "  no", color = "#cf222e", fontcolor = "#cf222e"];
 
-  // Every step but the last goes back to the top of the cascade.
-  simplify -> q1 [style = dashed, constraint = false];
-  coalesce -> q1 [style = dashed, constraint = false];
-  freeze -> q1 [style = dashed, constraint = false];
-  spill -> q1 [style = dashed, constraint = false];
-  rewrite -> build [style = dashed, constraint = false, color = "#cf222e"];
+  // Every step of the cascade goes back to the top of the cascade.
+  simplify -> b1 [dir = none, style = dashed, color = "#8c959f"];
+  coalesce -> b2 [dir = none, style = dashed, color = "#8c959f"];
+  freeze   -> b3 [dir = none, style = dashed, color = "#8c959f"];
+  spill    -> b4 [dir = none, style = dashed, color = "#8c959f"];
+  b1 -> b2 [dir = none, style = dashed, color = "#8c959f"];
+  b2 -> b3 [dir = none, style = dashed, color = "#8c959f"];
+  b3 -> b4 [dir = none, style = dashed, color = "#8c959f"];
+  b0 -> b1 [dir = none, style = dashed, color = "#8c959f"];
+  b0 -> top [style = dashed, color = "#8c959f", constraint = false];
+
+  // A spill sends the whole thing back to build: a new graph, from scratch.
+  rewrite -> c6 [dir = none, style = dashed, color = "#cf222e"];
+  c0 -> c1 [dir = none, style = dashed, color = "#cf222e"];
+  c1 -> c2 [dir = none, style = dashed, color = "#cf222e"];
+  c2 -> c3 [dir = none, style = dashed, color = "#cf222e"];
+  c3 -> c4 [dir = none, style = dashed, color = "#cf222e"];
+  c4 -> c5 [dir = none, style = dashed, color = "#cf222e"];
+  c5 -> c6 [dir = none, style = dashed, color = "#cf222e"];
+  c0 -> build [style = dashed, color = "#cf222e", constraint = false];
 }
