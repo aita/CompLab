@@ -18,7 +18,7 @@ graph wt {
   v1 [label = <v1<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">5</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "1.55,0.1!"];
   v2 [label = <v2<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "0,-2.15!"];
   v3 [label = <v3<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "0,-0.85!"];
-  v5 [label = <v5<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#0969da", penwidth = 2 pos = "0.1,1.9!"];
+  v5 [width = 0.88, fontsize = 10, label = <v5・v4<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#0969da", penwidth = 2 pos = "0.1,1.9!"];
   v7 [label = <v7<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">2</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "2.6,1.55!"];
   v6 [label = <<FONT COLOR="#8c959f">v6</FONT>>, style = "filled,dashed", fillcolor = "#ffffff", color = "#c9d1d9" pos = "3.05,0.25!"];
   v0 -- v1 [color = "#57606a"];
