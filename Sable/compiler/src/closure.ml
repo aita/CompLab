@@ -21,7 +21,9 @@ type t =
   | If_eq of Ident.t * Ident.t * t * t
   | If_le of Ident.t * Ident.t * t * t
   | Let of (Ident.t * Types.t) * t * t
-  | Make_closure of (Ident.t * Types.t) * closure * t
+  (* A whole group at once: mutually recursive closures capture one another, so
+     the blocks are all allocated before any of them is filled in. *)
+  | Make_closures of ((Ident.t * Types.t) * closure) list * t
   | Call_closure of Ident.t * Ident.t list
   | Call_direct of Ident.label * Ident.t list
   | Tuple of Ident.t list
@@ -56,8 +58,14 @@ let rec free_vars = function
       (Ident.Set.add y (Ident.Set.union (free_vars e1) (free_vars e2)))
   | Let ((x, _), e1, e2) ->
     Ident.Set.union (free_vars e1) (Ident.Set.remove x (free_vars e2))
-  | Make_closure ((x, _), { captured; _ }, e) ->
-    Ident.Set.remove x (Ident.Set.union (Ident.Set.of_list captured) (free_vars e))
+  | Make_closures (definitions, e) ->
+    let bound = Ident.Set.of_list (List.map (fun ((x, _), _) -> x) definitions) in
+    let captured =
+      List.fold_left
+        (fun acc (_, { captured; _ }) -> Ident.Set.union acc (Ident.Set.of_list captured))
+        (free_vars e) definitions
+    in
+    Ident.Set.diff captured bound
   | Call_closure (f, xs) -> Ident.Set.of_list (f :: xs)
   | Call_direct (_, xs) | Tuple xs | Block (_, xs) -> Ident.Set.of_list xs
   | Let_tuple (xts, y, e) ->
@@ -73,8 +81,8 @@ let close_over env names body =
   List.fold_left
     (fun body x ->
       if Ident.Set.mem x (free_vars body) then
-        Make_closure
-          ((x, Ident.Map.find x env), { entry = Ident.to_label x; captured = [] }, body)
+        Make_closures
+          ([ ((x, Ident.Map.find x env), { entry = Ident.to_label x; captured = [] }) ], body)
       else body)
     body names
 
@@ -151,42 +159,44 @@ and convert_group env known fds cont =
     close_over env names (convert_exp env optimistic cont)
   end
   else begin
-    if List.length fds > 1 then
-      raise
-        (Error
-           (Printf.sprintf
-              "the mutually recursive functions %s capture the variable(s) %s.\n\
-               Only a self-recursive function may capture its environment; \
-               pass the captured\nvalues as arguments instead."
-              (String.concat ", " (List.map Ident.display names))
-              (String.concat ", "
-                 (List.map Ident.display (Ident.Set.elements captured)))));
-    (* One function, and it needs a closure.  Throw away the optimistic bodies:
-       its recursive calls have to go through the closure too. *)
+    (* The group needs closures.  Throw away the optimistic bodies: calls
+       between its members have to go through those closures too. *)
     lifted := lifted_before;
-    let fd = List.hd fds in
-    let body = List.hd (convert_bodies known) in
-    (* The function's own name may be free in its body -- that is how it calls
-       itself -- so it is captured like any other variable.  Make_closure binds
-       the name before storing the captures, which makes that self-reference
-       point at the closure being built. *)
+    let bodies = convert_bodies known in
+    (* A member's own name may be free in its body -- that is how it calls
+       itself -- and so may its siblings' names.  All of them are captured like
+       any other variable, and Make_closures binds every name before storing
+       any capture, so the cycle closes. *)
     let captures =
-      Ident.Set.elements
-        (Ident.Set.diff (free_vars body) (Ident.Set.of_list (List.map fst fd.args)))
+      List.map2
+        (fun (fd : Anf.fundef) body ->
+          Ident.Set.elements
+            (Ident.Set.diff (free_vars body) (Ident.Set.of_list (List.map fst fd.args))))
+        fds bodies
     in
-    let name = fst fd.name in
-    lifted :=
-      {
-        label = Ident.to_label name;
-        args = fd.args;
-        captures = List.map (fun z -> (z, Ident.Map.find z env)) captures;
-        body;
-      }
-      :: !lifted;
+    List.iter2
+      (fun ((fd : Anf.fundef), body) captured ->
+        lifted :=
+          {
+            label = Ident.to_label (fst fd.name);
+            args = fd.args;
+            captures = List.map (fun z -> (z, Ident.Map.find z env)) captured;
+            body;
+          }
+          :: !lifted)
+      (List.combine fds bodies) captures;
     let cont = convert_exp env known cont in
-    if Ident.Set.mem name (free_vars cont) then
-      Make_closure
-        ((name, snd fd.name), { entry = Ident.to_label name; captured = captures }, cont)
+    let definitions =
+      List.map2
+        (fun (fd : Anf.fundef) captured ->
+          ( (fst fd.name, snd fd.name),
+            { entry = Ident.to_label (fst fd.name); captured } ))
+        fds captures
+    in
+    (* Nothing left to build if the whole group turned out to be unused. *)
+    if List.exists (fun ((x, _), _) -> Ident.Set.mem x (free_vars cont)) definitions
+       || List.length definitions > 1
+    then Make_closures (definitions, cont)
     else cont
   end
 

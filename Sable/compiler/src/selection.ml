@@ -145,17 +145,29 @@ let rec generate ctx dest exp =
         bind ctx x r)
       xts;
     generate ctx dest body
-  | Closure.Make_closure ((x, _), { entry; captured }, body) ->
-    let block = allocate_block ctx ((1 + List.length captured) * word) in
-    let code = Riscv.fresh_reg () in
-    emit ctx.builder (Riscv.La (code, entry));
-    emit ctx.builder (Riscv.Store (code, block, 0));
-    (* Bind the name before storing the captures so that a closure capturing
-       itself stores a pointer to itself. *)
-    bind ctx x block;
-    List.iteri
-      (fun i v -> emit ctx.builder (Riscv.Store (operand ctx v, block, (i + 1) * word)))
-      captured;
+  | Closure.Make_closures (definitions, body) ->
+    (* Allocate every block and bind every name first, then fill them in: a
+       closure may capture itself or a sibling, and neither pointer exists
+       until its block does. *)
+    let blocks =
+      List.map
+        (fun ((x, _), (closure : Closure.closure)) ->
+          let block =
+            allocate_block ctx ((1 + List.length closure.captured) * word)
+          in
+          bind ctx x block;
+          (block, closure))
+        definitions
+    in
+    List.iter
+      (fun (block, (closure : Closure.closure)) ->
+        let code = Riscv.fresh_reg () in
+        emit ctx.builder (Riscv.La (code, closure.entry));
+        emit ctx.builder (Riscv.Store (code, block, 0));
+        List.iteri
+          (fun i v -> emit ctx.builder (Riscv.Store (operand ctx v, block, (i + 1) * word)))
+          closure.captured)
+      blocks;
     generate ctx dest body
   | Closure.Call_direct (label, args) -> generate_call ctx dest (Riscv.Direct label) args None
   | Closure.Call_closure (f, args) ->
@@ -251,6 +263,16 @@ and generate_less_than ctx target a b =
     emit ctx.builder (Riscv.Arith_imm (Riscv.Slt, target, operand ctx a, n))
   | _ -> emit ctx.builder (Riscv.Arith (Riscv.Slt, target, operand ctx a, operand ctx b))
 
+(* Branch away to a call that never returns if the divisor is zero. *)
+and check_divisor ctx divisor =
+  let fine = Ident.fresh_label "nonzero" in
+  let bad = Ident.fresh_label "divzero" in
+  terminate ctx.builder (Riscv.Branch (Riscv.Eq, divisor, Riscv.zero, bad, fine));
+  start_block ctx.builder bad;
+  emit ctx.builder (Riscv.Call (Riscv.Direct "sable_division_by_zero", []));
+  terminate ctx.builder (Riscv.Jump fine);
+  start_block ctx.builder fine
+
 and generate_arith ctx target op x y =
   let shift src k =
     if k = 0 then emit ctx.builder (Riscv.Move (target, src))
@@ -273,6 +295,15 @@ and generate_arith ctx target op x y =
     shift (operand ctx x) (Option.get (power_of_two n))
   | Anf.Mul, Some n, _ when power_of_two n <> None ->
     shift (operand ctx y) (Option.get (power_of_two n))
+  | (Anf.Div | Anf.Rem), _, divisor ->
+    (* RISC-V does not trap on division by zero, it answers -1, so a program
+       that divides by zero would quietly carry on with a wrong number.  The
+       check is skipped when the divisor is a constant we can see is not
+       zero, which is most of them. *)
+    (match divisor with
+     | Some n when n <> 0 -> ()
+     | _ -> check_divisor ctx (operand ctx y));
+    emit ctx.builder (Riscv.Arith (binop_of op, target, operand ctx x, operand ctx y))
   | _ ->
     emit ctx.builder (Riscv.Arith (binop_of op, target, operand ctx x, operand ctx y))
 

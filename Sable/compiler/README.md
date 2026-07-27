@@ -373,14 +373,14 @@ Deliberate, and each one is a place the project could go next.
   runtime offers length, indexing, concatenation and equality.
 - Functions are uncurried and take at most eight arguments (they arrive in
   `a0`–`a7`); more should be a tuple.
-- Mutually recursive functions may not capture their environment. A
-  self-recursive one may, through its own closure; a cyclic group of closures
-  would need allocate-then-patch, which is not implemented. The compiler says so
-  rather than miscompiling.
-- No bounds checking on arrays, and integer division by zero follows the
-  hardware rather than raising.
+- No bounds checking on arrays or strings. Arrays do not carry their length, so
+  adding it would mean a word per array and a load and a branch per access;
+  strings do carry one, so checking them is the cheaper half and is still not
+  done.
 - No inlining, and no instruction scheduling.
-- Type errors do not carry source positions; syntax errors do.
+- Allocation is a call into the runtime. Inlining the bump pointer would save
+  the call and, more to the point, stop every allocation from destroying the
+  caller-saved registers and forcing values onto the stack.
 
 ## Layout
 

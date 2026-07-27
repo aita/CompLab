@@ -76,8 +76,12 @@ let rec closure out level exp =
   | Closure.Let_tuple (xts, y, e) ->
     say "let (%s) = %s in" (String.concat ", " (List.map fst xts)) y;
     closure out level e
-  | Closure.Make_closure ((x, _), { entry; captured }, e) ->
-    say "let %s = closure %s capturing (%s) in" x entry (vars captured);
+  | Closure.Make_closures (definitions, e) ->
+    List.iter
+      (fun ((x, _), (c : Closure.closure)) ->
+        say "let %s = closure %s capturing (%s)" x c.entry (vars c.captured))
+      definitions;
+    say "in";
     closure out level e
 
 and closure_if out level op x y e1 e2 =

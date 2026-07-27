@@ -34,13 +34,16 @@ let applied_type name args =
 (* A dotted run of capitalised names is a module path until something says
    otherwise, so both readings come out of one nonterminal and the action
    decides.  See the same trick in the ML parser. *)
-let is_path = function Constr (name, []) -> Some (String.split_on_char '.' name) | _ -> None
+let is_path e =
+  match strip e with
+  | Constr (name, []) -> Some (String.split_on_char '.' name)
+  | _ -> None
 
 (* Extending a path: `M` then `.N`.  Paths grow through the same postfix rule
    as property access, so the parser never has to decide at the dot which of
    the two it is looking at. *)
 let extend owner name =
-  match owner with
+  match strip owner with
   | Constr (path, []) -> Constr (path ^ "." ^ name, [])
   | _ -> failwith (Printf.sprintf "`%s` cannot be selected from a value" name)
 
@@ -66,8 +69,10 @@ let invoke owner name args =
 
 (* `f()` is a call with no arguments; every function here takes at least one,
    so it is passed the unit value. *)
+let at position exp = At (position, exp)
+
 let call fn args =
-  match fn with
+  match strip fn with
   | Constr (name, []) -> Constr (name, args)
   | _ -> App (fn, (match args with [] -> [ Unit ] | args -> args))
 %}
@@ -95,6 +100,7 @@ let call fn args =
 
 program:
   | declarations EOF { Kotlin_build.program $1 }
+
 
 declarations:
   | (* empty *) { [] }
@@ -213,16 +219,17 @@ statement:
 (* ----------------------------------------------------------- expressions *)
 
 expr:
-  | IF LPAREN expr RPAREN expr %prec no_else { If ($3, $5, Unit) }
-  | IF LPAREN expr RPAREN expr ELSE expr { If ($3, $5, $7) }
+  | IF LPAREN expr RPAREN expr %prec no_else { at $startpos (If ($3, $5, Unit)) }
+  | IF LPAREN expr RPAREN expr ELSE expr { at $startpos (If ($3, $5, $7)) }
   | WHEN LPAREN expr RPAREN LBRACE cases RBRACE
-      { Match
-          ( { scrutinee_type = Types.fresh_var (); result_type = Types.fresh_var () },
-            $3, $6 ) }
+      { at $startpos
+          (Match
+             ( { scrutinee_type = Types.fresh_var (); result_type = Types.fresh_var () },
+               $3, $6 )) }
   | FUN LPAREN parameters RPAREN opt_type function_body
       { let f = Ident.fresh "lambda" in
         Let_rec ([ make_function f $3 $5 $6 ], Var f) }
-  | postfix LBRACKET expr RBRACKET EQUAL expr { Put ($1, $3, $6) }
+  | postfix LBRACKET expr RBRACKET EQUAL expr { at $startpos (Put ($1, $3, $6)) }
   | disjunction { $1 }
 
 disjunction:
@@ -234,48 +241,48 @@ conjunction:
   | comparison { $1 }
 
 comparison:
-  | sum EQUAL_EQUAL sum { Cmp (Eq, $1, $3) }
-  | sum BANG_EQUAL sum { Cmp (Ne, $1, $3) }
-  | sum LESS sum { Cmp (Lt, $1, $3) }
-  | sum LESS_EQUAL sum { Cmp (Le, $1, $3) }
-  | sum GREATER sum { Cmp (Gt, $1, $3) }
-  | sum GREATER_EQUAL sum { Cmp (Ge, $1, $3) }
+  | sum EQUAL_EQUAL sum { at $startpos (Cmp (Eq, $1, $3)) }
+  | sum BANG_EQUAL sum { at $startpos (Cmp (Ne, $1, $3)) }
+  | sum LESS sum { at $startpos (Cmp (Lt, $1, $3)) }
+  | sum LESS_EQUAL sum { at $startpos (Cmp (Le, $1, $3)) }
+  | sum GREATER sum { at $startpos (Cmp (Gt, $1, $3)) }
+  | sum GREATER_EQUAL sum { at $startpos (Cmp (Ge, $1, $3)) }
   | sum { $1 }
 
 sum:
-  | sum PLUS product { Arith (Add, $1, $3) }
-  | sum MINUS product { Arith (Sub, $1, $3) }
+  | sum PLUS product { at $startpos (Arith (Add, $1, $3)) }
+  | sum MINUS product { at $startpos (Arith (Sub, $1, $3)) }
   | product { $1 }
 
 product:
-  | product STAR unary { Arith (Mul, $1, $3) }
-  | product SLASH unary { Arith (Div, $1, $3) }
-  | product PERCENT unary { Arith (Rem, $1, $3) }
+  | product STAR unary { at $startpos (Arith (Mul, $1, $3)) }
+  | product SLASH unary { at $startpos (Arith (Div, $1, $3)) }
+  | product PERCENT unary { at $startpos (Arith (Rem, $1, $3)) }
   | unary { $1 }
 
 unary:
-  | MINUS unary { Neg $2 }
-  | BANG unary { Not $2 }
+  | MINUS unary { at $startpos (Neg $2) }
+  | BANG unary { at $startpos (Not $2) }
   | postfix { $1 }
 
 postfix:
-  | postfix LPAREN arguments RPAREN { call $1 $3 }
-  | postfix LBRACKET expr RBRACKET { Get ($1, $3) }
+  | postfix LPAREN arguments RPAREN { at $startpos (call $1 $3) }
+  | postfix LBRACKET expr RBRACKET { at $startpos (Get ($1, $3)) }
   | postfix DOT UIDENT { extend $1 $3 }
-  | postfix DOT IDENT { select $1 $3 }
-  | postfix DOT IDENT LPAREN arguments RPAREN { invoke $1 $3 $5 }
+  | postfix DOT IDENT { at $startpos (select $1 $3) }
+  | postfix DOT IDENT LPAREN arguments RPAREN { at $startpos (invoke $1 $3 $5) }
   | primary { $1 }
 
 primary:
   | INT { Int $1 }
   | STRING { Str $1 }
   | BOOL { Bool $1 }
-  | IDENT { Var $1 }
+  | IDENT { at $startpos (Var $1) }
   | UIDENT { Constr ($1, []) }
-  | ARRAY LPAREN expr COMMA expr RPAREN { Array ($3, $5) }
+  | ARRAY LPAREN expr COMMA expr RPAREN { at $startpos (Array ($3, $5)) }
   | LIST_OF LPAREN arguments RPAREN { list_of $3 }
   | NIL { Nil }
-  | CONS LPAREN expr COMMA expr RPAREN { Cons ($3, $5) }
+  | CONS LPAREN expr COMMA expr RPAREN { at $startpos (Cons ($3, $5)) }
   | LPAREN RPAREN { Unit }
   | LPAREN arguments RPAREN { match $2 with [ e ] -> e | es -> Tuple es }
   | block { $1 }

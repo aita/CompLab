@@ -21,7 +21,16 @@ open Syntax
 
 exception Error of string
 
-let fail fmt = Printf.ksprintf (fun msg -> raise (Error msg)) fmt
+(* Where the expression being checked was written. *)
+let position : Lexing.position option ref = ref None
+
+let fail fmt =
+  Printf.ksprintf
+    (fun msg ->
+      match !position with
+      | Some p -> raise (Error (Printf.sprintf "%s: %s" (describe_position p) msg))
+      | None -> raise (Error msg))
+    fmt
 
 (* Functions provided by the runtime.  A name that is neither bound locally nor
    listed here is a genuine unbound-variable error rather than an implicitly
@@ -40,7 +49,9 @@ let externals =
 (* A comparison compiles to one machine-word comparison, so it is only
    meaningful on unboxed types.  The operand type is often still a variable
    when we meet it, so record it and check once everything is known. *)
-let deferred_comparisons : (Types.t * string) list ref = ref []
+(* Checked once the whole program is known, so each one remembers where it
+   was written. *)
+let deferred_comparisons : (Types.t * string * Lexing.position option) list ref = ref []
 
 let unify_in where expected actual =
   try Types.unify expected actual with
@@ -63,7 +74,7 @@ let check_arity name expected got =
    one-shot `let rec` whose body is the function's own name. *)
 let rec is_value = function
   | Unit | Bool _ | Int _ | Str _ | Var _ | Nil -> true
-  | Annot (e, _) -> is_value e
+  | At (_, e) | Annot (e, _) -> is_value e
   | Cons (head, tail) -> is_value head && is_value tail
   | Tuple es -> List.for_all is_value es
   | Constr (_, es) -> List.for_all is_value es
@@ -124,6 +135,12 @@ let bind_all bindings env =
 
 let rec infer_exp env exp =
   match exp with
+  | At (p, e) ->
+    let saved = !position in
+    position := Some p;
+    let t = infer_exp env e in
+    position := saved;
+    t
   | Unit -> Types.Unit
   | Bool _ -> Types.Bool
   | Int _ -> Types.Int
@@ -145,7 +162,7 @@ let rec infer_exp env exp =
     unify_in where t1 t2;
     (* Never quantify what a comparison rests on. *)
     Types.pin t1;
-    deferred_comparisons := (t1, string_of_cmp op) :: !deferred_comparisons;
+    deferred_comparisons := (t1, string_of_cmp op, !position) :: !deferred_comparisons;
     Types.Bool
   | If (cond, e1, e2) ->
     unify_in "in the condition of `if`" Types.Bool (infer_exp env cond);
@@ -282,7 +299,8 @@ let check exp =
   let t = infer_exp env exp in
   unify_in "at the top level (a program must have type unit)" Types.Unit t;
   List.iter
-    (fun (t, op) ->
+    (fun (t, op, where) ->
+      position := where;
       match Types.resolve t with
       | Types.Int | Types.Bool | Types.Unit -> ()
       | Types.String ->

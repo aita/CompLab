@@ -30,7 +30,15 @@ open Syntax
 
 exception Error of string
 
-let fail fmt = Printf.ksprintf (fun msg -> raise (Error msg)) fmt
+let position : Lexing.position option ref = ref None
+
+let fail fmt =
+  Printf.ksprintf
+    (fun msg ->
+      match !position with
+      | Some p -> raise (Error (Printf.sprintf "%s: %s" (describe_position p) msg))
+      | None -> raise (Error msg))
+    fmt
 
 type entry =
   | Structure of scope
@@ -209,10 +217,9 @@ let match_signature ~what body structure =
         | None -> fail "%s does not match its signature: it has no value `%s`" what name
         | Some internal ->
           fun rest ->
-            Let
-              ( (Ident.fresh "signature", Types.fresh_var ()),
-                Annot (Var internal, substitute assignments declared),
-                rest ))
+            let check = Annot (Var internal, substitute assignments declared) in
+            let check = match !position with Some p -> At (p, check) | None -> check in
+            Let ((Ident.fresh "signature", Types.fresh_var ()), check, rest))
       body.declared
   in
   (* What the signature lets through: its own names, and none of the
@@ -264,6 +271,12 @@ let declare_types scope prefix decls =
 let rec resolve_exp scope exp =
   let recur = resolve_exp scope in
   match exp with
+  | At (p, e) ->
+    let saved = !position in
+    position := Some p;
+    let e = resolve_exp scope e in
+    position := saved;
+    At (p, e)
   | Unit | Bool _ | Int _ | Str _ | Nil -> exp
   | Var x -> (
     (* A name this pass has not seen is either a runtime external or a genuine

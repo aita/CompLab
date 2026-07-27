@@ -77,6 +77,7 @@ word sable_read_int(word unit) {
 }
 
 void sable_match_failure(void) { fatal("match failure"); }
+void sable_division_by_zero(void) { fatal("division by zero"); }
 
 int main(void) {
   size_t heap_size = 256u << 20;

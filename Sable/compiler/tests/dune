@@ -170,6 +170,17 @@
  (action
   (diff kotlin.expected kotlin.out)))
 
+(rule
+ (with-stdout-to
+  mutual_closures.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:cases/mutual_closures.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff mutual_closures.expected mutual_closures.out)))
+
 ; A program the checker warns about, which then fails at run time exactly where
 ; the warning said it would.
 
@@ -199,8 +210,7 @@
     %{dep:errors/functor_missing.sbl}
     %{dep:errors/functor_too_specific.sbl} %{dep:errors/functor_unapplied.sbl}
     %{dep:errors/missing_sig_type.sbl} %{dep:errors/module_as_value.sbl}
-    %{dep:errors/module_member.sbl}
-    %{dep:errors/mutual_capture.sbl} %{dep:errors/not_unit.sbl}
+    %{dep:errors/module_member.sbl} %{dep:errors/not_unit.sbl}
     %{dep:errors/sealed.sbl} %{dep:errors/syntax.sbl}
     %{dep:errors/too_many_args.sbl}
     %{dep:errors/string_index.sbl} %{dep:errors/type_mismatch.sbl}

@@ -30,6 +30,7 @@ type t =
   | Str_get of t * t (* s.[i], the byte as an integer *)
   | Nil
   | Cons of t * t
+  | At of Lexing.position * t (* where this was written, for diagnostics *)
   | Annot of t * Types.t (* generated: `(e : ty)`, how a signature is checked *)
   | Qualified of string list * Ident.t (* M.x, M.N.x -- resolved away by Modules *)
   | Type_decl of type_decl * t (* type t = A | B in e *)
@@ -91,6 +92,13 @@ and fundef = {
   args : (Ident.t * Types.t) list;
   body : t;
 }
+
+(* Positions are only for diagnostics, so anything looking at the shape of an
+   expression wants to see through them. *)
+let rec strip = function At (_, e) -> strip e | e -> e
+
+let describe_position (p : Lexing.position) =
+  Printf.sprintf "%s:%d:%d" p.pos_fname p.pos_lnum (p.pos_cnum - p.pos_bol)
 
 let string_of_arith = function
   | Add -> "+"

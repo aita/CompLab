@@ -59,7 +59,7 @@ let mentioned exp =
     match e with
     | Var x -> Hashtbl.replace names x ()
     | Unit | Bool _ | Int _ | Str _ | Nil | Constr (_, []) | Qualified _ -> ()
-    | Not e | Neg e | Str_length e | Annot (e, _) | Field (e, _, _) -> walk e
+    | At (_, e) | Not e | Neg e | Str_length e | Annot (e, _) | Field (e, _, _) -> walk e
     | Arith (_, a, b) | Cmp (_, a, b) | Cons (a, b) | Str_get (a, b) | Array (a, b)
     | Get (a, b) ->
       walk a; walk b

@@ -260,6 +260,9 @@ let rec compile exp =
     Cons (head, compile tail)
   | Constr (name, args) -> Constr (name, List.map compile args)
   | Field (e, i, t) -> Field (compile e, i, t)
+  (* Positions have done their work by now; the passes after this one have no
+     use for them. *)
+  | At (_, e) -> compile e
   | Annot (e, t) -> Annot (compile e, t)
   | Type_decl _ | Qualified _ | Module _ | Open _ | Module_type _ | Functor _ ->
     failwith "Match_compile: modules should have been resolved away by Modules"

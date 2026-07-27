@@ -1,75 +1,71 @@
 --- branches.sbl
-type error between the branches of `if`:
+errors/branches.sbl:1:14: type error between the branches of `if`:
   expected: int
   but got:  bool
 --- compare_string.sbl
-`=` cannot compare strings; use `String.equal`
+errors/compare_string.sbl:1:16: `=` cannot compare strings; use `String.equal`
 --- compare_tuple.sbl
-`=` cannot compare values of type (int * int).
+errors/compare_tuple.sbl:1:19: `=` cannot compare values of type (int * int).
 Only int, bool and unit compare as a single machine word.
 --- list_element_types.sbl
-type error in the tail of `::`:
+errors/list_element_types.sbl:2:11: type error in the tail of `::`:
   expected: int list
   but got:  bool list
 --- constructor_arity.sbl
-the constructor `Pair` expects 2 argument(s) but is given 1
+errors/constructor_arity.sbl:2:11: the constructor `Pair` expects 2 argument(s) but is given 1
 --- duplicate_pattern_var.sbl
-the variable `x` is bound twice in the pattern `Pair (x, x)`
+errors/duplicate_pattern_var.sbl:2:11: the variable `x` is bound twice in the pattern `Pair (x, x)`
 --- abstract_in_functor.sbl
-unknown constructor `T`
+errors/abstract_in_functor.sbl:4:43: unknown constructor `T`
 --- abstract_type.sbl
-the module `M` has no constructor `T`
+errors/abstract_type.sbl:6:11: the module `M` has no constructor `T`
 --- distinct_abstract.sbl
-type error in a function application:
+errors/distinct_abstract.sbl:6:11: type error in a function application:
   expected: (B.t -> int)
   but got:  (A.t -> 'a)
 --- functor_hidden.sbl
-the module `X` has no value `other`
+errors/functor_hidden.sbl:4:41: the module `X` has no value `other`
 --- functor_missing.sbl
-the argument of `F` does not match its signature: it has no value `g`
+errors/functor_missing.sbl:4:0: the argument of `F` does not match its signature: it has no value `g`
 --- functor_too_specific.sbl
-type error in a signature:
+errors/functor_too_specific.sbl:5:0: type error in a signature:
   expected: ('a -> 'a list)
   but got:  (int -> int list)
 --- functor_unapplied.sbl
-`F` is a functor; it has to be applied before its contents are used
+errors/functor_unapplied.sbl:2:10: `F` is a functor; it has to be applied before its contents are used
 --- missing_sig_type.sbl
-the argument of `F` does not match its signature: it has no type `t`
+errors/missing_sig_type.sbl:4:0: the argument of `F` does not match its signature: it has no type `t`
 --- module_as_value.sbl
-`M.N` is a module, not a value
+errors/module_as_value.sbl:1:57: `M.N` is a module, not a value
 --- module_member.sbl
-the module `M` has no value `y`
---- mutual_capture.sbl
-the mutually recursive functions ping, pong capture the variable(s) n.
-Only a self-recursive function may capture its environment; pass the captured
-values as arguments instead.
+errors/module_member.sbl:1:45: the module `M` has no value `y`
 --- not_unit.sbl
 type error at the top level (a program must have type unit):
   expected: unit
   but got:  int
 --- sealed.sbl
-the module `M` has no value `hidden`
+errors/sealed.sbl:5:10: the module `M` has no value `hidden`
 --- syntax.sbl
 errors/syntax.sbl:1:18: syntax error at `in'
 --- too_many_args.sbl
-`f` takes 9 arguments; at most 8 are supported (pass a tuple)
+errors/too_many_args.sbl:1:0: `f` takes 9 arguments; at most 8 are supported (pass a tuple)
 --- string_index.sbl
-type error in a string index:
+errors/string_index.sbl:1:16: type error in a string index:
   expected: int
   but got:  bool
 --- type_mismatch.sbl
-type error in a function application:
+errors/type_mismatch.sbl:1:34: type error in a function application:
   expected: (int -> int)
   but got:  (bool -> 'a)
 --- unbound.sbl
-unbound variable `y`
+errors/unbound.sbl:1:28: unbound variable `y`
 --- unbound_module.sbl
-unbound module `Missing`
+errors/unbound_module.sbl:1:10: unbound module `Missing`
 --- weak_comparison.sbl
-type error in a function application:
+errors/weak_comparison.sbl:4:14: type error in a function application:
   expected: (int * int list -> bool)
   but got:  (bool * bool list -> 'a)
 --- unknown_constructor.sbl
-unknown constructor `Blue`
+errors/unknown_constructor.sbl:2:14: unknown constructor `Blue`
 --- unknown_type.sbl
 unknown type `widget` in the declaration of `box`

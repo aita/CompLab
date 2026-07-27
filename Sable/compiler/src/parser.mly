@@ -38,6 +38,11 @@ let base_type = function
    and how many arguments a constructor takes -- is Modules' business, so the
    name travels as written and the arguments are left alone. *)
 let dotted path = String.concat "." path
+
+(* Diagnostics want to say where something was written.  Only the productions
+   an error can be reported against carry a position; the rest would be noise
+   in the tree for no gain. *)
+let at position exp = At (position, exp)
 %}
 
 %token <int> INT
@@ -131,66 +136,67 @@ type_expr:
 simple_exp:
   | LPAREN exp RPAREN { $2 }
   | BEGIN exp END { $2 }
-  | long_name DOT IDENT { Qualified ($1, $3) }
+  | long_name DOT IDENT { at $startpos (Qualified ($1, $3)) }
   | LPAREN RPAREN { Unit }
   | BOOL { Bool $1 }
   | INT { Int $1 }
   | STRING { Str $1 }
-  | IDENT { Var $1 }
+  | IDENT { at $startpos (Var $1) }
   | long_name { Constr (dotted $1, []) }
   | LBRACKET RBRACKET { Nil }
   | LBRACKET list_body RBRACKET { List.fold_right (fun e rest -> Cons (e, rest)) $2 Nil }
-  | simple_exp DOT LPAREN exp RPAREN { Get ($1, $4) }
-  | simple_exp DOT LBRACKET exp RBRACKET { Str_get ($1, $4) }
+  | simple_exp DOT LPAREN exp RPAREN { at $startpos (Get ($1, $4)) }
+  | simple_exp DOT LBRACKET exp RBRACKET { at $startpos (Str_get ($1, $4)) }
 
 exp:
   | simple_exp { $1 }
-  | NOT exp %prec prec_app { Not $2 }
-  | MINUS exp %prec prec_unary_minus { Neg $2 }
-  | exp PLUS exp { Arith (Add, $1, $3) }
-  | exp MINUS exp { Arith (Sub, $1, $3) }
-  | exp AST exp { Arith (Mul, $1, $3) }
-  | exp SLASH exp { Arith (Div, $1, $3) }
-  | exp PERCENT exp { Arith (Rem, $1, $3) }
-  | exp EQUAL exp { Cmp (Eq, $1, $3) }
-  | exp LESS_GREATER exp { Cmp (Ne, $1, $3) }
-  | exp LESS exp { Cmp (Lt, $1, $3) }
-  | exp GREATER exp { Cmp (Gt, $1, $3) }
-  | exp LESS_EQUAL exp { Cmp (Le, $1, $3) }
-  | exp GREATER_EQUAL exp { Cmp (Ge, $1, $3) }
+  | NOT exp %prec prec_app { at $startpos (Not $2) }
+  | MINUS exp %prec prec_unary_minus { at $startpos (Neg $2) }
+  | exp PLUS exp { at $startpos (Arith (Add, $1, $3)) }
+  | exp MINUS exp { at $startpos (Arith (Sub, $1, $3)) }
+  | exp AST exp { at $startpos (Arith (Mul, $1, $3)) }
+  | exp SLASH exp { at $startpos (Arith (Div, $1, $3)) }
+  | exp PERCENT exp { at $startpos (Arith (Rem, $1, $3)) }
+  | exp EQUAL exp { at $startpos (Cmp (Eq, $1, $3)) }
+  | exp LESS_GREATER exp { at $startpos (Cmp (Ne, $1, $3)) }
+  | exp LESS exp { at $startpos (Cmp (Lt, $1, $3)) }
+  | exp GREATER exp { at $startpos (Cmp (Gt, $1, $3)) }
+  | exp LESS_EQUAL exp { at $startpos (Cmp (Le, $1, $3)) }
+  | exp GREATER_EQUAL exp { at $startpos (Cmp (Ge, $1, $3)) }
   | exp AMPAMP exp { If ($1, $3, Bool false) }
   | exp BARBAR exp { If ($1, Bool true, $3) }
-  | IF exp THEN exp ELSE exp %prec prec_if { If ($2, $4, $6) }
+  | IF exp THEN exp ELSE exp %prec prec_if { at $startpos (If ($2, $4, $6)) }
   (* A missing `else` is `else ()`, so the branch must have type unit. *)
-  | IF exp THEN exp %prec prec_if { If ($2, $4, Unit) }
+  | IF exp THEN exp %prec prec_if { at $startpos (If ($2, $4, Unit)) }
   | MATCH exp WITH match_cases %prec prec_match
-      { Match
-          ( { scrutinee_type = Types.fresh_var (); result_type = Types.fresh_var () },
-            $2, $4 ) }
+      { at $startpos
+          (Match
+             ( { scrutinee_type = Types.fresh_var (); result_type = Types.fresh_var () },
+               $2, $4 )) }
   | FUN formal_args ARROW exp %prec prec_let { lambda $2 $4 }
-  | LET IDENT EQUAL exp IN exp %prec prec_let { Let (typed $2, $4, $6) }
-  | LET REC fundefs IN exp %prec prec_let { Let_rec ($3, $5) }
-  | MODULE UIDENT EQUAL module_exp IN exp %prec prec_let { Module ($2, $4, $6) }
+  | LET IDENT EQUAL exp IN exp %prec prec_let { at $startpos (Let (typed $2, $4, $6)) }
+  | LET REC fundefs IN exp %prec prec_let { at $startpos (Let_rec ($3, $5)) }
+  | MODULE UIDENT EQUAL module_exp IN exp %prec prec_let { at $startpos (Module ($2, $4, $6)) }
   | MODULE UIDENT COLON signature EQUAL module_exp IN exp %prec prec_let
-      { Module ($2, Mod_sealed ($6, $4), $8) }
+      { at $startpos (Module ($2, Mod_sealed ($6, $4), $8)) }
   | MODULE UIDENT LPAREN UIDENT COLON signature RPAREN EQUAL STRUCT items END IN exp
       %prec prec_let
-      { Functor ($2, $4, $6, $10, $13) }
+      { at $startpos (Functor ($2, $4, $6, $10, $13)) }
   | MODULE TYPE UIDENT EQUAL signature IN exp %prec prec_let
-      { Module_type ($3, $5, $7) }
-  | OPEN long_name IN exp %prec prec_let { Open ($2, $4) }
+      { at $startpos (Module_type ($3, $5, $7)) }
+  | OPEN long_name IN exp %prec prec_let { at $startpos (Open ($2, $4)) }
   | LET LPAREN tuple_pat RPAREN EQUAL exp IN exp %prec prec_let
       { Let_tuple ($3, $6, $8) }
   | exp actual_args %prec prec_app
-      { match $1 with
-        | Constr (c, []) -> Constr (c, $2)
-        | f -> App (f, $2) }
+      { match strip $1 with
+        | Constr (c, []) -> at $startpos (Constr (c, $2))
+        | _ -> at $startpos (App ($1, $2)) }
   | elems %prec prec_tuple { Tuple $1 }
-  | ARRAY_MAKE simple_exp simple_exp %prec prec_app { Array ($2, $3) }
-  | STRING_LENGTH simple_exp %prec prec_app { Str_length $2 }
+  | ARRAY_MAKE simple_exp simple_exp %prec prec_app { at $startpos (Array ($2, $3)) }
+  | STRING_LENGTH simple_exp %prec prec_app { at $startpos (Str_length $2) }
   | exp CARET exp { App (Var "string_concat", [ $1; $3 ]) }
-  | simple_exp DOT LPAREN exp RPAREN LESS_MINUS exp { Put ($1, $4, $7) }
-  | exp COLONCOLON exp { Cons ($1, $3) }
+  | simple_exp DOT LPAREN exp RPAREN LESS_MINUS exp { at $startpos (Put ($1, $4, $7)) }
+  | exp COLONCOLON exp { at $startpos (Cons ($1, $3)) }
   | exp SEMICOLON exp { sequence $1 $3 }
 
 (* `[a; b]` is a two-element list, not a one-element list of a sequence: the
