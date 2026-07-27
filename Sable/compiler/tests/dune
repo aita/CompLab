@@ -157,6 +157,20 @@
  (action
   (diff functors.expected functors.out)))
 
+; The program the pipeline walkthrough is written around; the dumps quoted in
+; doc/pipeline.md come from it, so it has to keep compiling.
+
+(rule
+ (with-stdout-to
+  sum.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:../doc/sum.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff sum.expected sum.out)))
+
 ; The same language written in the brace form.
 
 (rule

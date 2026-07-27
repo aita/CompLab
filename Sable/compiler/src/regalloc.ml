@@ -106,11 +106,14 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
     let coloured_nodes = ref RegSet.empty in
     let select_stack = ref [] in
     let on_select_stack = ref RegSet.empty in
+    (* Appel keeps a move in exactly one of five sets, which makes the
+       invariant easy to state.  Only two of them are ever consulted here --
+       node_moves asks whether a move is still live, and a move is live exactly
+       when it is waiting or merely paused -- so the other three would be state
+       nothing reads.  What became of a move is recorded as a count instead. *)
     let worklist_moves = ref RegSet.empty in
     let active_moves = ref RegSet.empty in
-    let frozen_moves = ref RegSet.empty in
-    let coalesced_moves = ref RegSet.empty in
-    let constrained_moves = ref RegSet.empty in
+    let coalesced_count = ref 0 in
 
     let record_move dst src =
       let m = !num_moves in
@@ -250,13 +253,12 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
       let x = alias_of dst and y = alias_of src in
       let u, v = if precoloured y then (y, x) else (x, y) in
       if u = v then begin
-        coalesced_moves := RegSet.add m !coalesced_moves;
+        incr coalesced_count;
         add_to_worklist u
       end
       else if precoloured v || interferes u v then begin
         (* The two ends are live at the same time, or both are machine
            registers: this move has to stay. *)
-        constrained_moves := RegSet.add m !constrained_moves;
         add_to_worklist u;
         add_to_worklist v
       end
@@ -264,7 +266,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
         (precoloured u && RegSet.for_all (fun t -> george t u) (adjacent v))
         || ((not (precoloured u)) && briggs (RegSet.union (adjacent u) (adjacent v)))
       then begin
-        coalesced_moves := RegSet.add m !coalesced_moves;
+        incr coalesced_count;
         combine u v;
         add_to_worklist u
       end
@@ -276,8 +278,9 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
         (fun m ->
           let dst, src = moves.(m) in
           let v = if alias_of src = alias_of u then alias_of dst else alias_of src in
+          (* Dropping it from both sets is what freezing a move amounts to:
+             node_moves stops seeing it, so its ends are ordinary again. *)
           active_moves := RegSet.remove m !active_moves;
-          frozen_moves := RegSet.add m !frozen_moves;
           if (not (move_related v)) && degree.(v) < num_colors then begin
             freeze_worklist := RegSet.remove v !freeze_worklist;
             simplify_worklist := RegSet.add v !simplify_worklist
@@ -353,7 +356,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
       (* Only the round that succeeded describes the code that came out; the
          earlier rounds were thrown away along with their moves. *)
       report.moves_total <- Array.length moves;
-      report.moves_coalesced <- RegSet.cardinal !coalesced_moves;
+      report.moves_coalesced <- !coalesced_count;
       apply_colours colour
     end
     else begin

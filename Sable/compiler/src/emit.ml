@@ -162,7 +162,7 @@ let constant_constructors () =
   if constants <> [] then begin
     List.iter
       (fun (c : Datatype.constr) ->
-        comment (Printf.sprintf "%s.%s" c.owner c.cname);
+        comment (Printf.sprintf "%s.%s" (Ident.display c.owner) (Ident.display c.cname));
         label (Datatype.const_label c);
         line ".quad %d" c.tag)
       constants

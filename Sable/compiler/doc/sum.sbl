@@ -1,4 +1,4 @@
-type list = Nil | Cons of int * list
+type chain = Nil | Cons of int * chain
 
 let rec sum l =
   match l with

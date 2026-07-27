@@ -16,7 +16,7 @@ _build/default/src/sablec.exe --dump-regalloc -o /dev/null doc/sum.sbl
 このコンパイラの見どころがひととおり入る最小の例になっています。
 
 ```
-type list = Nil | Cons of int * list
+type chain = Nil | Cons of int * chain
 
 let rec sum l =
   match l with
@@ -230,38 +230,38 @@ $ ./sable -S tests/cases/patterns.sbl | grep '\.globl'
 
 ```
 $ sablec --dump-anf -o /dev/null doc/sum.sbl
-let rec sum.15 l.16 =
-  let t.5.18 : int =
-    l.16[0]                    ← タグの読み出し。match が決定木になっている
+let rec sum.18 l.19 =
+  let t.8.21 : int =
+    l.19[0]                    ← タグの読み出し。match が決定木になっている
   in
-  let t.6.19 : int =
+  let t.9.22 : int =
     0
   in
-  if t.5.18 = t.6.19 then      ← タグ 0 なら Nil
+  if t.8.21 = t.9.22 then      ← タグ 0 なら Nil
     0
   else
-    let fld.3.20 : int =
-      l.16[1]                  ← x
+    let fld.6.23 : int =
+      l.19[1]                  ← x
     in
-    let fld.4.21 : list =
-      l.16[2]                  ← rest
+    let fld.7.24 : chain =
+      l.19[2]                  ← rest
     in
-    let t.7.24 : int =
-      sum.15 fld.4.21
+    let t.10.27 : int =
+      sum.18 fld.7.24
     in
-    fld.3.20 + t.7.24
+    fld.6.23 + t.10.27
 in
 ...
-let t.10.32 : list =
-  &sable_const_list_Nil        ← 定数コンストラクタはアドレス。確保しない
+let t.13.35 : chain =
+  &sable_const_Nil_3           ← 定数コンストラクタはアドレス。確保しない
 in
-let t.11.30 : list =
-  block 1 (t.9.31 t.10.32)     ← Cons (2, Nil)
+let t.14.33 : chain =
+  block 1 (t.12.34 t.13.35)    ← Cons (2, Nil)
 in
 ```
 
 `match` はもう存在せず、タグの読み出しと比較と分岐になっています。`Nil` は
-`sable_const_list_Nil` のアドレスで、確保は起きません。
+`sable_const_Nil_3` のアドレスで、確保は起きません。
 
 表現についての決めごとが2つ、ここで見えています。`unit`・`bool`・`int` はどれも1ワード
 （`unit` は 0、`true` は 1）。そして**比較は分岐のテストとしてしか存在しません** — 値として
@@ -306,10 +306,10 @@ in
 
 ```
 $ sablec --dump-closure -o /dev/null doc/sum.sbl
-sable_sum_15 (l.16) =
+sable_sum_18 (l.19) =
   ...
-    let t.7.24 : int =
-      call sable_sum_15 (fld.4.21)   ← 直接呼び出し。クロージャなし
+    let t.10.27 : int =
+      call sable_sum_18 (fld.7.24)   ← 直接呼び出し。クロージャなし
 ```
 
 `sum` は何も捕獲しないので、再帰呼び出しはラベルへの直接呼び出しです。捕獲する例は
@@ -332,27 +332,27 @@ RISC-V 制御フローグラフに落とします。この時点のコードは�
 
 ```
 $ sablec --dump-riscv -o /dev/null doc/sum.sbl
-function sable_sum_15 (20 registers, 0 spill slots)
-  sable_sum_15:
+function sable_sum_18 (20 registers, 0 spill slots)
+  sable_sum_18:
     mv v0, s0            ┐
     mv v1, s1            │ callee-saved を仮想レジスタに退避
     ...                  │ （12本ぶん）
     mv v11, s11          ┘
     mv v12, a0           ← 引数
     ld v13, 0(v12)
-    beq v13, zero, .Lthen33 else .Lelse34
-  .Lthen33:
+    beq v13, zero, .Lthen36 else .Lelse37
+  .Lthen36:
     li v15, 0
     mv a0, v15
     mv s0, v0            ┐
     ...                  │ 復帰
     mv s11, v11          ┘
     ret a0
-  .Lelse34:
+  .Lelse37:
     ld v16, 8(v12)
     ld v17, 16(v12)
     mv a0, v17
-    call sable_sum_15(a0)
+    call sable_sum_18(a0)
     mv v18, a0
     add v19, v16, v18
     mv a0, v19
@@ -438,7 +438,7 @@ function sable_sum_15 (20 registers, 0 spill slots)
 
 ```
 $ sablec --dump-regalloc -o /dev/null doc/sum.sbl
-sable_sum_15: 2 round(s), 41/41 moves coalesced, 1 spill slot(s) [spilled v16]
+sable_sum_18: 2 round(s), 41/41 moves coalesced, 1 spill slot(s) [spilled v16]
 sable_main:   2 round(s), 30/31 moves coalesced, 3 spill slot(s) [spilled v0 v1 v2]
 ```
 
@@ -498,21 +498,21 @@ sp         (ABI 通り16バイト境界)
 最終形はこうなります。
 
 ```
-sable_sum_15:
+sable_sum_18:
 	addi sp, sp, -16
 	sd ra, 8(sp)
 	ld t0, 0(a0)             ← タグ
-	bne t0, zero, .Lelse34   ← 条件を反転して .Lthen33 へ落とす
-.Lthen33:
+	bne t0, zero, .Lelse37   ← 条件を反転して .Lthen36 へ落とす
+.Lthen36:
 	li a0, 0
 	ld ra, 8(sp)
 	addi sp, sp, 16
 	ret
-.Lelse34:
+.Lelse37:
 	ld t0, 8(a0)             ← x
 	sd t0, 0(sp)             ← スピル。呼び出しをまたぐので
 	ld a0, 16(a0)            ← rest（そのまま引数レジスタへ）
-	call sable_sum_15
+	call sable_sum_18
 	ld t0, 0(sp)
 	add a0, t0, a0
 	ld ra, 8(sp)
@@ -527,7 +527,7 @@ sable_sum_15:
 `main` の末尾も見ておく価値があります。
 
 ```
-	call sable_sum_15
+	call sable_sum_18
 	call sable_print_int     ← sum の結果は a0、print_int の引数も a0。移動なし
 	li a0, 0
 	...
@@ -539,8 +539,8 @@ sable_sum_15:
 ```
 	.section .rodata
 	.p2align 3
-	# list.Nil
-sable_const_list_Nil:
+	# chain.Nil
+sable_const_Nil_3:
 	.quad 0
 ```
 
