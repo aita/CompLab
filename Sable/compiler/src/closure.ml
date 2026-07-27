@@ -17,15 +17,15 @@ type t =
   | Int of int
   | Var of Ident.t
   | Neg of Ident.t
-  | Bin of Knormal.binop * Ident.t * Ident.t
-  | IfEq of Ident.t * Ident.t * t * t
-  | IfLe of Ident.t * Ident.t * t * t
+  | Bin of Anf.binop * Ident.t * Ident.t
+  | If_eq of Ident.t * Ident.t * t * t
+  | If_le of Ident.t * Ident.t * t * t
   | Let of (Ident.t * Types.t) * t * t
   | Make_closure of (Ident.t * Types.t) * closure * t
   | Call_closure of Ident.t * Ident.t list
   | Call_direct of Ident.label * Ident.t list
   | Tuple of Ident.t list
-  | LetTuple of (Ident.t * Types.t) list * Ident.t * t
+  | Let_tuple of (Ident.t * Types.t) list * Ident.t * t
   | Block of int * Ident.t list
   | Static of Ident.label
   | Field of Ident.t * int
@@ -49,7 +49,7 @@ let rec free_vars = function
   | Var x | Neg x | Field (x, _) -> Ident.Set.singleton x
   | Bin (_, x, y) | Array (x, y) | Get (x, y) -> Ident.Set.of_list [ x; y ]
   | Put (x, y, z) -> Ident.Set.of_list [ x; y; z ]
-  | IfEq (x, y, e1, e2) | IfLe (x, y, e1, e2) ->
+  | If_eq (x, y, e1, e2) | If_le (x, y, e1, e2) ->
     Ident.Set.add x
       (Ident.Set.add y (Ident.Set.union (free_vars e1) (free_vars e2)))
   | Let ((x, _), e1, e2) ->
@@ -58,7 +58,7 @@ let rec free_vars = function
     Ident.Set.remove x (Ident.Set.union (Ident.Set.of_list captured) (free_vars e))
   | Call_closure (f, xs) -> Ident.Set.of_list (f :: xs)
   | Call_direct (_, xs) | Tuple xs | Block (_, xs) -> Ident.Set.of_list xs
-  | LetTuple (xts, y, e) ->
+  | Let_tuple (xts, y, e) ->
     Ident.Set.add y
       (Ident.Set.diff (free_vars e) (Ident.Set.of_list (List.map fst xts)))
 
@@ -79,39 +79,39 @@ let close_over env names body =
 let rec convert_exp env known exp =
   let recur = convert_exp env known in
   match exp with
-  | Knormal.Int n -> Int n
-  | Knormal.Var x -> Var x
-  | Knormal.Neg x -> Neg x
-  | Knormal.Bin (op, x, y) -> Bin (op, x, y)
-  | Knormal.IfEq (x, y, e1, e2) -> IfEq (x, y, recur e1, recur e2)
-  | Knormal.IfLe (x, y, e1, e2) -> IfLe (x, y, recur e1, recur e2)
-  | Knormal.Let ((x, t), e1, e2) ->
+  | Anf.Int n -> Int n
+  | Anf.Var x -> Var x
+  | Anf.Neg x -> Neg x
+  | Anf.Bin (op, x, y) -> Bin (op, x, y)
+  | Anf.If_eq (x, y, e1, e2) -> If_eq (x, y, recur e1, recur e2)
+  | Anf.If_le (x, y, e1, e2) -> If_le (x, y, recur e1, recur e2)
+  | Anf.Let ((x, t), e1, e2) ->
     Let ((x, t), recur e1, convert_exp (Ident.Map.add x t env) known e2)
-  | Knormal.App (f, xs) when Ident.Set.mem f known -> Call_direct (Ident.to_label f, xs)
-  | Knormal.App (f, xs) -> Call_closure (f, xs)
-  | Knormal.ExtFunApp (f, xs) -> Call_direct (Ident.extern_label f, xs)
-  | Knormal.Tuple xs -> Tuple xs
-  | Knormal.Block (tag, xs) -> Block (tag, xs)
-  | Knormal.Static label -> Static label
-  | Knormal.Field (x, i) -> Field (x, i)
-  | Knormal.LetTuple (xts, y, e) ->
+  | Anf.App (f, xs) when Ident.Set.mem f known -> Call_direct (Ident.to_label f, xs)
+  | Anf.App (f, xs) -> Call_closure (f, xs)
+  | Anf.App_external (f, xs) -> Call_direct (Ident.extern_label f, xs)
+  | Anf.Tuple xs -> Tuple xs
+  | Anf.Block (tag, xs) -> Block (tag, xs)
+  | Anf.Static label -> Static label
+  | Anf.Field (x, i) -> Field (x, i)
+  | Anf.Let_tuple (xts, y, e) ->
     let env = List.fold_left (fun env (x, t) -> Ident.Map.add x t env) env xts in
-    LetTuple (xts, y, convert_exp env known e)
-  | Knormal.Array (x, y) -> Array (x, y)
-  | Knormal.Get (x, y) -> Get (x, y)
-  | Knormal.Put (x, y, z) -> Put (x, y, z)
-  | Knormal.LetRec (fds, cont) -> convert_group env known fds cont
+    Let_tuple (xts, y, convert_exp env known e)
+  | Anf.Array (x, y) -> Array (x, y)
+  | Anf.Get (x, y) -> Get (x, y)
+  | Anf.Put (x, y, z) -> Put (x, y, z)
+  | Anf.Let_rec (fds, cont) -> convert_group env known fds cont
 
 and convert_group env known fds cont =
-  let names = List.map (fun (fd : Knormal.fundef) -> fst fd.name) fds in
+  let names = List.map (fun (fd : Anf.fundef) -> fst fd.name) fds in
   let env =
     List.fold_left
-      (fun env (fd : Knormal.fundef) -> Ident.Map.add (fst fd.name) (snd fd.name) env)
+      (fun env (fd : Anf.fundef) -> Ident.Map.add (fst fd.name) (snd fd.name) env)
       env fds
   in
   let convert_bodies known =
     List.map
-      (fun (fd : Knormal.fundef) ->
+      (fun (fd : Anf.fundef) ->
         let body_env =
           List.fold_left (fun env (x, t) -> Ident.Map.add x t env) env fd.args
         in
@@ -125,7 +125,7 @@ and convert_group env known fds cont =
      those are code pointers, not captured values. *)
   let captured =
     List.fold_left2
-      (fun acc (fd : Knormal.fundef) body ->
+      (fun acc (fd : Anf.fundef) body ->
         Ident.Set.union acc
           (Ident.Set.diff (free_vars body)
              (Ident.Set.of_list (List.map fst fd.args @ names))))
@@ -135,7 +135,7 @@ and convert_group env known fds cont =
     (* Every member is directly callable.  A member used as a value inside a
        body just allocates a code-pointer-only closure there. *)
     List.iter2
-      (fun (fd : Knormal.fundef) body ->
+      (fun (fd : Anf.fundef) body ->
         lifted :=
           {
             label = Ident.to_label (fst fd.name);

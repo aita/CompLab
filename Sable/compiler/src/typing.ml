@@ -121,7 +121,7 @@ let rec infer_exp env exp =
     match Ident.Map.find_opt x env with
     | Some t -> t
     | None -> fail "unbound variable `%s`" x)
-  | LetRec (fds, body) ->
+  | Let_rec (fds, body) ->
     (* Every name of the group is visible in every body, so mutual recursion
        type-checks here; whether it can be compiled is Closure's business. *)
     let env =
@@ -153,7 +153,7 @@ let rec infer_exp env exp =
     unify_in "in a function application" tfn (Types.Fun (targs, tres));
     tres
   | Tuple es -> Types.Tuple (List.map (infer_exp env) es)
-  | LetTuple (xts, e1, e2) ->
+  | Let_tuple (xts, e1, e2) ->
     unify_in "in a tuple pattern" (Types.Tuple (List.map snd xts)) (infer_exp env e1);
     let env = List.fold_left (fun env (x, t) -> Ident.Map.add x t env) env xts in
     infer_exp env e2

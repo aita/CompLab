@@ -18,9 +18,9 @@ sablec [options] <file.sbl>
   -o <file>          write the assembly here (default: stdout)
   -nregs <n>         allocate out of n registers only (10..25, default 25)
   -O <n>             run the optimizer n times (default 3)
-  --dump-knormal     print the K-normalized program
+  --dump-anf     print the A-normalized program
   --dump-closure     print the closure-converted program
-  --dump-ir          print the machine IR before register allocation
+  --dump-riscv          print the RISC-V code before register allocation
   --dump-regalloc    report rounds, coalesced moves and spills per function
 ```
 
@@ -91,11 +91,11 @@ than continuing with a wrong answer.
 | type inference | `typing.ml` | destructive unification, occurs check |
 | match checking | `match_check.ml` | usefulness: exhaustiveness and redundancy |
 | match compilation | `match_compile.ml` | `match` into a decision tree |
-| K-normalization | `knormal.ml` | name every intermediate result |
+| A-normalization (ANF) | `anf.ml` | name every intermediate result |
 | α-conversion | `alpha.ml` | make every binder unique |
 | optimization | `optim.ml` | let-flattening, copy and constant propagation, dead-let elimination |
 | closure conversion | `closure.ml` | lift functions to the top level |
-| instruction selection | `virtual.ml` | RISC-V CFG over unlimited virtual registers |
+| instruction selection | `selection.ml` | RISC-V CFG over unlimited virtual registers |
 | liveness | `liveness.ml` | backwards dataflow; also dead-code elimination |
 | **register allocation** | **`regalloc.ml`** | **graph colouring with iterated coalescing** |
 | assembly | `emit.ml` | frame layout and instruction printing |
@@ -106,7 +106,7 @@ deliberately not called `ir.ml`: it knows exactly one target, down to which
 operations take a 12-bit immediate. `liveness.ml` and `regalloc.ml` are the
 parts that do not — they use only uses, definitions, successors and register
 substitution, so retargeting would mean rewriting `riscv.ml`, `emit.ml` and the
-instruction-selection half of `virtual.ml`, and leaving the allocator alone.
+instruction-selection half of `selection.ml`, and leaving the allocator alone.
 
 ### Representation
 
@@ -167,14 +167,14 @@ register, so anything live across it interferes with all of them and is pushed
 into a callee-saved register or onto the stack — without a single special case
 in the allocator.
 
-**Saving callee-saved registers is just spilling.** `virtual.ml` copies every
+**Saving callee-saved registers is just spilling.** `selection.ml` copies every
 callee-saved register into a virtual register on entry and copies it back before
 each return. If the function does not need that register, coalescing merges the
 two ends and both moves vanish. If it does, the virtual gets spilled — and the
 spill *is* the save/restore. A leaf function pays nothing; a function that uses
 five saved registers saves exactly five.
 
-Here is `fib` before allocation (`--dump-ir`), 22 virtual registers and 12
+Here is `fib` before allocation (`--dump-riscv`), 22 virtual registers and 12
 callee-saved copies:
 
 ```

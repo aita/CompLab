@@ -18,10 +18,10 @@ type t =
   | If of t * t * t
   | Let of (Ident.t * Types.t) * t * t
   | Var of Ident.t
-  | LetRec of fundef list * t (* a whole `let rec .. and ..` group *)
+  | Let_rec of fundef list * t (* a whole `let rec .. and ..` group *)
   | App of t * t list
   | Tuple of t list
-  | LetTuple of (Ident.t * Types.t) list * t * t
+  | Let_tuple of (Ident.t * Types.t) list * t * t
   | Array of t * t (* Array.make size init *)
   | Get of t * t
   | Put of t * t * t

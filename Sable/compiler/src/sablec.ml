@@ -3,9 +3,9 @@
 let output_file = ref "-"
 let register_budget = ref Riscv.max_colors
 let optimizer_rounds = ref 3
-let dump_knormal = ref false
+let dump_anf = ref false
 let dump_closure = ref false
-let dump_ir = ref false
+let dump_riscv = ref false
 let dump_regalloc = ref false
 
 let options =
@@ -16,9 +16,9 @@ let options =
       Printf.sprintf "<n>  allocate out of n registers (%d..%d, default %d)"
         Riscv.min_colors Riscv.max_colors Riscv.max_colors );
     ("-O", Arg.Set_int optimizer_rounds, "<n>  run the optimizer n times (default 3)");
-    ("--dump-knormal", Arg.Set dump_knormal, "  print the K-normalized program");
+    ("--dump-anf", Arg.Set dump_anf, "  print the A-normalized program");
     ("--dump-closure", Arg.Set dump_closure, "  print the closure-converted program");
-    ("--dump-ir", Arg.Set dump_ir, "  print the machine IR before register allocation");
+    ("--dump-riscv", Arg.Set dump_riscv, "  print the RISC-V code before register allocation");
     ("--dump-regalloc", Arg.Set dump_regalloc, "  report on register allocation");
   ]
 
@@ -44,16 +44,16 @@ let compile path =
   let ast = parse_file path in
   let ast = Typing.check ast in
   let ast = Match_compile.compile ast in
-  let normalized = Alpha.rename (Knormal.normalize ast) in
+  let normalized = Alpha.rename (Anf.normalize ast) in
   let normalized = Optim.optimize ~rounds:!optimizer_rounds normalized in
-  if !dump_knormal then Dump.knormal stderr 0 normalized;
+  if !dump_anf then Dump.anf stderr 0 normalized;
   let converted = Closure.convert normalized in
   if !dump_closure then Dump.closure_program stderr converted;
-  let functions = Virtual.translate converted in
+  let functions = Selection.translate converted in
   List.iter
     (fun func ->
       Liveness.eliminate_dead_code func;
-      if !dump_ir then Riscv.print_func stderr func;
+      if !dump_riscv then Riscv.print_func stderr func;
       let report = Regalloc.allocate func in
       if !dump_regalloc then Regalloc.print_report stderr func.Riscv.name report)
     functions;
@@ -80,7 +80,7 @@ let () =
     | Closure.Error msg ->
       Printf.eprintf "%s\n" msg;
       exit 1
-    | Virtual.Error msg ->
+    | Selection.Error msg ->
       Printf.eprintf "%s\n" msg;
       exit 1)
   | _ ->

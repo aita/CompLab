@@ -196,7 +196,7 @@ let compile_match info scrutinee cases =
         let args = params_of i in
         let ty = Types.Fun (List.map snd args, info.result_type) in
         body :=
-          LetRec ([ { name = (join, ty); args; body = cases.(i).action } ], !body))
+          Let_rec ([ { name = (join, ty); args; body = cases.(i).action } ], !body))
     join_of;
   Let ((scrut, info.scrutinee_type), scrutinee, !body)
 
@@ -218,14 +218,14 @@ let rec compile exp =
   | Let (xt, e1, e2) ->
     let e1 = compile e1 in
     Let (xt, e1, compile e2)
-  | LetRec (fds, e) ->
+  | Let_rec (fds, e) ->
     let fds = List.map (fun fd -> { fd with body = compile fd.body }) fds in
-    LetRec (fds, compile e)
+    Let_rec (fds, compile e)
   | App (f, args) ->
     let f = compile f in
     App (f, List.map compile args)
   | Tuple es -> Tuple (List.map compile es)
-  | LetTuple (xts, e1, e2) -> LetTuple (xts, compile e1, compile e2)
+  | Let_tuple (xts, e1, e2) -> Let_tuple (xts, compile e1, compile e2)
   | Array (a, b) -> Array (compile a, compile b)
   | Get (a, b) -> Get (compile a, compile b)
   | Put (a, b, c) -> Put (compile a, compile b, compile c)

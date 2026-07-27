@@ -4,48 +4,48 @@ open Printf
 
 let indent n = String.make (n * 2) ' '
 
-let rec knormal out level exp =
+let rec anf out level exp =
   let say fmt = fprintf out ("%s" ^^ fmt ^^ "\n") (indent level) in
   let vars = String.concat " " in
   match exp with
-  | Knormal.Int n -> say "%d" n
-  | Knormal.Var x -> say "%s" x
-  | Knormal.Neg x -> say "- %s" x
-  | Knormal.Bin (op, x, y) -> say "%s %s %s" x (Knormal.string_of_binop op) y
-  | Knormal.Static l -> say "&%s" l
-  | Knormal.Field (x, i) -> say "%s[%d]" x i
-  | Knormal.Block (tag, xs) -> say "block %d (%s)" tag (vars xs)
-  | Knormal.Tuple xs -> say "(%s)" (vars xs)
-  | Knormal.Array (n, v) -> say "Array.make %s %s" n v
-  | Knormal.Get (a, i) -> say "%s.(%s)" a i
-  | Knormal.Put (a, i, v) -> say "%s.(%s) <- %s" a i v
-  | Knormal.App (f, xs) -> say "%s %s" f (vars xs)
-  | Knormal.ExtFunApp (f, xs) -> say "external %s %s" f (vars xs)
-  | Knormal.IfEq (x, y, e1, e2) -> conditional out level "=" x y e1 e2
-  | Knormal.IfLe (x, y, e1, e2) -> conditional out level "<=" x y e1 e2
-  | Knormal.Let ((x, t), e1, e2) ->
+  | Anf.Int n -> say "%d" n
+  | Anf.Var x -> say "%s" x
+  | Anf.Neg x -> say "- %s" x
+  | Anf.Bin (op, x, y) -> say "%s %s %s" x (Anf.string_of_binop op) y
+  | Anf.Static l -> say "&%s" l
+  | Anf.Field (x, i) -> say "%s[%d]" x i
+  | Anf.Block (tag, xs) -> say "block %d (%s)" tag (vars xs)
+  | Anf.Tuple xs -> say "(%s)" (vars xs)
+  | Anf.Array (n, v) -> say "Array.make %s %s" n v
+  | Anf.Get (a, i) -> say "%s.(%s)" a i
+  | Anf.Put (a, i, v) -> say "%s.(%s) <- %s" a i v
+  | Anf.App (f, xs) -> say "%s %s" f (vars xs)
+  | Anf.App_external (f, xs) -> say "external %s %s" f (vars xs)
+  | Anf.If_eq (x, y, e1, e2) -> conditional out level "=" x y e1 e2
+  | Anf.If_le (x, y, e1, e2) -> conditional out level "<=" x y e1 e2
+  | Anf.Let ((x, t), e1, e2) ->
     say "let %s : %s =" x (Types.to_string t);
-    knormal out (level + 1) e1;
+    anf out (level + 1) e1;
     say "in";
-    knormal out level e2
-  | Knormal.LetTuple (xts, y, e) ->
+    anf out level e2
+  | Anf.Let_tuple (xts, y, e) ->
     say "let (%s) = %s in" (String.concat ", " (List.map fst xts)) y;
-    knormal out level e
-  | Knormal.LetRec (fds, e) ->
+    anf out level e
+  | Anf.Let_rec (fds, e) ->
     List.iter
-      (fun (fd : Knormal.fundef) ->
+      (fun (fd : Anf.fundef) ->
         say "let rec %s %s =" (fst fd.name) (vars (List.map fst fd.args));
-        knormal out (level + 1) fd.body)
+        anf out (level + 1) fd.body)
       fds;
     say "in";
-    knormal out level e
+    anf out level e
 
 and conditional out level op x y e1 e2 =
   let say fmt = fprintf out ("%s" ^^ fmt ^^ "\n") (indent level) in
   say "if %s %s %s then" x op y;
-  knormal out (level + 1) e1;
+  anf out (level + 1) e1;
   say "else";
-  knormal out (level + 1) e2
+  anf out (level + 1) e2
 
 let rec closure out level exp =
   let say fmt = fprintf out ("%s" ^^ fmt ^^ "\n") (indent level) in
@@ -54,7 +54,7 @@ let rec closure out level exp =
   | Closure.Int n -> say "%d" n
   | Closure.Var x -> say "%s" x
   | Closure.Neg x -> say "- %s" x
-  | Closure.Bin (op, x, y) -> say "%s %s %s" x (Knormal.string_of_binop op) y
+  | Closure.Bin (op, x, y) -> say "%s %s %s" x (Anf.string_of_binop op) y
   | Closure.Static l -> say "&%s" l
   | Closure.Field (x, i) -> say "%s[%d]" x i
   | Closure.Block (tag, xs) -> say "block %d (%s)" tag (vars xs)
@@ -64,14 +64,14 @@ let rec closure out level exp =
   | Closure.Put (a, i, v) -> say "%s.(%s) <- %s" a i v
   | Closure.Call_direct (l, xs) -> say "call %s (%s)" l (vars xs)
   | Closure.Call_closure (f, xs) -> say "call closure %s (%s)" f (vars xs)
-  | Closure.IfEq (x, y, e1, e2) -> closure_if out level "=" x y e1 e2
-  | Closure.IfLe (x, y, e1, e2) -> closure_if out level "<=" x y e1 e2
+  | Closure.If_eq (x, y, e1, e2) -> closure_if out level "=" x y e1 e2
+  | Closure.If_le (x, y, e1, e2) -> closure_if out level "<=" x y e1 e2
   | Closure.Let ((x, t), e1, e2) ->
     say "let %s : %s =" x (Types.to_string t);
     closure out (level + 1) e1;
     say "in";
     closure out level e2
-  | Closure.LetTuple (xts, y, e) ->
+  | Closure.Let_tuple (xts, y, e) ->
     say "let (%s) = %s in" (String.concat ", " (List.map fst xts)) y;
     closure out level e
   | Closure.Make_closure ((x, _), { entry; captured }, e) ->

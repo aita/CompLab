@@ -1,4 +1,5 @@
-(* Instruction selection: closure-converted code into the machine IR.
+(* Instruction selection: closure-converted code into the RISC-V control-flow
+   graph.
 
    Everything here uses fresh virtual registers, so the code it produces is
    correct but unrunnable; Regalloc turns it into something a processor can
@@ -64,11 +65,11 @@ let bind ctx x r = ctx.env <- Ident.Map.add x r ctx.env
 let compare_operand ctx x = if const_of ctx x = Some 0 then Riscv.zero else reg_of ctx x
 
 let binop_of = function
-  | Knormal.Add -> Riscv.Add
-  | Knormal.Sub -> Riscv.Sub
-  | Knormal.Mul -> Riscv.Mul
-  | Knormal.Div -> Riscv.Div
-  | Knormal.Rem -> Riscv.Rem
+  | Anf.Add -> Riscv.Add
+  | Anf.Sub -> Riscv.Sub
+  | Anf.Mul -> Riscv.Mul
+  | Anf.Div -> Riscv.Div
+  | Anf.Rem -> Riscv.Rem
 
 let word = 8
 
@@ -111,12 +112,12 @@ let rec generate ctx dest exp =
     generate ctx (Into r) value;
     bind ctx x r;
     generate ctx dest body
-  | Closure.IfEq (x, y, then_, else_) ->
+  | Closure.If_eq (x, y, then_, else_) ->
     generate_branch ctx dest Riscv.Eq (compare_operand ctx x) (compare_operand ctx y) then_ else_
-  | Closure.IfLe (x, y, then_, else_) ->
+  | Closure.If_le (x, y, then_, else_) ->
     (* x <= y is y >= x. *)
     generate_branch ctx dest Riscv.Ge (compare_operand ctx y) (compare_operand ctx x) then_ else_
-  | Closure.LetTuple (xts, tuple, body) ->
+  | Closure.Let_tuple (xts, tuple, body) ->
     let base = reg_of ctx tuple in
     List.iteri
       (fun i (x, _) ->
@@ -183,7 +184,7 @@ and generate_value ctx dest exp =
      let address, offset = element_address ctx arr idx in
      emit ctx.builder (Riscv.Store (reg_of ctx v, address, offset));
      emit ctx.builder (Riscv.Li (target, 0))
-   | _ -> failwith "Virtual: generate_value on a control-flow expression");
+   | _ -> failwith "Selection: generate_value on a control-flow expression");
   match dest with
   | Into _ -> ()
   | Return_from_function ->
@@ -193,11 +194,11 @@ and generate_value ctx dest exp =
 and generate_arith ctx target op x y =
   let immediate =
     match (op, const_of ctx y) with
-    | Knormal.Add, Some n when Riscv.fits_immediate n -> Some (Riscv.Add, reg_of ctx x, n)
-    | Knormal.Sub, Some n when Riscv.fits_immediate (-n) -> Some (Riscv.Add, reg_of ctx x, -n)
+    | Anf.Add, Some n when Riscv.fits_immediate n -> Some (Riscv.Add, reg_of ctx x, n)
+    | Anf.Sub, Some n when Riscv.fits_immediate (-n) -> Some (Riscv.Add, reg_of ctx x, -n)
     | _ -> (
       match (op, const_of ctx x) with
-      | Knormal.Add, Some n when Riscv.fits_immediate n -> Some (Riscv.Add, reg_of ctx y, n)
+      | Anf.Add, Some n when Riscv.fits_immediate n -> Some (Riscv.Add, reg_of ctx y, n)
       | _ -> None)
   in
   match immediate with

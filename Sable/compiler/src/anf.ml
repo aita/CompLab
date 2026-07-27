@@ -1,4 +1,4 @@
-(* K-normalization: every intermediate result is named by a `let`.
+(* A-normalization: every intermediate result is named by a `let`.
 
    This is the shape the whole back end wants.  Each subexpression a machine
    instruction consumes is already a variable, so instruction selection never
@@ -17,14 +17,14 @@ type t =
   | Var of Ident.t
   | Neg of Ident.t
   | Bin of binop * Ident.t * Ident.t
-  | IfEq of Ident.t * Ident.t * t * t
-  | IfLe of Ident.t * Ident.t * t * t (* x <= y *)
+  | If_eq of Ident.t * Ident.t * t * t
+  | If_le of Ident.t * Ident.t * t * t (* x <= y *)
   | Let of (Ident.t * Types.t) * t * t
-  | LetRec of fundef list * t
+  | Let_rec of fundef list * t
   | App of Ident.t * Ident.t list
-  | ExtFunApp of Ident.t * Ident.t list
+  | App_external of Ident.t * Ident.t list
   | Tuple of Ident.t list
-  | LetTuple of (Ident.t * Types.t) list * Ident.t * t
+  | Let_tuple of (Ident.t * Types.t) list * Ident.t * t
   | Block of int * Ident.t list (* a tagged block: a constructor's value *)
   | Static of Ident.label (* a read-only block: a constant constructor *)
   | Field of Ident.t * int (* word i of a block *)
@@ -60,12 +60,12 @@ let rec free_vars = function
   | Var x | Neg x | Field (x, _) -> Ident.Set.singleton x
   | Bin (_, x, y) | Array (x, y) | Get (x, y) -> Ident.Set.of_list [ x; y ]
   | Put (x, y, z) -> Ident.Set.of_list [ x; y; z ]
-  | IfEq (x, y, e1, e2) | IfLe (x, y, e1, e2) ->
+  | If_eq (x, y, e1, e2) | If_le (x, y, e1, e2) ->
     Ident.Set.add x
       (Ident.Set.add y (Ident.Set.union (free_vars e1) (free_vars e2)))
   | Let ((x, _), e1, e2) ->
     Ident.Set.union (free_vars e1) (Ident.Set.remove x (free_vars e2))
-  | LetRec (fds, e) ->
+  | Let_rec (fds, e) ->
     let names = Ident.Set.of_list (List.map (fun fd -> fst fd.name) fds) in
     let bodies =
       List.fold_left
@@ -76,8 +76,8 @@ let rec free_vars = function
     in
     Ident.Set.diff (Ident.Set.union bodies (free_vars e)) names
   | App (f, xs) -> Ident.Set.of_list (f :: xs)
-  | ExtFunApp (_, xs) | Tuple xs | Block (_, xs) -> Ident.Set.of_list xs
-  | LetTuple (xts, y, e) ->
+  | App_external (_, xs) | Tuple xs | Block (_, xs) -> Ident.Set.of_list xs
+  | Let_tuple (xts, y, e) ->
     Ident.Set.add y
       (Ident.Set.diff (free_vars e) (Ident.Set.of_list (List.map fst xts)))
 
@@ -94,7 +94,7 @@ let insert_let (e, t) k =
 let external_result name =
   match List.assoc_opt name Typing.externals with
   | Some (Types.Fun (_, tres)) -> tres
-  | _ -> failwith ("Knormal: unknown external " ^ name)
+  | _ -> failwith ("Anf: unknown external " ^ name)
 
 let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
   match exp with
@@ -124,7 +124,7 @@ let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
               let e2', _ = normalize_exp env else_ in
               (make x y e1' e2', t)))
     in
-    let if_eq x y a b = IfEq (x, y, a, b) and if_le x y a b = IfLe (x, y, a, b) in
+    let if_eq x y a b = If_eq (x, y, a, b) and if_le x y a b = If_le (x, y, a, b) in
     (match op with
      | Syntax.Eq -> branch if_eq a b e1 e2
      | Syntax.Ne -> branch if_eq a b e2 e1
@@ -141,7 +141,7 @@ let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
     let e2', t2 = normalize_exp (Ident.Map.add x t env) e2 in
     (Let ((x, t), e1', e2'), t2)
   | Syntax.Var x -> (Var x, Ident.Map.find x env)
-  | Syntax.LetRec (fds, body) ->
+  | Syntax.Let_rec (fds, body) ->
     let env =
       List.fold_left
         (fun env (fd : Syntax.fundef) -> Ident.Map.add (fst fd.name) (snd fd.name) env)
@@ -157,9 +157,9 @@ let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
         fds
     in
     let body', t = normalize_exp env body in
-    (LetRec (fds, body'), t)
+    (Let_rec (fds, body'), t)
   | Syntax.App (Syntax.Var f, args) when not (Ident.Map.mem f env) ->
-    insert_lets env args (fun xs -> (ExtFunApp (f, xs), external_result f))
+    insert_lets env args (fun xs -> (App_external (f, xs), external_result f))
   | Syntax.App (fn, args) ->
     let fn', tfn = normalize_exp env fn in
     let tres =
@@ -175,11 +175,11 @@ let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
         insert_let (e', t) (fun x -> loop (x :: named) (t :: types) rest)
     in
     loop [] [] es
-  | Syntax.LetTuple (xts, e1, e2) ->
+  | Syntax.Let_tuple (xts, e1, e2) ->
     insert_let (normalize_exp env e1) (fun y ->
         let env = List.fold_left (fun env (x, t) -> Ident.Map.add x t env) env xts in
         let e2', t2 = normalize_exp env e2 in
-        (LetTuple (xts, y, e2'), t2))
+        (Let_tuple (xts, y, e2'), t2))
   | Syntax.Array (size, init) ->
     insert_let (normalize_exp env size) (fun n ->
         let init', t = normalize_exp env init in
@@ -204,9 +204,9 @@ let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
     insert_let (normalize_exp env e) (fun x -> (Field (x, i), t))
   | Syntax.Match_failure t ->
     (* Never returns; the 0 only gives the expression a value. *)
-    (Let ((Ident.fresh "fail", Types.Unit), ExtFunApp ("match_failure", []), Int 0), t)
+    (Let ((Ident.fresh "fail", Types.Unit), App_external ("match_failure", []), Int 0), t)
   | Syntax.Match _ ->
-    failwith "Knormal: `match` should have been compiled away by Match_compile"
+    failwith "Anf: `match` should have been compiled away by Match_compile"
 
 (* Name a whole list of subexpressions, left to right. *)
 and insert_lets env exps k =

@@ -11,7 +11,7 @@ let sequence e1 e2 = Let ((Ident.fresh "seq", Types.Unit), e1, e2)
    function itself, so anonymous and named functions share one code path. *)
 let lambda args body =
   let f = Ident.fresh "fun" in
-  LetRec ([ { name = typed f; args; body } ], Var f)
+  Let_rec ([ { name = typed f; args; body } ], Var f)
 
 let base_type = function
   | "int" -> Types.Int
@@ -142,9 +142,9 @@ exp:
             $2, $4 ) }
   | FUN formal_args ARROW exp %prec prec_let { lambda $2 $4 }
   | LET IDENT EQUAL exp IN exp %prec prec_let { Let (typed $2, $4, $6) }
-  | LET REC fundefs IN exp %prec prec_let { LetRec ($3, $5) }
+  | LET REC fundefs IN exp %prec prec_let { Let_rec ($3, $5) }
   | LET LPAREN tuple_pat RPAREN EQUAL exp IN exp %prec prec_let
-      { LetTuple ($3, $6, $8) }
+      { Let_tuple ($3, $6, $8) }
   | exp actual_args %prec prec_app
       { match $1 with
         | Constr (c, []) -> Constr (c, constr_args c $2)
