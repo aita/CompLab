@@ -1,0 +1,45 @@
+// The two fates of the copy instruction selection emits for a callee-saved
+// register, and why neither of them needed any code in the allocator.
+// See doc/regalloc.md §6.
+// Render with ./render.sh (needs graphviz).
+digraph calleesaved {
+  rankdir = TB;
+  bgcolor = "transparent";
+  nodesep = 0.55;
+  ranksep = 0.34;
+  node [shape = box, style = "rounded,filled", fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 10, margin = "0.16,0.09"];
+  edge [color = "#57606a", fontcolor = "#57606a", fontname = "Helvetica",
+        fontsize = 9];
+
+  emitted [label = <<FONT POINT-SIZE="10">selection.ml emits, for each of s0..s11:</FONT><BR ALIGN="LEFT"/><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="11">at entry   mv v<SUB>i</SUB>, s<SUB>i</SUB></FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="11">at ret     mv s<SUB>i</SUB>, v<SUB>i</SUB></FONT><BR ALIGN="LEFT"/>>,
+            fillcolor = "#ffffff"];
+  ask [shape = diamond, fillcolor = "#ffffff", margin = "0.02,0.01",
+       label = "does the function want\nthat register for anything?"];
+
+  no [label = <<B>no</B> — coalesce merges v<SUB>i</SUB> with s<SUB>i</SUB><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="11">mv s<SUB>i</SUB>, s<SUB>i</SUB></FONT>, which apply_colours deletes<BR ALIGN="LEFT"/>>,
+       fillcolor = "#ddf4ff", color = "#0969da"];
+  yes [label = <<B>yes</B> — v<SUB>i</SUB> loses the colour and is spilled<BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="11">sd s<SUB>i</SUB>, N(sp)</FONT> at entry, <FONT FACE="Courier" POINT-SIZE="11">ld s<SUB>i</SUB>, N(sp)</FONT> at ret<BR ALIGN="LEFT"/>>,
+        fillcolor = "#fff8c5", color = "#9a6700"];
+
+  none [label = "nothing is emitted.\na leaf function pays nothing",
+        fillcolor = "#ffffff", color = "#0969da", penwidth = 2];
+  save [label = "that is the save and restore\nthe ABI asks for, exactly",
+        fillcolor = "#ffffff", color = "#9a6700", penwidth = 2];
+
+  emitted -> ask;
+  ask -> no [label = "  no  "];
+  ask -> yes [label = "  yes  "];
+  no -> none;
+  yes -> save;
+
+  note [shape = plaintext, style = "", fillcolor = "transparent",
+        fontcolor = "#57606a", fontsize = 9,
+        label = "A function that uses 5 of them pays for 5, and the allocator has\l\
+no rule about callee-saved registers anywhere in it.  What decides\l\
+between the two arms is one edge: `ret` reads s0..s11, so the copy\l\
+back is live to the end and the value has to survive.\l"];
+  { rank = same; none; save; }
+  save -> note [style = dotted, arrowhead = none, color = "#8c959f"];
+}

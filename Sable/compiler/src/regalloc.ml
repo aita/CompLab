@@ -42,8 +42,7 @@ type report = {
 let no_report () =
   { rounds = 0; moves_total = 0; moves_coalesced = 0; spill_slots = 0; spilled = [] }
 
-let set_of_list = Liveness.set_of_list
-let pick set = RegSet.min_elt set
+let pick set = Bitset.min_elt set
 
 let allocate ?(report = no_report ()) (func : Riscv.func) =
   let num_colors = Riscv.num_colors () in
@@ -67,10 +66,20 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
     let precoloured r = r < Riscv.num_physical in
 
     (* ------------------------------------------------------- the graph *)
-    let adjacency = Hashtbl.create 1024 in
-    let neighbours = Array.make n RegSet.empty in
+    (* One row of bits per node, holding that node's neighbours.  The row is
+       filled in both directions whatever the nodes are, so it answers "do
+       these two interfere?" as well as "who are your neighbours?" -- the
+       adjacency used to be a separate Hashtbl keyed on the pair.  Only the
+       rows of nodes that get simplified are ever iterated, so the rows
+       belonging to machine registers cost their bits and nothing else.
+
+       This is n * n bits: 184 kB for the largest function in the examples,
+       and quadratic in the size of a function.  A hash table of the edges
+       would be smaller on a sparse graph, but these graphs are not sparse --
+       a value live across a call interferes with every caller-saved register
+       at once -- and it was slower on every function measured. *)
+    let interfere = Array.init n (fun _ -> Bitset.create n) in
     let degree = Array.make n 0 in
-    let move_list = Array.make n RegSet.empty in
     let alias = Array.init n (fun i -> i) in
     let colour = Array.make n (-1) in
     let uses_and_defs = Array.make n 0 in
@@ -80,32 +89,36 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
         degree.(r) <- max_int)
       colours;
 
-    let edge u v = if u < v then (u * n) + v else (v * n) + u in
-    let interferes u v = Hashtbl.mem adjacency (edge u v) in
+    let interferes u v = Bitset.mem interfere.(u) v in
     let add_edge u v =
       if u <> v && not (interferes u v) then begin
-        Hashtbl.replace adjacency (edge u v) ();
-        if not (precoloured u) then begin
-          neighbours.(u) <- RegSet.add v neighbours.(u);
-          degree.(u) <- degree.(u) + 1
-        end;
-        if not (precoloured v) then begin
-          neighbours.(v) <- RegSet.add u neighbours.(v);
-          degree.(v) <- degree.(v) + 1
-        end
+        Bitset.add interfere.(u) v;
+        Bitset.add interfere.(v) u;
+        if not (precoloured u) then degree.(u) <- degree.(u) + 1;
+        if not (precoloured v) then degree.(v) <- degree.(v) + 1
       end
     in
 
     (* --------------------------------------------------- the worklists *)
+    (* How many moves there will be, so that the sets of them can be sized
+       before the walk that finds them. *)
+    let move_capacity =
+      List.fold_left
+        (fun acc (b : Riscv.block) ->
+          List.fold_left
+            (fun acc i -> if Riscv.move_pair i <> None then acc + 1 else acc)
+            acc b.body)
+        0 func.Riscv.blocks
+    in
     let moves = ref [] and num_moves = ref 0 in
-    let simplify_worklist = ref RegSet.empty in
-    let freeze_worklist = ref RegSet.empty in
-    let spill_worklist = ref RegSet.empty in
-    let spilled_nodes = ref RegSet.empty in
-    (* These three are only ever asked "is this node in you?", and a node is an
-       index into a dense range, so they are arrays rather than sets: no
-       hashing, no rebuilding a tree per update, and adjacent below can test
-       them without building anything at all. *)
+    let move_list = Array.init n (fun _ -> Bitset.create move_capacity) in
+    let simplify_worklist = Bitset.create n in
+    let freeze_worklist = Bitset.create n in
+    let spill_worklist = Bitset.create n in
+    let spilled_nodes = Bitset.create n in
+    (* These three are only ever asked "is this node in you?", so they are
+       plain boolean arrays: a bitset would answer the same question with more
+       arithmetic and no fewer cache misses. *)
     let coalesced = Array.make n false in
     let coloured = Array.make n false in
     let stacked = Array.make n false in
@@ -115,17 +128,17 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
        node_moves asks whether a move is still live, and a move is live exactly
        when it is waiting or merely paused -- so the other three would be state
        nothing reads.  What became of a move is recorded as a count instead. *)
-    let worklist_moves = ref RegSet.empty in
-    let active_moves = ref RegSet.empty in
+    let worklist_moves = Bitset.create move_capacity in
+    let active_moves = Bitset.create move_capacity in
     let coalesced_count = ref 0 in
 
     let record_move dst src =
       let m = !num_moves in
       incr num_moves;
       moves := (dst, src) :: !moves;
-      move_list.(dst) <- RegSet.add m move_list.(dst);
-      move_list.(src) <- RegSet.add m move_list.(src);
-      worklist_moves := RegSet.add m !worklist_moves
+      Bitset.add move_list.(dst) m;
+      Bitset.add move_list.(src) m;
+      Bitset.add worklist_moves m
     in
 
     (* Walk each block backwards from its live-out set, adding an edge between
@@ -133,55 +146,55 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
        is the one exception: `mv d, s` does not make d and s interfere, which is
        precisely what leaves them free to be coalesced. *)
     let live_out = Liveness.analyze func in
+    let live = Bitset.create n in
     List.iter
       (fun (b : Riscv.block) ->
-        let live =
-          ref
-            (RegSet.union
-               (Hashtbl.find live_out b.label)
-               (set_of_list (Riscv.terminator_uses b.terminator)))
-        in
+        Bitset.clear live;
+        RegSet.iter (Bitset.add live) (Hashtbl.find live_out b.label);
+        List.iter (Bitset.add live) (Riscv.terminator_uses b.terminator);
         List.iter
           (fun instr ->
             (match Riscv.move_pair instr with
              | Some (dst, src) ->
-               live := RegSet.remove src !live;
+               Bitset.remove live src;
                record_move dst src
              | None -> ());
             let defs = Riscv.defines instr and uses = Riscv.uses instr in
-            live := List.fold_left (fun acc d -> RegSet.add d acc) !live defs;
-            List.iter (fun d -> RegSet.iter (fun l -> add_edge l d) !live) defs;
-            live :=
-              RegSet.union (RegSet.diff !live (set_of_list defs)) (set_of_list uses);
+            List.iter (Bitset.add live) defs;
+            List.iter (fun d -> Bitset.iter (fun l -> add_edge l d) live) defs;
+            List.iter (Bitset.remove live) defs;
+            List.iter (Bitset.add live) uses;
             List.iter (fun r -> uses_and_defs.(r) <- uses_and_defs.(r) + 1) (defs @ uses))
           (List.rev b.body))
       func.Riscv.blocks;
     let moves = Array.of_list (List.rev !moves) in
 
     (* ------------------------------------------------------- primitives *)
-    (* Filtering rather than differencing: the sets these once subtracted are
-       whole-graph sized, while a node's neighbourhood usually is not. *)
-    let adjacent node =
-      RegSet.filter (fun r -> not (stacked.(r) || coalesced.(r))) neighbours.(node)
+    (* The neighbours still in the graph, and the moves still live.  Both used
+       to build a set and hand it back; now they walk the row and skip, which
+       is the same order and allocates nothing.  Nothing below mutates the row
+       it is walking: add_edge only ever touches the two nodes named, and
+       neither is the one being iterated. *)
+    let iter_adjacent node f =
+      Bitset.iter (fun r -> if not (stacked.(r) || coalesced.(r)) then f r) interfere.(node)
     in
-    let node_moves node =
-      RegSet.filter
-        (fun m -> RegSet.mem m !active_moves || RegSet.mem m !worklist_moves)
+    let iter_node_moves node f =
+      Bitset.iter
+        (fun m -> if Bitset.mem active_moves m || Bitset.mem worklist_moves m then f m)
         move_list.(node)
     in
-    let move_related node = not (RegSet.is_empty (node_moves node)) in
+    let move_related node =
+      Bitset.exists
+        (fun m -> Bitset.mem active_moves m || Bitset.mem worklist_moves m)
+        move_list.(node)
+    in
     let rec alias_of node = if coalesced.(node) then alias_of alias.(node) else node in
-    let enable_moves nodes =
-      RegSet.iter
-        (fun node ->
-          RegSet.iter
-            (fun m ->
-              if RegSet.mem m !active_moves then begin
-                active_moves := RegSet.remove m !active_moves;
-                worklist_moves := RegSet.add m !worklist_moves
-              end)
-            (node_moves node))
-        nodes
+    let enable_move node =
+      iter_node_moves node (fun m ->
+          if Bitset.mem active_moves m then begin
+            Bitset.remove active_moves m;
+            Bitset.add worklist_moves m
+          end)
     in
     let decrement_degree node =
       if not (precoloured node) then begin
@@ -190,71 +203,76 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
         if d = num_colors then begin
           (* The node just became trivially colourable, so moves involving it
              are worth reconsidering. *)
-          enable_moves (RegSet.add node (adjacent node));
-          spill_worklist := RegSet.remove node !spill_worklist;
-          if move_related node then freeze_worklist := RegSet.add node !freeze_worklist
-          else simplify_worklist := RegSet.add node !simplify_worklist
+          enable_move node;
+          iter_adjacent node enable_move;
+          Bitset.remove spill_worklist node;
+          if move_related node then Bitset.add freeze_worklist node
+          else Bitset.add simplify_worklist node
         end
       end
     in
     let make_worklists () =
       for node = Riscv.num_physical to n - 1 do
-        if degree.(node) >= num_colors then
-          spill_worklist := RegSet.add node !spill_worklist
-        else if move_related node then freeze_worklist := RegSet.add node !freeze_worklist
-        else simplify_worklist := RegSet.add node !simplify_worklist
+        if degree.(node) >= num_colors then Bitset.add spill_worklist node
+        else if move_related node then Bitset.add freeze_worklist node
+        else Bitset.add simplify_worklist node
       done
     in
 
     let simplify () =
-      let node = pick !simplify_worklist in
-      simplify_worklist := RegSet.remove node !simplify_worklist;
+      let node = pick simplify_worklist in
+      Bitset.remove simplify_worklist node;
       select_stack := node :: !select_stack;
       stacked.(node) <- true;
-      RegSet.iter decrement_degree (adjacent node)
+      iter_adjacent node decrement_degree
     in
 
     let add_to_worklist node =
       if (not (precoloured node)) && (not (move_related node))
          && degree.(node) < num_colors
       then begin
-        freeze_worklist := RegSet.remove node !freeze_worklist;
-        simplify_worklist := RegSet.add node !simplify_worklist
+        Bitset.remove freeze_worklist node;
+        Bitset.add simplify_worklist node
       end
     in
     (* George: merging into the pre-coloured [r] is safe if every neighbour of
        the other node already interferes with r or is insignificant. *)
-    let george neighbour r =
-      degree.(neighbour) < num_colors || precoloured neighbour
-      || interferes neighbour r
+    let george r node =
+      not
+        (Bitset.exists
+           (fun t ->
+             (not (stacked.(t) || coalesced.(t)))
+             && not (degree.(t) < num_colors || precoloured t || interferes t r))
+           interfere.(node))
     in
     (* Briggs: merging is safe if the merged node has fewer than K neighbours
-       of significant degree. *)
-    let briggs nodes =
-      RegSet.cardinal (RegSet.filter (fun t -> degree.(t) >= num_colors) nodes)
-      < num_colors
+       of significant degree.  The union is built in a scratch row that is
+       reused, so the test costs no allocation. *)
+    let scratch = Bitset.create n in
+    let briggs u v =
+      Bitset.clear scratch;
+      iter_adjacent u (Bitset.add scratch);
+      iter_adjacent v (Bitset.add scratch);
+      Bitset.count (fun t -> degree.(t) >= num_colors) scratch < num_colors
     in
     let combine u v =
-      if RegSet.mem v !freeze_worklist then
-        freeze_worklist := RegSet.remove v !freeze_worklist
-      else spill_worklist := RegSet.remove v !spill_worklist;
+      if Bitset.mem freeze_worklist v then Bitset.remove freeze_worklist v
+      else Bitset.remove spill_worklist v;
       coalesced.(v) <- true;
       alias.(v) <- u;
-      move_list.(u) <- RegSet.union move_list.(u) move_list.(v);
-      enable_moves (RegSet.singleton v);
-      RegSet.iter
-        (fun t ->
+      Bitset.union_into move_list.(u) move_list.(v);
+      enable_move v;
+      iter_adjacent v (fun t ->
           add_edge t u;
-          decrement_degree t)
-        (adjacent v);
-      if degree.(u) >= num_colors && RegSet.mem u !freeze_worklist then begin
-        freeze_worklist := RegSet.remove u !freeze_worklist;
-        spill_worklist := RegSet.add u !spill_worklist
+          decrement_degree t);
+      if degree.(u) >= num_colors && Bitset.mem freeze_worklist u then begin
+        Bitset.remove freeze_worklist u;
+        Bitset.add spill_worklist u
       end
     in
     let coalesce () =
-      let m = pick !worklist_moves in
-      worklist_moves := RegSet.remove m !worklist_moves;
+      let m = pick worklist_moves in
+      Bitset.remove worklist_moves m;
       let dst, src = moves.(m) in
       let x = alias_of dst and y = alias_of src in
       let u, v = if precoloured y then (y, x) else (x, y) in
@@ -269,34 +287,31 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
         add_to_worklist v
       end
       else if
-        (precoloured u && RegSet.for_all (fun t -> george t u) (adjacent v))
-        || ((not (precoloured u)) && briggs (RegSet.union (adjacent u) (adjacent v)))
+        (precoloured u && george u v) || ((not (precoloured u)) && briggs u v)
       then begin
         incr coalesced_count;
         combine u v;
         add_to_worklist u
       end
-      else active_moves := RegSet.add m !active_moves
+      else Bitset.add active_moves m
     in
 
     let freeze_moves u =
-      RegSet.iter
-        (fun m ->
+      iter_node_moves u (fun m ->
           let dst, src = moves.(m) in
           let v = if alias_of src = alias_of u then alias_of dst else alias_of src in
           (* Dropping it from both sets is what freezing a move amounts to:
              node_moves stops seeing it, so its ends are ordinary again. *)
-          active_moves := RegSet.remove m !active_moves;
+          Bitset.remove active_moves m;
           if (not (move_related v)) && degree.(v) < num_colors then begin
-            freeze_worklist := RegSet.remove v !freeze_worklist;
-            simplify_worklist := RegSet.add v !simplify_worklist
+            Bitset.remove freeze_worklist v;
+            Bitset.add simplify_worklist v
           end)
-        (node_moves u)
     in
     let freeze () =
-      let node = pick !freeze_worklist in
-      freeze_worklist := RegSet.remove node !freeze_worklist;
-      simplify_worklist := RegSet.add node !simplify_worklist;
+      let node = pick freeze_worklist in
+      Bitset.remove freeze_worklist node;
+      Bitset.add simplify_worklist node;
       freeze_moves node
     in
 
@@ -310,36 +325,33 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
         else float_of_int uses_and_defs.(node) /. float_of_int (max 1 degree.(node))
       in
       let node =
-        RegSet.fold
+        Bitset.fold
           (fun candidate best ->
             match best with
             | Some b when cost b <= cost candidate -> best
             | _ -> Some candidate)
-          !spill_worklist None
+          spill_worklist None
         |> Option.get
       in
-      spill_worklist := RegSet.remove node !spill_worklist;
-      simplify_worklist := RegSet.add node !simplify_worklist;
+      Bitset.remove spill_worklist node;
+      Bitset.add simplify_worklist node;
       freeze_moves node
     in
 
     let assign_colours () =
+      (* There are at most 25 colours, so the set of the ones still free is a
+         row of its own rather than anything cleverer. *)
+      let available = Bitset.create Riscv.num_physical in
       List.iter
         (fun node ->
-          let available =
-            Array.fold_left (fun acc c -> RegSet.add c acc) RegSet.empty colours
-          in
-          let available =
-            RegSet.fold
-              (fun w acc ->
-                let w = alias_of w in
-                if coloured.(w) || precoloured w then
-                  RegSet.remove colour.(w) acc
-                else acc)
-              neighbours.(node) available
-          in
-          if RegSet.is_empty available then
-            spilled_nodes := RegSet.add node !spilled_nodes
+          Bitset.clear available;
+          Array.iter (Bitset.add available) colours;
+          Bitset.iter
+            (fun w ->
+              let w = alias_of w in
+              if coloured.(w) || precoloured w then Bitset.remove available colour.(w))
+            interfere.(node);
+          if Bitset.is_empty available then Bitset.add spilled_nodes node
           else begin
             coloured.(node) <- true;
             colour.(node) <- pick available
@@ -352,15 +364,15 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
 
     make_worklists ();
     let rec work () =
-      if not (RegSet.is_empty !simplify_worklist) then (simplify (); work ())
-      else if not (RegSet.is_empty !worklist_moves) then (coalesce (); work ())
-      else if not (RegSet.is_empty !freeze_worklist) then (freeze (); work ())
-      else if not (RegSet.is_empty !spill_worklist) then (select_spill (); work ())
+      if not (Bitset.is_empty simplify_worklist) then (simplify (); work ())
+      else if not (Bitset.is_empty worklist_moves) then (coalesce (); work ())
+      else if not (Bitset.is_empty freeze_worklist) then (freeze (); work ())
+      else if not (Bitset.is_empty spill_worklist) then (select_spill (); work ())
     in
     work ();
     assign_colours ();
 
-    if RegSet.is_empty !spilled_nodes then begin
+    if Bitset.is_empty spilled_nodes then begin
       (* Only the round that succeeded describes the code that came out; the
          earlier rounds were thrown away along with their moves. *)
       report.moves_total <- Array.length moves;
@@ -368,7 +380,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
       apply_colours colour
     end
     else begin
-      rewrite !spilled_nodes;
+      rewrite spilled_nodes;
       round ()
     end
 
@@ -378,14 +390,16 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
      strictly closer to done. *)
   and rewrite spilled =
     let slots = Hashtbl.create 8 in
-    RegSet.iter
+    Bitset.iter
       (fun r ->
         Hashtbl.replace slots r func.Riscv.num_spill_slots;
         func.Riscv.num_spill_slots <- func.Riscv.num_spill_slots + 1;
         report.spilled <- Riscv.name_of_reg r :: report.spilled)
       spilled;
     let offset r = Hashtbl.find slots r * 8 in
-    let touched regs = List.sort_uniq compare (List.filter (fun r -> RegSet.mem r spilled) regs) in
+    let touched regs =
+      List.sort_uniq compare (List.filter (fun r -> Bitset.mem spilled r) regs)
+    in
     (* One temporary per spilled register per instruction, whether the
        instruction reads it, writes it, or both. *)
     let temps_for reads writes =

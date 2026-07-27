@@ -34,11 +34,11 @@ one pass each.
 - [doc/pipeline.md](doc/pipeline.md) — 1本のプログラムが全パスを通り抜けるまでを、
   実際のダンプで追ったもの
 - [doc/typing.md](doc/typing.md) — 型推論の詳説。単一化、レベル方式の一般化、
-  値制限、シグネチャ照合の硬い変数
+  値制限、シグネチャ照合の rigid な型変数
 - [doc/matching.md](doc/matching.md) — パターンマッチの詳説。網羅性・到達不能の
   判定、決定木の作り方、合流点
 - [doc/regalloc.md](doc/regalloc.md) — レジスタ割り付けの詳説。干渉グラフの実例、
-  合体・スピル・callee-saved の扱い
+  融合・スピル・callee-saved の扱い
 
 ## Two forms
 
@@ -198,6 +198,10 @@ around a condition, commas where it has spaces.
 | **register allocation** | **`regalloc.ml`** | **graph colouring with iterated coalescing** |
 | peephole | `peephole.ml` | local rewrites once registers are assigned |
 | assembly | `emit.ml` | frame layout and instruction printing |
+
+`bitset.ml` holds the sets the allocator lives on -- the worklists and the
+interference itself, a bit per pair. It is the one data-structure choice that
+shows up in the wall clock: see [the write-up](doc/regalloc.md), section 10.
 
 The last five rows sit on `riscv.ml`, which holds the instruction and
 control-flow types, the register file and the calling convention. It is

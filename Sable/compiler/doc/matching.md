@@ -193,7 +193,7 @@ let fields = List.map (fun t -> (Ident.fresh "fld", t)) field_types in
 
 `score` の木はこうなります。
 
-![score の決定木](figures/decision-tree.svg)
+![score の決定木](./figures/decision-tree.svg)
 
 実際の A正規形（`--dump-anf`）の先頭は次のとおりで、図と一致します。
 
