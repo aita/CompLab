@@ -300,8 +300,12 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
       iter_node_moves u (fun m ->
           let dst, src = moves.(m) in
           let v = if alias_of src = alias_of u then alias_of dst else alias_of src in
-          (* Dropping it from both sets is what freezing a move amounts to:
-             node_moves stops seeing it, so its ends are ordinary again. *)
+          (* Freezing a move is making node_moves stop seeing it, so that its
+             ends count as ordinary nodes again.  node_moves reads both live
+             sets, but freeze and select_spill are only reached when
+             worklist_moves is empty -- the cascade tries coalescing before
+             either -- so every live move is in active_moves and dropping it
+             from there is the whole of it. *)
           Bitset.remove active_moves m;
           if (not (move_related v)) && degree.(v) < num_colors then begin
             Bitset.remove freeze_worklist v;
