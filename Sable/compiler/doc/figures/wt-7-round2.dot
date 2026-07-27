@@ -1,0 +1,38 @@
+// The graph the second round of the worked example starts from, after the
+// spilled v0 has been rewritten.  doc/regalloc.md section 7, step 7.
+// Straight out of tests/walkthrough.exe, like the wt-1..6 panels; the layout
+// is its own because this is a different graph -- v0 is isolated now.
+// Render with ./render.sh (needs graphviz).
+graph wt2 {
+  layout = neato;
+  overlap = false;
+  splines = true;
+  bgcolor = "transparent";
+  node [shape = circle, style = filled, fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 11, width = 0.62, fixedsize = true];
+  edge [color = "#57606a", dir = none, fontname = "Helvetica", fontsize = 9];
+  v1 [label = <v1<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">7</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "0,0!"];
+  v2 [label = <v2<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">2</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "-2.1,-1.3!"];
+  v3 [label = <v3<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">2</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "-2.1,0.35!"];
+  v4 [label = <v4<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">1</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "-1,1.75!"];
+  v5 [label = <v5<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "1.35,1.55!"];
+  v9 [label = <v9<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">2</FONT>>, fillcolor = "#dafbe1", color = "#1a7f37", penwidth = 2 pos = "2.95,0.95!"];
+  v7 [label = <v7<BR/><FONT POINT-SIZE="8" COLOR="#cf222e">3</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "2.15,-0.95!"];
+  v6 [label = <v6<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">2</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "3.6,-2.55!"];
+  v0 [label = <v0<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">0</FONT>>, fillcolor = "#f6f8fa", color = "#57606a" pos = "-3.5,2.3!"];
+  v8 [label = <v8<BR/><FONT POINT-SIZE="8" COLOR="#1a7f37">0</FONT>>, fillcolor = "#dafbe1", color = "#1a7f37", penwidth = 2 pos = "-2.3,2.9!"];
+  v1 -- v2;
+  v1 -- v3;
+  v1 -- v4;
+  v1 -- v5;
+  v1 -- v6;
+  v1 -- v7;
+  v1 -- v9;
+  v2 -- v3;
+  v5 -- v7;
+  v5 -- v9;
+  v6 -- v7;
+  v7 -- v9 [style = dashed, color = "#0969da", label = "mv", fontcolor = "#0969da"];
+  v5 -- v4 [style = dashed, color = "#0969da", label = "mv", fontcolor = "#0969da"];
+}

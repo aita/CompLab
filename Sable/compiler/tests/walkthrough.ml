@@ -12,7 +12,10 @@
    allocatable whatever `-nregs` says, because the calling convention needs
    them.  And a graph with K of 25 does not fit on a page.  So this drives the
    allocator directly, on a machine of three registers, which is a thing the
-   command line cannot ask for. *)
+   command line cannot ask for.
+
+   The offsets start at 64 so that the slot the spiller allocates, at 0(sp),
+   cannot be confused with the block's own stack traffic. *)
 
 let colours = [| 10; 11; 12 |] (* a0, a1, a2 *)
 
@@ -28,15 +31,15 @@ let shrink_machine () =
 let v n = Riscv.num_physical + n
 let a0 = 10
 
-(*   ld  v0, 0(sp)        four values loaded and all live at once, which is one
-     ld  v1, 8(sp)        more than the machine has
-     ld  v2, 16(sp)
-     ld  v3, 24(sp)
+(*   ld  v0, 64(sp)       four values loaded and all live at once, which is one
+     ld  v1, 72(sp)       more than the machine has
+     ld  v2, 80(sp)
+     ld  v3, 88(sp)
      add v4, v2, v3
      mv  v5, v4           a move whose ends can be merged
      mv  v7, v0           a move whose ends cannot
      add v6, v7, v5
-     sd  v6, 32(sp)
+     sd  v6, 96(sp)
      add a0, v7, v1
      ret a0                                                                  *)
 let block () : Riscv.block =
@@ -44,15 +47,15 @@ let block () : Riscv.block =
     label = "L";
     body =
       [
-        Riscv.Load (v 0, Riscv.sp, 0);
-        Riscv.Load (v 1, Riscv.sp, 8);
-        Riscv.Load (v 2, Riscv.sp, 16);
-        Riscv.Load (v 3, Riscv.sp, 24);
+        Riscv.Load (v 0, Riscv.sp, 64);
+        Riscv.Load (v 1, Riscv.sp, 72);
+        Riscv.Load (v 2, Riscv.sp, 80);
+        Riscv.Load (v 3, Riscv.sp, 88);
         Riscv.Arith (Riscv.Add, v 4, v 2, v 3);
         Riscv.Move (v 5, v 4);
         Riscv.Move (v 7, v 0);
         Riscv.Arith (Riscv.Add, v 6, v 7, v 5);
-        Riscv.Store (v 6, Riscv.sp, 32);
+        Riscv.Store (v 6, Riscv.sp, 96);
         Riscv.Arith (Riscv.Add, a0, v 7, v 1);
       ];
     terminator = Riscv.Return [ a0 ];
