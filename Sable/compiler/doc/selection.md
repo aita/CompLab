@@ -6,10 +6,6 @@
 
 ## 1. 命令選択 — `selection.ml`
 
-ここから機械の側です。クロージャ変換済みのコードを、**無制限の仮想レジスタ**の上の
-RISC-V 制御フローグラフに落とします。この時点のコードは正しいが実行不能で、これを
-実行できるものに変えるのが `regalloc.ml` の仕事です。
-
 ```
 $ sablec --dump-riscv -o /dev/null doc/sum.sbl
 function sable_sum_18 (20 registers, 0 spill slots)

@@ -21,7 +21,7 @@ digraph closure {
   t2 [label = "捕獲する関数"];
   one [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6"
                        COLOR="#57606a">
-    <TR><TD BGCOLOR="#f6f8fa"><FONT FACE="Courier" POINT-SIZE="10">&amp;sable_add_8</FONT></TD>
+    <TR><TD BGCOLOR="#f6f8fa"><FONT FACE="Courier" POINT-SIZE="10">&amp;sable_add_6</FONT></TD>
         <TD><FONT FACE="Courier" POINT-SIZE="10">n</FONT></TD></TR>
     <TR><TD><FONT POINT-SIZE="8" COLOR="#57606a">コードポインタ</FONT></TD>
         <TD><FONT POINT-SIZE="8" COLOR="#57606a">捕獲した値</FONT></TD></TR>
