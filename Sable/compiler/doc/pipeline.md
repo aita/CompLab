@@ -157,8 +157,10 @@ type error in a function application:
 
 ## 3. 型推論 — `typing.ml`
 
-[Hindley–Milner][damas] に**レベル方式の一般化**（Rémy の方法、OCaml 自身が使っている
-もの。[Kiselyov の解説][levels]が読みやすい）を載せています。
+> ここは[型推論の詳説](typing.md)に別立てで書いてあります。以下は概略です。
+
+Hindley–Milner に**レベル方式の一般化**（Rémy の方法、OCaml 自身が使っているもの）を
+載せています。
 
 構文解析器は束縛子・パターン変数・`match` のそれぞれに空の型変数を付けておき、推論は
 それを埋めていく1回のボトムアップ走査です。単一化は破壊的（`Types.unify` が `ref` に書き
@@ -175,7 +177,7 @@ type error in a function application:
 問わない表現を選んであるので、要素を覗かない関数は要素の型を気にせずに済みます。`length`
 は1つコンパイルされるだけで `int list` にも `string list` にも `int list list` にも効きます。
 
-制約が2つあります。**一般化するのは構文的な値だけ**です（[値制限][valuerestriction]）。これがないと、可変配列に
+制約が2つあります。**一般化するのは構文的な値だけ**です（値制限）。これがないと、可変配列に
 入れた多相な値に整数を書いてポインタとして読み出せてしまいます。もう1つ、**比較の被演算子は
 最外レベルに固定して量化しない**ようにしています。`=` は機械語1命令に落ちるので、そう比較
 できる型に決まってもらわないと困るからです。
@@ -191,6 +193,9 @@ type error in a function application:
 「アドレスを比べて黙って動く」のではなくエラーになります。
 
 ## 4. パターンマッチの検査 — `match_check.ml`
+
+> §4 と §5 は[パターンマッチの詳説](matching.md)に別立てで書いてあります。
+> 以下は概略です。
 
 網羅性と到達不能ケースは、じつは同じ1つの問いです — 「ある行は、その上の行が全部
 拒否する値を受理するか？」（*usefulness*）。上の行に対して有用でない行は到達不能で、
@@ -583,21 +588,13 @@ sable_const_Nil_3:
 
 ## 参考文献
 
-型検査から命令選択までの各パスが拠っているもの。レジスタ割り付けのものは
-[そちらの文書](regalloc.md#参考文献)にあります。
+この文書が扱う範囲のもの。詳説を別に立てたパスの文献は、そちらにまとめてあります。
 
-- L. Damas, R. Milner, [*Principal type-schemes for functional programs*][damas],
-  POPL 1982. 推論そのもの。
-- O. Kiselyov, [*Efficient and Insightful Generalization*][levels]. Rémy の
-  レベル方式による一般化の解説。`types.ml` の `level` はこれです。
-- A. K. Wright, [*Simple imperative polymorphism*][valuerestriction],
-  LISP and Symbolic Computation 8(4), 1995. 値制限。
-- L. Maranget, [*Warnings for pattern matching*][warnings],
-  JFP 17(3), 2007（[PDF][warnings-pdf]）。`match_check.ml` の usefulness 判定 —
-  網羅性と到達不能ケースを1つのアルゴリズムで、しかも反例つきで出す方法。
-- L. Maranget, [*Compiling pattern matching to good decision trees*][trees],
-  ML Workshop 2008（[PDF][trees-pdf]）。`match_compile.ml` の行列アルゴリズム。
-  列の選び方のヒューリスティクスまでは追っていません（本文のとおり最左を取ります）。
+- **型推論** — [型推論の参考文献](typing.md#参考文献)（Damas–Milner、レベル方式、値制限）
+- **パターンマッチ** — [パターンマッチの参考文献](matching.md#参考文献)（Maranget ほか）
+- **レジスタ割り付け** — [レジスタ割り付けの参考文献](regalloc.md#参考文献)
+  （Chaitin、Briggs、George–Appel ほか）
+
 - C. Flanagan, A. Sabry, B. F. Duba, M. Felleisen,
   [*The essence of compiling with continuations*][anf], PLDI 1993. A正規形。
 - M. Elsman, [*Static interpretation of modules*][elsman], ICFP 1999.
@@ -609,13 +606,6 @@ sable_const_Nil_3:
   A正規化・α変換・最適化・クロージャ変換と、既知関数の楽観的な判定 — はこれに倣って
   います。バックエンドは別物で、こちらは AST を辿るのではなく制御フローグラフを作ります。
 
-[damas]: https://doi.org/10.1145/582153.582176
-[levels]: https://okmij.org/ftp/ML/generalization.html
-[valuerestriction]: https://doi.org/10.1007/BF01018828
-[warnings]: https://doi.org/10.1017/S0956796807006223
-[warnings-pdf]: http://moscova.inria.fr/~maranget/papers/warn/warn.pdf
-[trees]: https://doi.org/10.1145/1411304.1411311
-[trees-pdf]: http://moscova.inria.fr/~maranget/papers/ml05e-maranget.pdf
 [anf]: https://doi.org/10.1145/155090.155113
 [elsman]: https://doi.org/10.1145/317636.317800
 [tarjan]: https://doi.org/10.1137/0201010
@@ -637,3 +627,8 @@ RISC-V の標準規約に1つ足しただけです。
 
 末尾呼び出しは本物です。フレームを畳んでからジャンプするので、末尾再帰で書いたループは
 スタックを消費しません。`examples/tour.sbl` の `count 1 1000000 0` がそれを踏んでいます。
+
+---
+
+詳説：[型推論](typing.md)、[パターンマッチ](matching.md)、
+[レジスタ割り付け](regalloc.md)。

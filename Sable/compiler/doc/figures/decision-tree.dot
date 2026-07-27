@@ -1,0 +1,52 @@
+// The decision tree for `score` in doc/matching.md.  A multiway test is
+// emitted as a chain of two-way tests; drawn here as one node per column so
+// that the shape is visible.
+// Render with ./render.sh (needs graphviz).
+digraph decision {
+  rankdir = TB;
+  bgcolor = "transparent";
+  nodesep = 0.30;
+  ranksep = 0.40;
+  node [shape = box, style = "rounded,filled", fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 10, margin = "0.14,0.07"];
+  edge [color = "#57606a", fontcolor = "#57606a",
+        fontname = "Helvetica", fontsize = 9];
+  { node [shape = diamond, fillcolor = "#ffffff", margin = "0.02,0.01"];
+    colour; shapeR; shapeG; shapeB; }
+
+  colour [label = "tag of the colour"];
+  shapeR [label = "tag of the shape"];
+  shapeG [label = "tag of the shape"];
+  shapeB [label = "tag of the shape"];
+
+  redDot  [label = "-1"];
+  redRect [label = "w - h"];
+  green   [label = "7"];
+  blueDot [label = "-2"];
+  blueRect [label = "w + h"];
+  shared  [label = "r * 100\lreached from all three colours,\lso it is a function and these are calls\l",
+           fillcolor = "#ddf4ff", color = "#0969da", penwidth = 2];
+
+  colour -> shapeR [label = "  0  Red"];
+  colour -> shapeG [label = "  1  Green"];
+  colour -> shapeB [label = "  2  Blue"];
+
+  shapeR -> redDot  [label = "  0  Dot"];
+  shapeR -> redRect [label = "  2  Rect"];
+  shapeR -> shared  [label = "  1  Circle", color = "#0969da"];
+
+  shapeG -> shared [label = "  1  Circle", color = "#0969da"];
+  shapeG -> green  [label = "  0  Dot\l  2  Rect\l"];
+
+  shapeB -> blueDot  [label = "  0  Dot"];
+  shapeB -> blueRect [label = "  2  Rect"];
+  shapeB -> shared   [label = "  1  Circle", color = "#0969da"];
+
+  note [shape = plaintext, style = "", fillcolor = "transparent",
+        fontcolor = "#57606a", fontsize = 9,
+        label = "Each test reads word 0 of the block and compares it.\l\
+The last arm of a node needs no test, so a node with n arms\l\
+costs n − 1 comparisons, not n.\l"];
+  shapeB -> note [style = dotted, arrowhead = none, color = "#8c959f"];
+}

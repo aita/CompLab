@@ -28,10 +28,15 @@ sablec [options] <file.sbl>
 registers and with 10, and the two runs must agree — which is how the spiller
 gets tested.
 
-Two longer write-ups, in Japanese:
+Longer write-ups, in Japanese. The first is the tour; the other three go into
+one pass each.
 
 - [doc/pipeline.md](doc/pipeline.md) — 1本のプログラムが全パスを通り抜けるまでを、
   実際のダンプで追ったもの
+- [doc/typing.md](doc/typing.md) — 型推論の詳説。単一化、レベル方式の一般化、
+  値制限、シグネチャ照合の硬い変数
+- [doc/matching.md](doc/matching.md) — パターンマッチの詳説。網羅性・到達不能の
+  判定、決定木の作り方、合流点
 - [doc/regalloc.md](doc/regalloc.md) — レジスタ割り付けの詳説。干渉グラフの実例、
   合体・スピル・callee-saved の扱い
 
@@ -402,10 +407,11 @@ Deliberate, and each one is a place the project could go next.
 
 ## References
 
-Each of the two write-ups carries the reading its own half rests on:
-[the pipeline](doc/pipeline.md#参考文献) for inference, pattern matching, ANF
-and modules, and [register allocation](doc/regalloc.md#参考文献) for the
-colouring. The four the code follows most closely:
+Each write-up carries the reading its own subject rests on:
+[the pipeline](doc/pipeline.md#参考文献) for ANF, modules and the rest,
+[type inference](doc/typing.md#参考文献), [pattern matching](doc/matching.md#参考文献),
+and [register allocation](doc/regalloc.md#参考文献). The four the code follows
+most closely:
 
 - L. George, A. W. Appel, [*Iterated register coalescing*][iterated],
   ACM TOPLAS 18(3), 1996 — the allocator.
@@ -431,7 +437,7 @@ src/          the compiler
 runtime/      sable_runtime.c: entry point, heap, primitives
 examples/     programs, all run by the test suite
 tests/        golden tests, including the compile-error messages
-doc/          the two write-ups, and the graphviz sources for their figures
+doc/          the write-ups, and the graphviz sources for their figures
 sable         compile + link + run under qemu
 ```
 

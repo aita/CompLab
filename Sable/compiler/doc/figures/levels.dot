@@ -1,0 +1,42 @@
+// Why the type variables the parser attaches to binders are written and never
+// unified against.  See doc/typing.md.
+// Render with ./render.sh (needs graphviz).
+digraph levels {
+  rankdir = TB;
+  bgcolor = "transparent";
+  ranksep = 0.35;
+  node [shape = box, style = "rounded,filled", fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 10, margin = "0.16,0.08"];
+  edge [color = "#57606a", fontcolor = "#57606a",
+        fontname = "Helvetica", fontsize = 9];
+
+  start [label = "let rec id x = x in ...\lparsed: the binder carries a slot,\lmade before inference starts, so at level 0\l",
+         fillcolor = "#ffffff"];
+  enter [label = "enter_level\lchecking the right-hand side, at level 1"];
+  fresh [label = "'a created here\llevel 1"];
+
+  subgraph cluster_bad {
+    label = "unify the slot with it";
+    fontname = "Helvetica"; fontsize = 9; fontcolor = "#cf222e";
+    color = "#cf222e"; style = "rounded,dashed";
+    lower [label = "a variable at level 0 pulls\lwhat it is linked to down with it\l'a : level 1 → 0", color = "#cf222e"];
+    nothing [label = "generalize at level 0\lquantifies variables deeper than 0\l'a is not deeper — nothing is quantified\l\lid : 'a → 'a  for one 'a only",
+             fillcolor = "#ffebe9", color = "#cf222e"];
+    lower -> nothing;
+  }
+
+  subgraph cluster_good {
+    label = "assign the slot afterwards";
+    fontname = "Helvetica"; fontsize = 9; fontcolor = "#0969da";
+    color = "#0969da"; style = "rounded,dashed";
+    keep [label = "the slot is written, not unified\lno level is disturbed\l'a : level 1", color = "#0969da"];
+    quant [label = "generalize at level 0\l'a is deeper than 0, so it is quantified\l\lid : ∀a. a → a",
+           fillcolor = "#ddf4ff", color = "#0969da"];
+    keep -> quant;
+  }
+
+  start -> enter -> fresh;
+  fresh -> lower;
+  fresh -> keep;
+}

@@ -16,7 +16,9 @@ let rec anf out level exp =
   | Anf.Field (x, i) -> say "%s[%d]" x i
   | Anf.Byte (x, i) -> say "%s.[%s]" x i
   | Anf.Block (tag, xs) -> say "block %d (%s)" tag (vars xs)
-  | Anf.Tuple xs -> say "(%s)" (vars xs)
+  (* Commas, not the spaces the other forms use: `(a b)` reads as an
+     application. *)
+  | Anf.Tuple xs -> say "(%s)" (String.concat ", " xs)
   | Anf.Array (n, v) -> say "Array.make %s %s" n v
   | Anf.Get (a, i) -> say "%s.(%s)" a i
   | Anf.Put (a, i, v) -> say "%s.(%s) <- %s" a i v
@@ -60,7 +62,7 @@ let rec closure out level exp =
   | Closure.Field (x, i) -> say "%s[%d]" x i
   | Closure.Byte (x, i) -> say "%s.[%s]" x i
   | Closure.Block (tag, xs) -> say "block %d (%s)" tag (vars xs)
-  | Closure.Tuple xs -> say "(%s)" (vars xs)
+  | Closure.Tuple xs -> say "(%s)" (String.concat ", " xs)
   | Closure.Array (n, v) -> say "Array.make %s %s" n v
   | Closure.Get (a, i) -> say "%s.(%s)" a i
   | Closure.Put (a, i, v) -> say "%s.(%s) <- %s" a i v
