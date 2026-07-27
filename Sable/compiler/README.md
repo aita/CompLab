@@ -28,6 +28,13 @@ sablec [options] <file.sbl>
 registers and with 10, and the two runs must agree — which is how the spiller
 gets tested.
 
+Two longer write-ups, in Japanese:
+
+- [doc/pipeline.md](doc/pipeline.md) — 1本のプログラムが全パスを通り抜けるまでを、
+  実際のダンプで追ったもの
+- [doc/regalloc.md](doc/regalloc.md) — レジスタ割り付けの詳説。干渉グラフの実例、
+  合体・スピル・callee-saved の扱い
+
 ## The language
 
 Monomorphic ML. Functions take all their arguments at once (no currying), and
@@ -247,8 +254,8 @@ different scopes do not collide. The listings above drop it for readability.)
 ```
 $ ./sable --dump-regalloc examples/pressure.sbl
 sable_blend:      1 round(s), 27/27 moves coalesced, 0 spill slot(s)
-sable_pressure:   2 round(s), 46/150 moves coalesced, 16 spill slot(s) [spilled ...]
-sable_accumulate: 2 round(s), 42/88 moves coalesced, 2 spill slot(s) [spilled ...]
+sable_pressure:   2 round(s), 46/75 moves coalesced, 16 spill slot(s) [spilled ...]
+sable_accumulate: 2 round(s), 42/44 moves coalesced, 2 spill slot(s) [spilled ...]
 sable_main:       1 round(s), 29/29 moves coalesced, 0 spill slot(s)
 ```
 

@@ -23,4 +23,6 @@ the assembly.
 
 Everything lives in [`compiler/`](compiler): see
 [`compiler/README.md`](compiler/README.md) for the language, the pipeline, and a
-walk through the allocator.
+walk through the allocator.  Two longer write-ups, in Japanese:
+[パイプライン解説](compiler/doc/pipeline.md) と
+[レジスタ割り付け解説](compiler/doc/regalloc.md)。

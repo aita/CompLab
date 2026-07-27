@@ -150,7 +150,6 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
           (List.rev b.body))
       func.Riscv.blocks;
     let moves = Array.of_list (List.rev !moves) in
-    report.moves_total <- report.moves_total + Array.length moves;
 
     (* ------------------------------------------------------- primitives *)
     let adjacent node =
@@ -351,7 +350,10 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
     assign_colours ();
 
     if RegSet.is_empty !spilled_nodes then begin
-      report.moves_coalesced <- report.moves_coalesced + RegSet.cardinal !coalesced_moves;
+      (* Only the round that succeeded describes the code that came out; the
+         earlier rounds were thrown away along with their moves. *)
+      report.moves_total <- Array.length moves;
+      report.moves_coalesced <- RegSet.cardinal !coalesced_moves;
       apply_colours colour
     end
     else begin

@@ -1,0 +1,9 @@
+type list = Nil | Cons of int * list
+
+let rec sum l =
+  match l with
+  | Nil -> 0
+  | Cons (x, rest) -> x + sum rest
+in
+print_int (sum (Cons (1, Cons (2, Nil))));
+print_newline ()
