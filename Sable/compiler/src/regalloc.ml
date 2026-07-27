@@ -45,16 +45,16 @@ let no_report () =
 let set_of_list = Liveness.set_of_list
 let pick set = RegSet.min_elt set
 
-let allocate ?(report = no_report ()) (func : Ir.func) =
-  let num_colors = Ir.num_colors () in
-  let colours = !Ir.allocatable in
+let allocate ?(report = no_report ()) (func : Riscv.func) =
+  let num_colors = Riscv.num_colors () in
+  let colours = !Riscv.allocatable in
   (* Temporaries introduced to hold a spilled value are never spilled again:
      their live range is a single instruction, and spilling them would not
      terminate. *)
   let never_spill = Hashtbl.create 16 in
   let fresh_reg () =
-    let r = func.Ir.num_regs in
-    func.Ir.num_regs <- r + 1;
+    let r = func.Riscv.num_regs in
+    func.Riscv.num_regs <- r + 1;
     Hashtbl.replace never_spill r ();
     r
   in
@@ -63,8 +63,8 @@ let allocate ?(report = no_report ()) (func : Ir.func) =
     report.rounds <- report.rounds + 1;
     if report.rounds > 32 then
       failwith "Regalloc: allocation failed to converge (this is a compiler bug)";
-    let n = func.Ir.num_regs in
-    let precoloured r = r < Ir.num_physical in
+    let n = func.Riscv.num_regs in
+    let precoloured r = r < Riscv.num_physical in
 
     (* ------------------------------------------------------- the graph *)
     let adjacency = Hashtbl.create 1024 in
@@ -127,28 +127,28 @@ let allocate ?(report = no_report ()) (func : Ir.func) =
        precisely what leaves them free to be coalesced. *)
     let live_out = Liveness.analyze func in
     List.iter
-      (fun (b : Ir.block) ->
+      (fun (b : Riscv.block) ->
         let live =
           ref
             (RegSet.union
                (Hashtbl.find live_out b.label)
-               (set_of_list (Ir.terminator_uses b.terminator)))
+               (set_of_list (Riscv.terminator_uses b.terminator)))
         in
         List.iter
           (fun instr ->
-            (match Ir.move_pair instr with
+            (match Riscv.move_pair instr with
              | Some (dst, src) ->
                live := RegSet.remove src !live;
                record_move dst src
              | None -> ());
-            let defs = Ir.defines instr and uses = Ir.uses instr in
+            let defs = Riscv.defines instr and uses = Riscv.uses instr in
             live := List.fold_left (fun acc d -> RegSet.add d acc) !live defs;
             List.iter (fun d -> RegSet.iter (fun l -> add_edge l d) !live) defs;
             live :=
               RegSet.union (RegSet.diff !live (set_of_list defs)) (set_of_list uses);
             List.iter (fun r -> uses_and_defs.(r) <- uses_and_defs.(r) + 1) (defs @ uses))
           (List.rev b.body))
-      func.Ir.blocks;
+      func.Riscv.blocks;
     let moves = Array.of_list (List.rev !moves) in
     report.moves_total <- report.moves_total + Array.length moves;
 
@@ -190,7 +190,7 @@ let allocate ?(report = no_report ()) (func : Ir.func) =
       end
     in
     let make_worklists () =
-      for node = Ir.num_physical to n - 1 do
+      for node = Riscv.num_physical to n - 1 do
         if degree.(node) >= num_colors then
           spill_worklist := RegSet.add node !spill_worklist
         else if move_related node then freeze_worklist := RegSet.add node !freeze_worklist
@@ -367,9 +367,9 @@ let allocate ?(report = no_report ()) (func : Ir.func) =
     let slots = Hashtbl.create 8 in
     RegSet.iter
       (fun r ->
-        Hashtbl.replace slots r func.Ir.num_spill_slots;
-        func.Ir.num_spill_slots <- func.Ir.num_spill_slots + 1;
-        report.spilled <- Ir.name_of_reg r :: report.spilled)
+        Hashtbl.replace slots r func.Riscv.num_spill_slots;
+        func.Riscv.num_spill_slots <- func.Riscv.num_spill_slots + 1;
+        report.spilled <- Riscv.name_of_reg r :: report.spilled)
       spilled;
     let offset r = Hashtbl.find slots r * 8 in
     let touched regs = List.sort_uniq compare (List.filter (fun r -> RegSet.mem r spilled) regs) in
@@ -383,12 +383,12 @@ let allocate ?(report = no_report ()) (func : Ir.func) =
       table
     in
     List.iter
-      (fun (b : Ir.block) ->
+      (fun (b : Riscv.block) ->
         let body =
           List.concat_map
             (fun instr ->
-              let reads = touched (Ir.uses instr) in
-              let writes = touched (Ir.defines instr) in
+              let reads = touched (Riscv.uses instr) in
+              let writes = touched (Riscv.defines instr) in
               if reads = [] && writes = [] then [ instr ]
               else begin
                 let temps = temps_for reads writes in
@@ -396,46 +396,46 @@ let allocate ?(report = no_report ()) (func : Ir.func) =
                   match Hashtbl.find_opt temps r with Some t -> t | None -> r
                 in
                 let loads =
-                  List.map (fun r -> Ir.Load (substitute r, Ir.sp, offset r)) reads
+                  List.map (fun r -> Riscv.Load (substitute r, Riscv.sp, offset r)) reads
                 in
                 let stores =
-                  List.map (fun r -> Ir.Store (substitute r, Ir.sp, offset r)) writes
+                  List.map (fun r -> Riscv.Store (substitute r, Riscv.sp, offset r)) writes
                 in
                 loads
-                @ [ Ir.map_regs ~use:substitute ~def:substitute instr ]
+                @ [ Riscv.map_regs ~use:substitute ~def:substitute instr ]
                 @ stores
               end)
             b.body
         in
-        let reads = touched (Ir.terminator_uses b.terminator) in
+        let reads = touched (Riscv.terminator_uses b.terminator) in
         let temps = temps_for reads [] in
         let substitute r =
           match Hashtbl.find_opt temps r with Some t -> t | None -> r
         in
-        b.terminator <- Ir.map_terminator_regs ~use:substitute b.terminator;
+        b.terminator <- Riscv.map_terminator_regs ~use:substitute b.terminator;
         b.body <-
-          body @ List.map (fun r -> Ir.Load (substitute r, Ir.sp, offset r)) reads)
-      func.Ir.blocks
+          body @ List.map (fun r -> Riscv.Load (substitute r, Riscv.sp, offset r)) reads)
+      func.Riscv.blocks
 
   (* Replace every virtual register by the machine register it was given, and
      drop the moves that have become `mv x, x`. *)
   and apply_colours colour =
-    let recolour r = if Ir.is_virtual r then colour.(r) else r in
+    let recolour r = if Riscv.is_virtual r then colour.(r) else r in
     List.iter
-      (fun (b : Ir.block) ->
+      (fun (b : Riscv.block) ->
         b.body <-
           List.filter_map
             (fun instr ->
-              let instr = Ir.map_regs ~use:recolour ~def:recolour instr in
+              let instr = Riscv.map_regs ~use:recolour ~def:recolour instr in
               match instr with
-              | Ir.Move (d, s) when d = s -> None
+              | Riscv.Move (d, s) when d = s -> None
               | _ -> Some instr)
             b.body;
-        b.terminator <- Ir.map_terminator_regs ~use:recolour b.terminator)
-      func.Ir.blocks
+        b.terminator <- Riscv.map_terminator_regs ~use:recolour b.terminator)
+      func.Riscv.blocks
   in
   round ();
-  report.spill_slots <- report.spill_slots + func.Ir.num_spill_slots;
+  report.spill_slots <- report.spill_slots + func.Riscv.num_spill_slots;
   report
 
 let print_report out name report =

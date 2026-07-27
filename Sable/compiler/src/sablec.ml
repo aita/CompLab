@@ -1,7 +1,7 @@
 (* The compiler driver. *)
 
 let output_file = ref "-"
-let register_budget = ref Ir.max_colors
+let register_budget = ref Riscv.max_colors
 let optimizer_rounds = ref 3
 let dump_knormal = ref false
 let dump_closure = ref false
@@ -14,7 +14,7 @@ let options =
     ( "-nregs",
       Arg.Set_int register_budget,
       Printf.sprintf "<n>  allocate out of n registers (%d..%d, default %d)"
-        Ir.min_colors Ir.max_colors Ir.max_colors );
+        Riscv.min_colors Riscv.max_colors Riscv.max_colors );
     ("-O", Arg.Set_int optimizer_rounds, "<n>  run the optimizer n times (default 3)");
     ("--dump-knormal", Arg.Set dump_knormal, "  print the K-normalized program");
     ("--dump-closure", Arg.Set dump_closure, "  print the closure-converted program");
@@ -40,7 +40,7 @@ let parse_file path =
              (Lexing.lexeme lexbuf)))
 
 let compile path =
-  Ir.configure !register_budget;
+  Riscv.configure !register_budget;
   let ast = parse_file path in
   let ast = Typing.check ast in
   let ast = Match_compile.compile ast in
@@ -53,9 +53,9 @@ let compile path =
   List.iter
     (fun func ->
       Liveness.eliminate_dead_code func;
-      if !dump_ir then Ir.print_func stderr func;
+      if !dump_ir then Riscv.print_func stderr func;
       let report = Regalloc.allocate func in
-      if !dump_regalloc then Regalloc.print_report stderr func.Ir.name report)
+      if !dump_regalloc then Regalloc.print_report stderr func.Riscv.name report)
     functions;
   let channel = if !output_file = "-" then stdout else open_out !output_file in
   Emit.program channel functions;

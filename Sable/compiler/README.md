@@ -100,6 +100,14 @@ than continuing with a wrong answer.
 | **register allocation** | **`regalloc.ml`** | **graph colouring with iterated coalescing** |
 | assembly | `emit.ml` | frame layout and instruction printing |
 
+The last four rows sit on `riscv.ml`, which holds the instruction and
+control-flow types, the register file and the calling convention. It is
+deliberately not called `ir.ml`: it knows exactly one target, down to which
+operations take a 12-bit immediate. `liveness.ml` and `regalloc.ml` are the
+parts that do not — they use only uses, definitions, successors and register
+substitution, so retargeting would mean rewriting `riscv.ml`, `emit.ml` and the
+instruction-selection half of `virtual.ml`, and leaving the allocator alone.
+
 ### Representation
 
 Everything is a 64-bit word. Tuples and constructor arguments are heap blocks;

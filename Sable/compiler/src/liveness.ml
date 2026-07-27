@@ -15,23 +15,23 @@ module RegSet = Set.Make (Int)
 let set_of_list = List.fold_left (fun acc r -> RegSet.add r acc) RegSet.empty
 
 (* Registers live just before [block], given those live just after it. *)
-let live_in_of_block (block : Ir.block) live_out =
-  let live = ref (RegSet.union live_out (set_of_list (Ir.terminator_uses block.terminator))) in
+let live_in_of_block (block : Riscv.block) live_out =
+  let live = ref (RegSet.union live_out (set_of_list (Riscv.terminator_uses block.terminator))) in
   List.iter
     (fun instr ->
       live :=
         RegSet.union
-          (RegSet.diff !live (set_of_list (Ir.defines instr)))
-          (set_of_list (Ir.uses instr)))
+          (RegSet.diff !live (set_of_list (Riscv.defines instr)))
+          (set_of_list (Riscv.uses instr)))
     (List.rev block.body);
   !live
 
 (* Live-out sets for every block, keyed by label. *)
-let analyze (func : Ir.func) =
+let analyze (func : Riscv.func) =
   let live_out = Hashtbl.create 16 in
   let live_in = Hashtbl.create 16 in
   List.iter
-    (fun (b : Ir.block) ->
+    (fun (b : Riscv.block) ->
       Hashtbl.replace live_out b.label RegSet.empty;
       Hashtbl.replace live_in b.label RegSet.empty)
     func.blocks;
@@ -39,7 +39,7 @@ let analyze (func : Ir.func) =
   while !changed do
     changed := false;
     List.iter
-      (fun (b : Ir.block) ->
+      (fun (b : Riscv.block) ->
         let out =
           List.fold_left
             (fun acc succ ->
@@ -47,7 +47,7 @@ let analyze (func : Ir.func) =
               | Some s -> RegSet.union acc s
               | None -> acc)
             RegSet.empty
-            (Ir.successors b.terminator)
+            (Riscv.successors b.terminator)
         in
         let inn = live_in_of_block b out in
         if not (RegSet.equal out (Hashtbl.find live_out b.label)) then changed := true;
@@ -62,24 +62,24 @@ let analyze (func : Ir.func) =
    Note the test is on the instruction's actual destination, not on what the
    allocator tracks: `mv t6, x` writes a reserved register and has to stay. *)
 let writes_dead_register live = function
-  | Ir.Li (d, _)
-  | Ir.La (d, _)
-  | Ir.Move (d, _)
-  | Ir.Arith (_, d, _, _)
-  | Ir.Arith_imm (_, d, _, _)
-  | Ir.Load (d, _, _) ->
-    Ir.is_tracked d && not (RegSet.mem d live)
-  | Ir.Store _ | Ir.Call _ -> false
+  | Riscv.Li (d, _)
+  | Riscv.La (d, _)
+  | Riscv.Move (d, _)
+  | Riscv.Arith (_, d, _, _)
+  | Riscv.Arith_imm (_, d, _, _)
+  | Riscv.Load (d, _, _) ->
+    Riscv.is_tracked d && not (RegSet.mem d live)
+  | Riscv.Store _ | Riscv.Call _ -> false
 
-let eliminate_dead_code (func : Ir.func) =
+let eliminate_dead_code (func : Riscv.func) =
   let live_out = analyze func in
   List.iter
-    (fun (b : Ir.block) ->
+    (fun (b : Riscv.block) ->
       let live =
         ref
           (RegSet.union
              (Hashtbl.find live_out b.label)
-             (set_of_list (Ir.terminator_uses b.terminator)))
+             (set_of_list (Riscv.terminator_uses b.terminator)))
       in
       let kept =
         List.fold_left
@@ -88,8 +88,8 @@ let eliminate_dead_code (func : Ir.func) =
             else begin
               live :=
                 RegSet.union
-                  (RegSet.diff !live (set_of_list (Ir.defines instr)))
-                  (set_of_list (Ir.uses instr));
+                  (RegSet.diff !live (set_of_list (Riscv.defines instr)))
+                  (set_of_list (Riscv.uses instr));
               instr :: kept
             end)
           [] (List.rev b.body)

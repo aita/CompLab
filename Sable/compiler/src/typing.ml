@@ -133,10 +133,10 @@ let rec infer_exp env exp =
       (fun fd ->
         (* Arguments are passed in registers and there are only so many; a
            function that wants more should take a tuple. *)
-        if List.length fd.args > Ir.max_args then
+        if List.length fd.args > Riscv.max_args then
           fail "`%s` takes %d arguments; at most %d are supported (pass a tuple)"
             (Ident.display (fst fd.name))
-            (List.length fd.args) Ir.max_args;
+            (List.length fd.args) Riscv.max_args;
         let body_env =
           List.fold_left (fun env (x, t) -> Ident.Map.add x t env) env fd.args
         in
