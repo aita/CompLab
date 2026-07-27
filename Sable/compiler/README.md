@@ -201,7 +201,7 @@ around a condition, commas where it has spaces.
 
 `bitset.ml` holds the sets the allocator lives on -- the worklists and the
 interference itself, a bit per pair. It is the one data-structure choice that
-shows up in the wall clock: see [the write-up](doc/regalloc.md), section 10.
+shows up in the wall clock: see [the write-up](doc/regalloc.md), section 12.
 
 The last five rows sit on `riscv.ml`, which holds the instruction and
 control-flow types, the register file and the calling convention. It is
