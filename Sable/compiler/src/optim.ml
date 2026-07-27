@@ -101,34 +101,70 @@ let rec propagate env exp =
 
 (* Allocation counts as pure, so an unused tuple, block or array is collected;
    anything that can print or store does not. *)
-let rec has_effect = function
-  | App _ | App_external _ | Put _ -> true
-  | Let (_, e1, e2) -> has_effect e1 || has_effect e2
-  | If_eq (_, _, e1, e2) | If_le (_, _, e1, e2) -> has_effect e1 || has_effect e2
-  | Let_rec (_, e) | Let_tuple (_, _, e) -> has_effect e
-  | _ -> false
 
-let rec eliminate = function
-  | If_eq (x, y, e1, e2) -> If_eq (x, y, eliminate e1, eliminate e2)
-  | If_le (x, y, e1, e2) -> If_le (x, y, eliminate e1, eliminate e2)
+(* One bottom-up pass that hands back, for each node, what it needs from
+   outside it and whether it can be dropped.  Asking for those separately at
+   every binding -- which is what this did before -- walks the continuation
+   again per `let`, and A-normalization produces very long chains of them. *)
+let rec eliminate exp =
+  let pure free = (exp, free, false) in
+  let effectful free = (exp, free, true) in
+  match exp with
+  | Int _ | Static _ -> pure Ident.Set.empty
+  | Var x | Neg x | Field (x, _) -> pure (Ident.Set.singleton x)
+  | Bin (_, x, y) | Array (x, y) | Get (x, y) | Byte (x, y) ->
+    pure (Ident.Set.of_list [ x; y ])
+  | Tuple xs | Block (_, xs) -> pure (Ident.Set.of_list xs)
+  | Put (x, y, z) -> effectful (Ident.Set.of_list [ x; y; z ])
+  | App (f, xs) -> effectful (Ident.Set.of_list (f :: xs))
+  | App_external (_, xs) -> effectful (Ident.Set.of_list xs)
+  | If_eq (x, y, e1, e2) -> branch (fun a b -> If_eq (x, y, a, b)) x y e1 e2
+  | If_le (x, y, e1, e2) -> branch (fun a b -> If_le (x, y, a, b)) x y e1 e2
   | Let ((x, t), e1, e2) ->
-    let e1 = eliminate e1 and e2 = eliminate e2 in
-    if has_effect e1 || Ident.Set.mem x (free_vars e2) then Let ((x, t), e1, e2) else e2
-  | Let_rec (fds, e) ->
-    let fds = List.map (fun fd -> { fd with body = eliminate fd.body }) fds in
-    let e = eliminate e in
+    let e1, free1, impure1 = eliminate e1 in
+    let e2, free2, impure2 = eliminate e2 in
+    if impure1 || Ident.Set.mem x free2 then
+      ( Let ((x, t), e1, e2),
+        Ident.Set.union free1 (Ident.Set.remove x free2),
+        impure1 || impure2 )
+    else (e2, free2, impure2)
+  | Let_tuple (xts, y, e) ->
+    let e, free, impure = eliminate e in
+    if List.exists (fun (x, _) -> Ident.Set.mem x free) xts then
+      ( Let_tuple (xts, y, e),
+        Ident.Set.add y
+          (Ident.Set.diff free (Ident.Set.of_list (List.map fst xts))),
+        impure )
+    else (e, free, impure)
+  | Let_rec (fds, body) ->
+    let fds, wanted =
+      List.fold_left
+        (fun (fds, wanted) fd ->
+          let body, free, _ = eliminate fd.body in
+          let free = Ident.Set.diff free (Ident.Set.of_list (List.map fst fd.args)) in
+          ({ fd with body } :: fds, Ident.Set.union wanted free))
+        ([], Ident.Set.empty) fds
+    in
+    let fds = List.rev fds in
+    let body, free, impure = eliminate body in
     (* The group can only be entered from the continuation: if no name of it is
        free there, the whole group is unreachable, however much its members
        mention each other. *)
-    let used = free_vars e in
-    if List.exists (fun fd -> Ident.Set.mem (fst fd.name) used) fds then Let_rec (fds, e)
-    else e
-  | Let_tuple (xts, y, e) ->
-    let e = eliminate e in
-    let used = free_vars e in
-    if List.exists (fun (x, _) -> Ident.Set.mem x used) xts then Let_tuple (xts, y, e)
-    else e
-  | e -> e
+    if List.exists (fun fd -> Ident.Set.mem (fst fd.name) free) fds then
+      ( Let_rec (fds, body),
+        Ident.Set.diff (Ident.Set.union wanted free)
+          (Ident.Set.of_list (List.map (fun fd -> fst fd.name) fds)),
+        impure )
+    else (body, free, impure)
+
+and branch rebuild x y e1 e2 =
+  let e1, free1, impure1 = eliminate e1 in
+  let e2, free2, impure2 = eliminate e2 in
+  ( rebuild e1 e2,
+    Ident.Set.add x (Ident.Set.add y (Ident.Set.union free1 free2)),
+    impure1 || impure2 )
+
+let eliminate exp = let e, _, _ = eliminate exp in e
 
 (* ------------------------------------------------------------- driver *)
 

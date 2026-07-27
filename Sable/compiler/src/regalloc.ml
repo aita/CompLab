@@ -102,10 +102,14 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
     let freeze_worklist = ref RegSet.empty in
     let spill_worklist = ref RegSet.empty in
     let spilled_nodes = ref RegSet.empty in
-    let coalesced_nodes = ref RegSet.empty in
-    let coloured_nodes = ref RegSet.empty in
+    (* These three are only ever asked "is this node in you?", and a node is an
+       index into a dense range, so they are arrays rather than sets: no
+       hashing, no rebuilding a tree per update, and adjacent below can test
+       them without building anything at all. *)
+    let coalesced = Array.make n false in
+    let coloured = Array.make n false in
+    let stacked = Array.make n false in
     let select_stack = ref [] in
-    let on_select_stack = ref RegSet.empty in
     (* Appel keeps a move in exactly one of five sets, which makes the
        invariant easy to state.  Only two of them are ever consulted here --
        node_moves asks whether a move is still live, and a move is live exactly
@@ -155,16 +159,18 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
     let moves = Array.of_list (List.rev !moves) in
 
     (* ------------------------------------------------------- primitives *)
+    (* Filtering rather than differencing: the sets these once subtracted are
+       whole-graph sized, while a node's neighbourhood usually is not. *)
     let adjacent node =
-      RegSet.diff neighbours.(node) (RegSet.union !on_select_stack !coalesced_nodes)
+      RegSet.filter (fun r -> not (stacked.(r) || coalesced.(r))) neighbours.(node)
     in
     let node_moves node =
-      RegSet.inter move_list.(node) (RegSet.union !active_moves !worklist_moves)
+      RegSet.filter
+        (fun m -> RegSet.mem m !active_moves || RegSet.mem m !worklist_moves)
+        move_list.(node)
     in
     let move_related node = not (RegSet.is_empty (node_moves node)) in
-    let rec alias_of node =
-      if RegSet.mem node !coalesced_nodes then alias_of alias.(node) else node
-    in
+    let rec alias_of node = if coalesced.(node) then alias_of alias.(node) else node in
     let enable_moves nodes =
       RegSet.iter
         (fun node ->
@@ -204,7 +210,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
       let node = pick !simplify_worklist in
       simplify_worklist := RegSet.remove node !simplify_worklist;
       select_stack := node :: !select_stack;
-      on_select_stack := RegSet.add node !on_select_stack;
+      stacked.(node) <- true;
       RegSet.iter decrement_degree (adjacent node)
     in
 
@@ -232,7 +238,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
       if RegSet.mem v !freeze_worklist then
         freeze_worklist := RegSet.remove v !freeze_worklist
       else spill_worklist := RegSet.remove v !spill_worklist;
-      coalesced_nodes := RegSet.add v !coalesced_nodes;
+      coalesced.(v) <- true;
       alias.(v) <- u;
       move_list.(u) <- RegSet.union move_list.(u) move_list.(v);
       enable_moves (RegSet.singleton v);
@@ -327,7 +333,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
             RegSet.fold
               (fun w acc ->
                 let w = alias_of w in
-                if RegSet.mem w !coloured_nodes || precoloured w then
+                if coloured.(w) || precoloured w then
                   RegSet.remove colour.(w) acc
                 else acc)
               neighbours.(node) available
@@ -335,11 +341,13 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
           if RegSet.is_empty available then
             spilled_nodes := RegSet.add node !spilled_nodes
           else begin
-            coloured_nodes := RegSet.add node !coloured_nodes;
+            coloured.(node) <- true;
             colour.(node) <- pick available
           end)
         !select_stack;
-      RegSet.iter (fun node -> colour.(node) <- colour.(alias_of node)) !coalesced_nodes
+      for node = 0 to n - 1 do
+        if coalesced.(node) then colour.(node) <- colour.(alias_of node)
+      done
     in
 
     make_worklists ();
