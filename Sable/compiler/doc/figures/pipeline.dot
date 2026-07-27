@@ -35,7 +35,8 @@ closure.ml  クロージャ変換\l"];
 
   closure -> virtual [label = "  selection.ml  命令選択"];
 
-  virtual -> machine [label = "  liveness.ml  後ろ向き生存解析、デッドコード除去\l  \
+  virtual -> machine [label = "  cfg.ml       制御フローグラフ、後行順と閉路の検査\l  \
+liveness.ml  後ろ向き生存解析、デッドコード除去\l  \
 regalloc.ml  グラフ彩色\l", color = "#0969da", fontcolor = "#0969da",
                       penwidth = 2];
 

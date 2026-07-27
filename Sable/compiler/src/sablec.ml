@@ -7,6 +7,7 @@ let dump_anf = ref false
 let dump_closure = ref false
 let dump_riscv = ref false
 let dump_regalloc = ref false
+let check_cfg = ref false
 
 let options =
   [
@@ -20,6 +21,9 @@ let options =
     ("--dump-closure", Arg.Set dump_closure, "  print the closure-converted program");
     ("--dump-riscv", Arg.Set dump_riscv, "  print the RISC-V code before register allocation");
     ("--dump-regalloc", Arg.Set dump_regalloc, "  report on register allocation");
+    ( "--check-cfg",
+      Arg.Set check_cfg,
+      "  fail if any function's control-flow graph has a cycle" );
   ]
 
 let usage = "usage: sablec [options] <file.sbl>"
@@ -58,11 +62,23 @@ let compile path =
   let functions = Selection.translate converted in
   List.iter
     (fun func ->
+      (* The back end reads a cycle-free graph in two places: liveness is done
+         in one pass, and the spill cost counts uses without weighting them by
+         loop depth (doc/regalloc.md §10).  Nothing in the language can produce
+         a loop inside a function -- a loop in the source is a recursive call,
+         which leaves it -- and this is what says so out loud. *)
+      if !check_cfg && not (Cfg.is_acyclic (Cfg.build func)) then
+        failwith
+          (Printf.sprintf "%s: the control-flow graph has a cycle" func.Riscv.name);
       Liveness.eliminate_dead_code func;
       if !dump_riscv then Riscv.print_func stderr func;
       let report = Regalloc.allocate func in
       if !dump_regalloc then Regalloc.print_report stderr func.Riscv.name report;
-      Peephole.run func)
+      Peephole.run func;
+      (* Order the blocks so that terminators fall through where they can.
+         After peephole, which is what threads the jumps and strands the
+         blocks this drops. *)
+      Cfg.relayout func)
     functions;
   let channel = if !output_file = "-" then stdout else open_out !output_file in
   Emit.program channel functions;

@@ -246,3 +246,25 @@
  (libraries sable)
  (flags
   (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
+
+; The back end reads the control-flow graph as acyclic in two places; this says
+; so for every example rather than leaving it to a comment.
+(rule
+ (with-stdout-to
+  cfg.out
+  (progn
+   (run %{exe:../src/sablec.exe} --check-cfg -o /dev/null %{dep:../examples/tour.sbl})
+   (run %{exe:../src/sablec.exe} --check-cfg -o /dev/null %{dep:../examples/queens.sbl})
+   (run %{exe:../src/sablec.exe} --check-cfg -o /dev/null %{dep:../examples/sort.sbl})
+   (run %{exe:../src/sablec.exe} --check-cfg -o /dev/null %{dep:../examples/tree.sbl})
+   (run %{exe:../src/sablec.exe} --check-cfg -o /dev/null %{dep:../examples/pressure.sbl})
+   (run %{exe:../src/sablec.exe} --check-cfg -o /dev/null %{dep:../examples/lists.sbl})
+   (run %{exe:../src/sablec.exe} --check-cfg -o /dev/null %{dep:../examples/strings.sbl})
+   (run %{exe:../src/sablec.exe} --check-cfg -o /dev/null %{dep:../examples/modules.sbl})
+   (run %{exe:../src/sablec.exe} --check-cfg -o /dev/null %{dep:../examples/functors.sbl})
+   (echo "every control-flow graph is acyclic\n"))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff cfg.expected cfg.out)))

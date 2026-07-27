@@ -22,6 +22,7 @@ sablec [options] <file.sbl>
   --dump-closure     print the closure-converted program
   --dump-riscv          print the RISC-V code before register allocation
   --dump-regalloc    report rounds, coalesced moves and spills per function
+  --check-cfg        fail if any control-flow graph has a cycle
 ```
 
 `-nregs` shrinks the machine on purpose. Every test runs twice, with 25
@@ -194,6 +195,7 @@ around a condition, commas where it has spaces.
 | optimization | `optim.ml` | let-flattening, copy and constant propagation, dead-let elimination |
 | closure conversion | `closure.ml` | lift functions to the top level |
 | instruction selection | `selection.ml` | RISC-V CFG over unlimited virtual registers |
+| control flow | `cfg.ml` | postorder, reachability, an acyclicity check and block layout |
 | liveness | `liveness.ml` | backwards dataflow; also dead-code elimination |
 | **register allocation** | **`regalloc.ml`** | **graph colouring with iterated coalescing** |
 | peephole | `peephole.ml` | local rewrites once registers are assigned |

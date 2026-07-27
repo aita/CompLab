@@ -4,11 +4,13 @@
    writing it.  Everything the allocator does rests on this: two values
    interfere exactly when one is live where the other is defined.
 
-   Control flow inside a function is acyclic here -- a loop in the source is a
-   recursive call, which leaves the function -- so the backwards fixed point
-   converges in a single pass over the blocks in reverse.  The loop is written
-   as a general fixed point anyway, since nothing else in the back end depends
-   on the graph being acyclic. *)
+   The blocks are visited in the depth-first postorder Cfg computes, which puts
+   a block after everything it can reach.  A backwards analysis that sees the
+   successors first is done in one pass on an acyclic graph, and control flow
+   inside a function is acyclic here -- a loop in the source is a recursive
+   call, which leaves the function.  The fixed point around it stays: it costs
+   one comparison per block on the graphs that arrive, and it is what would
+   keep this correct if a loop ever did. *)
 
 module RegSet = Set.Make (Int)
 
@@ -28,6 +30,8 @@ let live_in_of_block (block : Riscv.block) live_out =
 
 (* Live-out sets for every block, keyed by label. *)
 let analyze (func : Riscv.func) =
+  let cfg = Cfg.build func in
+  let order = List.map (Cfg.block cfg) cfg.Cfg.postorder in
   let live_out = Hashtbl.create 16 in
   let live_in = Hashtbl.create 16 in
   List.iter
@@ -54,7 +58,7 @@ let analyze (func : Riscv.func) =
         if not (RegSet.equal inn (Hashtbl.find live_in b.label)) then changed := true;
         Hashtbl.replace live_out b.label out;
         Hashtbl.replace live_in b.label inn)
-      (List.rev func.blocks)
+      order
   done;
   live_out
 
