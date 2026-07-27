@@ -12,6 +12,14 @@ _build/default/src/sablec.exe --dump-riscv   -o /dev/null doc/sum.sbl
 _build/default/src/sablec.exe --dump-regalloc -o /dev/null doc/sum.sbl
 ```
 
+通り道の全体はこうなっています。図は `doc/figures/` の `.dot` から起こしたもので、
+編集したら `doc/figures/render.sh` で描き直します。
+
+![パス一覧](figures/pipeline.svg)
+
+**`Syntax` より下は、そのプログラムがどちらの形で書かれたかを知りません。** 2つの構文が
+1つの抽象構文に合流するのがこの図のいちばんの要点です。
+
 題材はリストの総和です。データ型、パターンマッチ、再帰呼び出し、ヒープ確保という、
 このコンパイラの見どころがひととおり入る最小の例になっています。
 

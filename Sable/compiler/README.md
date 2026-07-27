@@ -174,6 +174,8 @@ around a condition, commas where it has spaces.
 
 ## The pipeline
 
+![the passes](doc/figures/pipeline.svg)
+
 | pass | file | what it does |
 |---|---|---|
 | lexing, parsing | `lexer.mll`, `parser.mly` | ocamllex and menhir |
@@ -429,5 +431,10 @@ src/          the compiler
 runtime/      sable_runtime.c: entry point, heap, primitives
 examples/     programs, all run by the test suite
 tests/        golden tests, including the compile-error messages
+doc/          the two write-ups, and the graphviz sources for their figures
 sable         compile + link + run under qemu
 ```
+
+The figures are generated: edit `doc/figures/*.dot` and run
+`doc/figures/render.sh`, which needs graphviz. The SVGs are committed so that
+the documents render without it.

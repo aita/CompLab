@@ -1,0 +1,60 @@
+// What `work ()` in regalloc.ml does, and the outer loop around it.  The
+// cascade of tests is the `if ... else if ...` chain in the source, in order.
+// Render with ./render.sh (needs graphviz).
+digraph regalloc {
+  rankdir = TB;
+  bgcolor = "transparent";
+  nodesep = 0.35;
+  ranksep = 0.30;
+  node [shape = box, style = "rounded,filled", fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 11, margin = "0.16,0.09"];
+  edge [color = "#57606a", fontcolor = "#57606a",
+        fontname = "Helvetica", fontsize = 9];
+  { node [shape = diamond, fillcolor = "#ffffff", margin = "0.02,0.01"];
+    q1; q2; q3; q4; q5; }
+
+  build [label = "build\nthe interference graph, from liveness"];
+  q1 [label = "anything\ntrivially colourable?"];
+  q2 [label = "any move\nleft to try?"];
+  q3 [label = "any move-related\nnode left?"];
+  q4 [label = "anything\nleft at all?"];
+  q5 [label = "did every node\nget a colour?"];
+
+  simplify [label = "simplify\nremove a node of degree < K,\npush it on the stack"];
+  coalesce [label = "coalesce\nmerge the move's two ends if\nBriggs' or George's test allows"];
+  freeze   [label = "freeze\ngive up on a move so that\nits ends become ordinary"];
+  spill    [label = "select spill\nguess that the least used and\nmost constrained node loses"];
+  select   [label = "assign colours\npop the stack, take a colour\nno neighbour has"];
+  rewrite  [label = "rewrite\ngive the spilled values stack slots,\nload and store around each use",
+            color = "#cf222e"];
+  done     [label = "apply the colouring\ndelete the moves that became mv x, x",
+            fillcolor = "#ffffff", color = "#0969da", penwidth = 2];
+
+  build -> q1;
+  q1 -> q2 [label = "  no"];
+  q2 -> q3 [label = "  no"];
+  q3 -> q4 [label = "  no"];
+  q4 -> select [label = "  no, the graph is empty"];
+  select -> q5;
+  q5 -> done [label = "  yes"];
+
+  { rank = same; q1; simplify; }
+  { rank = same; q2; coalesce; }
+  { rank = same; q3; freeze; }
+  { rank = same; q4; spill; }
+  { rank = same; q5; rewrite; }
+
+  q1 -> simplify [label = "  yes"];
+  q2 -> coalesce [label = "  yes"];
+  q3 -> freeze [label = "  yes"];
+  q4 -> spill [label = "  yes"];
+  q5 -> rewrite [label = "  no", color = "#cf222e", fontcolor = "#cf222e"];
+
+  // Every step but the last goes back to the top of the cascade.
+  simplify -> q1 [style = dashed, constraint = false];
+  coalesce -> q1 [style = dashed, constraint = false];
+  freeze -> q1 [style = dashed, constraint = false];
+  spill -> q1 [style = dashed, constraint = false];
+  rewrite -> build [style = dashed, constraint = false, color = "#cf222e"];
+}

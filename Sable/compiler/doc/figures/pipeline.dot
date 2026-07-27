@@ -1,0 +1,48 @@
+// The passes, and what each one hands to the next.
+// Render with ./render.sh (needs graphviz).
+digraph pipeline {
+  rankdir = TB;
+  bgcolor = "transparent";
+  node [shape = box, style = "rounded,filled", fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 11, margin = "0.18,0.10"];
+  edge [color = "#57606a", fontcolor = "#57606a",
+        fontname = "Helvetica", fontsize = 9];
+
+  { rank = same; ml; brace; }
+  ml    [label = "a.sbl\nML form", fillcolor = "#ffffff"];
+  brace [label = "a.sbb\nbrace form", fillcolor = "#ffffff"];
+
+  syntax  [label = "Syntax\none abstract syntax for both forms"];
+  anf     [label = "Anf\nevery intermediate result named"];
+  closure [label = "Closure\nfunctions lifted to the top level"];
+  virtual [label = "RISC-V control-flow graph\nunlimited virtual registers"];
+  machine [label = "RISC-V control-flow graph\nmachine registers"];
+  asm     [label = "a.s", fillcolor = "#ffffff"];
+
+  ml    -> syntax [label = "  lexer.mll\n  parser.mly"];
+  brace -> syntax [label = "  brace_lexer.mll\n  brace_parser.mly\n  brace_build.ml"];
+
+  syntax -> anf [label = "  modules.ml       modules and functors resolved away\l  \
+typing.ml        let-polymorphism, by levels\l  \
+match_check.ml   exhaustiveness and redundancy\l  \
+match_compile.ml match into a decision tree\l  \
+anf.ml           A-normalization\l"];
+
+  anf -> closure [label = "  alpha.ml    every binder made unique\l  \
+optim.ml    flatten, propagate, eliminate\l  \
+closure.ml  closure conversion\l"];
+
+  closure -> virtual [label = "  selection.ml  instruction selection"];
+
+  virtual -> machine [label = "  liveness.ml  backwards dataflow, dead code\l  \
+regalloc.ml  graph colouring\l", color = "#0969da", fontcolor = "#0969da",
+                      penwidth = 2];
+
+  machine -> asm [label = "  peephole.ml  local rewrites\l  emit.ml      frame layout\l"];
+
+  note [shape = plaintext, style = "", fillcolor = "transparent",
+        fontcolor = "#57606a", fontsize = 9,
+        label = "Nothing below Syntax knows which form\lthe program was written in.\l"];
+  syntax -> note [style = dotted, arrowhead = none, color = "#8c959f"];
+}

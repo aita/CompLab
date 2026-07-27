@@ -1,0 +1,54 @@
+// The interference graph around v16 in sum's .Lelse block, worked out in
+// doc/regalloc.md.  An edge drawn to a box stands for an edge to each of its
+// members: v16 interferes with all 12 and all 13, which is what takes its
+// degree to 28.
+// Render with ./render.sh (needs graphviz).
+digraph interference {
+  compound = true;
+  rankdir = LR;
+  bgcolor = "transparent";
+  node [shape = circle, style = filled, fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 10, width = 0.55, fixedsize = true];
+  edge [color = "#57606a", fontname = "Helvetica", fontsize = 9];
+
+  subgraph cluster_saved {
+    label = "v0 – v11\nthe 12 callee-saved copies,\nlive from entry to every return";
+    fontname = "Helvetica"; fontsize = 9; fontcolor = "#57606a";
+    color = "#8c959f"; style = "rounded,dashed";
+    v0 [label = "v0"]; v1 [label = "v1"]; vdots [label = "…", shape = plaintext,
+                                                 style = "", width = 0.3];
+    v11 [label = "v11"];
+    v0 -> v1 [style = invis]; v1 -> vdots [style = invis]; vdots -> v11 [style = invis];
+  }
+
+  subgraph cluster_caller {
+    label = "a0 – a7,  t0 – t4\nthe 13 the call destroys";
+    fontname = "Helvetica"; fontsize = 9; fontcolor = "#57606a";
+    color = "#cf222e"; style = "rounded,dashed";
+    a0 [label = "a0", fillcolor = "#ffebe9"];
+    a1 [label = "a1", fillcolor = "#ffebe9"];
+    adots [label = "…", shape = plaintext, style = "", width = 0.3];
+    t4 [label = "t4", fillcolor = "#ffebe9"];
+    a0 -> a1 [style = invis]; a1 -> adots [style = invis]; adots -> t4 [style = invis];
+  }
+
+  v16 [label = "v16", fillcolor = "#ddf4ff", color = "#0969da", penwidth = 2,
+       width = 0.7];
+  v12 [label = "v12"];
+  v17 [label = "v17"];
+  v18 [label = "v18"];
+
+  v16 -> v12 [dir = none];
+  v16 -> v17 [dir = none];
+  v16 -> v18 [dir = none];
+  v16 -> v1 [dir = none, lhead = cluster_saved, label = "  12"];
+  v16 -> a1 [dir = none, lhead = cluster_caller, label = "  13", color = "#cf222e"];
+
+  legend [shape = plaintext, style = "", fillcolor = "transparent",
+          fontcolor = "#57606a", fontsize = 9, width = 0, fixedsize = false,
+          label = "v16 holds x, which is live across the recursive call.\l\
+Its degree is 12 + 3 + 13 = 28, and K is 25,\l\
+so it cannot be simplified.\l"];
+  v18 -> legend [style = dotted, arrowhead = none, color = "#8c959f"];
+}
