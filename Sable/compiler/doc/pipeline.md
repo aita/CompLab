@@ -37,10 +37,10 @@ print_newline ()
 **パターンマッチ**（[詳説](matching.md)）。`match` が決定木になります。網羅されているので
 警告は出ません。
 
-**A正規化**（[詳説](anf.md)）。`match` はもう存在せず、タグの読み出しと比較と分岐です。
+**K正規化**（[詳説](knormal.md)）。`match` はもう存在せず、タグの読み出しと比較と分岐です。
 
 ```
-$ sablec --dump-anf -o /dev/null doc/sum.sbl
+$ sablec --dump-knf -o /dev/null doc/sum.sbl
 let rec sum.18 l.19 =
   let t.8.21 : int =
     l.19[0]                    ← タグの読み出し
@@ -126,7 +126,7 @@ sable_sum_18:
 
 ## 参考文献
 
-各パスの文献は、それぞれの文書の末尾にあります。全体の並び — A正規化・α変換・最適化・
+各パスの文献は、それぞれの文書の末尾にあります。全体の並び — K正規化・α変換・最適化・
 クロージャ変換と、既知関数の楽観的な判定 — は次に倣っています。
 
 - E. Sumii, [*MinCaml: a simple and efficient compiler for a minimal functional

@@ -66,15 +66,15 @@ let bind ctx x r = ctx.env <- Ident.Map.add x r ctx.env
    register it was occupying. *)
 let operand ctx x = if const_of ctx x = Some 0 then Riscv.zero else reg_of ctx x
 
-(* The arms of a comparison that was turned into a value by A-normalization. *)
+(* The arms of a comparison that was turned into a value by K-normalization. *)
 let is_boolean_pair a b = (a = 1 && b = 0) || (a = 0 && b = 1)
 
 let binop_of = function
-  | Anf.Add -> Riscv.Add
-  | Anf.Sub -> Riscv.Sub
-  | Anf.Mul -> Riscv.Mul
-  | Anf.Div -> Riscv.Div
-  | Anf.Rem -> Riscv.Rem
+  | Knormal.Add -> Riscv.Add
+  | Knormal.Sub -> Riscv.Sub
+  | Knormal.Mul -> Riscv.Mul
+  | Knormal.Div -> Riscv.Div
+  | Knormal.Rem -> Riscv.Rem
 
 let word = 8
 
@@ -280,22 +280,22 @@ and generate_arith ctx target op x y =
   in
   match (op, const_of ctx x, const_of ctx y) with
   (* Addition and multiplication may take their constant on either side. *)
-  | Anf.Add, _, Some n when Riscv.fits_immediate n ->
+  | Knormal.Add, _, Some n when Riscv.fits_immediate n ->
     emit ctx.builder (Riscv.Arith_imm (Riscv.Add, target, operand ctx x, n))
-  | Anf.Add, Some n, _ when Riscv.fits_immediate n ->
+  | Knormal.Add, Some n, _ when Riscv.fits_immediate n ->
     emit ctx.builder (Riscv.Arith_imm (Riscv.Add, target, operand ctx y, n))
   (* Subtracting a constant is adding its negation. *)
-  | Anf.Sub, _, Some n when Riscv.fits_immediate (-n) ->
+  | Knormal.Sub, _, Some n when Riscv.fits_immediate (-n) ->
     emit ctx.builder (Riscv.Arith_imm (Riscv.Add, target, operand ctx x, -n))
   (* Multiplying by a power of two is a shift.  Division is deliberately left
      alone: `div` truncates towards zero and an arithmetic shift rounds towards
      minus infinity, so the two disagree on negative numbers and the correction
      costs more than it saves here. *)
-  | Anf.Mul, _, Some n when power_of_two n <> None ->
+  | Knormal.Mul, _, Some n when power_of_two n <> None ->
     shift (operand ctx x) (Option.get (power_of_two n))
-  | Anf.Mul, Some n, _ when power_of_two n <> None ->
+  | Knormal.Mul, Some n, _ when power_of_two n <> None ->
     shift (operand ctx y) (Option.get (power_of_two n))
-  | (Anf.Div | Anf.Rem), _, divisor ->
+  | (Knormal.Div | Knormal.Rem), _, divisor ->
     (* RISC-V does not trap on division by zero, it answers -1, so a program
        that divides by zero would quietly carry on with a wrong number.  The
        check is skipped when the divisor is a constant we can see is not

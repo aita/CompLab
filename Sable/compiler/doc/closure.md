@@ -152,4 +152,4 @@ sable_odd_15 (k.20) capturing (even.14) = ...
 
 ---
 
-[← 5. A正規化とその後](anf.md) ／ [目次](index.md) ／ [7. 命令選択と制御フロー →](selection.md)
+[← 5. K正規化とその後](knormal.md) ／ [目次](index.md) ／ [7. 命令選択と制御フロー →](selection.md)

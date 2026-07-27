@@ -20,7 +20,7 @@ ML ふうの言語を RISC-V（RV64I/M）へコンパイルする処理系の解
 | 2 | [名前解決](modules.md) | `modules.ml`。モジュールとファンクタを、名前を付け替えるだけで消す |
 | 3 | [型推論](typing.md) | `typing.ml`・`types.ml`。単一化と、レベルによる一般化 |
 | 4 | [パターンマッチ](matching.md) | `match_check.ml`・`match_compile.ml`。網羅性の検査と決定木 |
-| 5 | [A正規化とその後](anf.md) | `anf.ml`・`alpha.ml`・`optim.ml`。中間結果に名前を付け、一意にし、畳む |
+| 5 | [K正規化とその後](knormal.md) | `knormal.ml`・`alpha.ml`・`optim.ml`。中間結果に名前を付け、一意にし、畳む |
 | 6 | [クロージャ変換](closure.md) | `closure.ml`。入れ子の関数をトップレベルへ |
 
 ### 後半 — 機械語へ
@@ -45,10 +45,11 @@ ML ふうの言語を RISC-V（RV64I/M）へコンパイルする処理系の解
 
 ```sh
 ./sable -S doc/sum.sbl                            # 最終アセンブリ
-sablec --dump-anf      -o /dev/null doc/sum.sbl   # A正規形（5章）
+sablec --dump-knf      -o /dev/null doc/sum.sbl   # K正規形（5章）
 sablec --dump-closure  -o /dev/null doc/sum.sbl   # クロージャ変換後（6章）
 sablec --dump-riscv    -o /dev/null doc/sum.sbl   # 割り付け前（7章）
 sablec --dump-regalloc -o /dev/null doc/sum.sbl   # 割り付けの結果（8章）
+sablec --check-knf     -o /dev/null doc/sum.sbl   # 正規形の検査（5章）
 sablec --check-cfg     -o /dev/null doc/sum.sbl   # 制御フローグラフの検査（7章）
 dune exec tests/walkthrough.exe                   # 割り付けを1手ずつ（8章 §7）
 ```

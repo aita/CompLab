@@ -3,11 +3,12 @@
 let output_file = ref "-"
 let register_budget = ref Riscv.max_colors
 let optimizer_rounds = ref 3
-let dump_anf = ref false
+let dump_knf = ref false
 let dump_closure = ref false
 let dump_riscv = ref false
 let dump_regalloc = ref false
 let check_cfg = ref false
+let check_knf = ref false
 
 let options =
   [
@@ -17,10 +18,13 @@ let options =
       Printf.sprintf "<n>  allocate out of n registers (%d..%d, default %d)"
         Riscv.min_colors Riscv.max_colors Riscv.max_colors );
     ("-O", Arg.Set_int optimizer_rounds, "<n>  run the optimizer n times (default 3)");
-    ("--dump-anf", Arg.Set dump_anf, "  print the A-normalized program");
+    ("--dump-knf", Arg.Set dump_knf, "  print the K-normalized program");
     ("--dump-closure", Arg.Set dump_closure, "  print the closure-converted program");
     ("--dump-riscv", Arg.Set dump_riscv, "  print the RISC-V code before register allocation");
     ("--dump-regalloc", Arg.Set dump_regalloc, "  report on register allocation");
+    ( "--check-knf",
+      Arg.Set check_knf,
+      "  fail if the normalized program is not in K-normal form" );
     ( "--check-cfg",
       Arg.Set check_cfg,
       "  fail if any function's control-flow graph has a cycle" );
@@ -54,9 +58,18 @@ let compile path =
   let ast = Modules.resolve ast in
   let ast = Typing.check ast in
   let ast = Match_compile.compile ast in
-  let normalized = Alpha.rename (Anf.normalize ast) in
+  let check ~unique stage e =
+    if !check_knf then
+      try Knormal.check ~unique e
+      with Knormal.Broken msg -> failwith (Printf.sprintf "%s: after %s, %s" path stage msg)
+  in
+  let normalized = Knormal.normalize ast in
+  check ~unique:false "normalization" normalized;
+  let normalized = Alpha.rename normalized in
+  check ~unique:true "alpha renaming" normalized;
   let normalized = Optim.optimize ~rounds:!optimizer_rounds normalized in
-  if !dump_anf then Dump.anf stderr 0 normalized;
+  check ~unique:true "the optimizer" normalized;
+  if !dump_knf then Dump.knormal stderr 0 normalized;
   let converted = Closure.convert normalized in
   if !dump_closure then Dump.closure_program stderr converted;
   let functions = Selection.translate converted in

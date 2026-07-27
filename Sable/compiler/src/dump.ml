@@ -4,51 +4,51 @@ open Printf
 
 let indent n = String.make (n * 2) ' '
 
-let rec anf out level exp =
+let rec knormal out level exp =
   let say fmt = fprintf out ("%s" ^^ fmt ^^ "\n") (indent level) in
   let vars = String.concat " " in
   match exp with
-  | Anf.Int n -> say "%d" n
-  | Anf.Var x -> say "%s" x
-  | Anf.Neg x -> say "- %s" x
-  | Anf.Bin (op, x, y) -> say "%s %s %s" x (Anf.string_of_binop op) y
-  | Anf.Static l -> say "&%s" l
-  | Anf.Field (x, i) -> say "%s[%d]" x i
-  | Anf.Byte (x, i) -> say "%s.[%s]" x i
-  | Anf.Block (tag, xs) -> say "block %d (%s)" tag (vars xs)
+  | Knormal.Int n -> say "%d" n
+  | Knormal.Var x -> say "%s" x
+  | Knormal.Neg x -> say "- %s" x
+  | Knormal.Bin (op, x, y) -> say "%s %s %s" x (Knormal.string_of_binop op) y
+  | Knormal.Static l -> say "&%s" l
+  | Knormal.Field (x, i) -> say "%s[%d]" x i
+  | Knormal.Byte (x, i) -> say "%s.[%s]" x i
+  | Knormal.Block (tag, xs) -> say "block %d (%s)" tag (vars xs)
   (* Commas, not the spaces the other forms use: `(a b)` reads as an
      application. *)
-  | Anf.Tuple xs -> say "(%s)" (String.concat ", " xs)
-  | Anf.Array (n, v) -> say "Array.make %s %s" n v
-  | Anf.Get (a, i) -> say "%s.(%s)" a i
-  | Anf.Put (a, i, v) -> say "%s.(%s) <- %s" a i v
-  | Anf.App (f, xs) -> say "%s %s" f (vars xs)
-  | Anf.App_external (f, xs) -> say "external %s %s" f (vars xs)
-  | Anf.If_eq (x, y, e1, e2) -> conditional out level "=" x y e1 e2
-  | Anf.If_le (x, y, e1, e2) -> conditional out level "<=" x y e1 e2
-  | Anf.Let ((x, t), e1, e2) ->
+  | Knormal.Tuple xs -> say "(%s)" (String.concat ", " xs)
+  | Knormal.Array (n, v) -> say "Array.make %s %s" n v
+  | Knormal.Get (a, i) -> say "%s.(%s)" a i
+  | Knormal.Put (a, i, v) -> say "%s.(%s) <- %s" a i v
+  | Knormal.App (f, xs) -> say "%s %s" f (vars xs)
+  | Knormal.App_external (f, xs) -> say "external %s %s" f (vars xs)
+  | Knormal.If_eq (x, y, e1, e2) -> conditional out level "=" x y e1 e2
+  | Knormal.If_le (x, y, e1, e2) -> conditional out level "<=" x y e1 e2
+  | Knormal.Let ((x, t), e1, e2) ->
     say "let %s : %s =" x (Types.to_string t);
-    anf out (level + 1) e1;
+    knormal out (level + 1) e1;
     say "in";
-    anf out level e2
-  | Anf.Let_tuple (xts, y, e) ->
+    knormal out level e2
+  | Knormal.Let_tuple (xts, y, e) ->
     say "let (%s) = %s in" (String.concat ", " (List.map fst xts)) y;
-    anf out level e
-  | Anf.Let_rec (fds, e) ->
+    knormal out level e
+  | Knormal.Let_rec (fds, e) ->
     List.iter
-      (fun (fd : Anf.fundef) ->
+      (fun (fd : Knormal.fundef) ->
         say "let rec %s %s =" (fst fd.name) (vars (List.map fst fd.args));
-        anf out (level + 1) fd.body)
+        knormal out (level + 1) fd.body)
       fds;
     say "in";
-    anf out level e
+    knormal out level e
 
 and conditional out level op x y e1 e2 =
   let say fmt = fprintf out ("%s" ^^ fmt ^^ "\n") (indent level) in
   say "if %s %s %s then" x op y;
-  anf out (level + 1) e1;
+  knormal out (level + 1) e1;
   say "else";
-  anf out (level + 1) e2
+  knormal out (level + 1) e2
 
 let rec closure out level exp =
   let say fmt = fprintf out ("%s" ^^ fmt ^^ "\n") (indent level) in
@@ -57,7 +57,7 @@ let rec closure out level exp =
   | Closure.Int n -> say "%d" n
   | Closure.Var x -> say "%s" x
   | Closure.Neg x -> say "- %s" x
-  | Closure.Bin (op, x, y) -> say "%s %s %s" x (Anf.string_of_binop op) y
+  | Closure.Bin (op, x, y) -> say "%s %s %s" x (Knormal.string_of_binop op) y
   | Closure.Static l -> say "&%s" l
   | Closure.Field (x, i) -> say "%s[%d]" x i
   | Closure.Byte (x, i) -> say "%s.[%s]" x i

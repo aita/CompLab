@@ -14,7 +14,7 @@ digraph pipeline {
   brace [label = "a.sbb\nbrace 形式", fillcolor = "#ffffff"];
 
   syntax  [label = "Syntax\n2つの形式が1つの抽象構文に合流する"];
-  anf     [label = "Anf\n中間結果すべてに名前が付く"];
+  knf     [label = "Knormal\n中間結果すべてに名前が付く"];
   closure [label = "Closure\n関数がトップレベルへ持ち上がる"];
   virtual [label = "RISC-V 制御フローグラフ\n無制限の仮想レジスタ"];
   machine [label = "RISC-V 制御フローグラフ\n物理レジスタ"];
@@ -23,14 +23,14 @@ digraph pipeline {
   ml    -> syntax [label = "  lexer.mll\n  parser.mly"];
   brace -> syntax [label = "  brace_lexer.mll\n  brace_parser.mly\n  brace_build.ml"];
 
-  syntax -> anf [label = "  modules.ml       モジュールとファンクタを解決して消す\l  \
+  syntax -> knf [label = "  modules.ml       モジュールとファンクタを解決して消す\l  \
 typing.ml        レベル方式で let 多相\l  \
 match_check.ml   網羅性と到達不能の検査\l  \
 match_compile.ml  match を決定木に\l  \
-anf.ml            A正規化\l"];
+knormal.ml        K正規化\l"];
 
-  anf -> closure [label = "  alpha.ml    束縛子を一意にする\l  \
-optim.ml    平坦化・伝播・除去\l  \
+  knf -> closure [label = "  alpha.ml    束縛子を一意にする\l  \
+optim.ml    伝播・除去\l  \
 closure.ml  クロージャ変換\l"];
 
   closure -> virtual [label = "  selection.ml  命令選択"];

@@ -193,10 +193,10 @@ let fields = List.map (fun t -> (Ident.fresh "fld", t)) field_types in
 
 ![score の決定木](./figures/decision-tree.png)
 
-実際の A正規形（`--dump-anf`）の先頭は次のとおりで、図と一致します。
+実際の K正規形（`--dump-knf`）の先頭は次のとおりで、図と一致します。
 
 ```
-$ sablec --dump-anf -o /dev/null score.sbl
+$ sablec --dump-knf -o /dev/null score.sbl
 let rec score.44 c.45 s.46 =
   let match.10.47 : (colour * shape) =
     (c.45, s.46)
@@ -424,4 +424,4 @@ $ echo $?
 
 ---
 
-[← 3. 型推論](typing.md) ／ [目次](index.md) ／ [5. A正規化とその後 →](anf.md)
+[← 3. 型推論](typing.md) ／ [目次](index.md) ／ [5. K正規化とその後 →](knormal.md)

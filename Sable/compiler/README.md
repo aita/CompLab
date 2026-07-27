@@ -18,10 +18,11 @@ sablec [options] <file.sbl>
   -o <file>          write the assembly here (default: stdout)
   -nregs <n>         allocate out of n registers only (10..25, default 25)
   -O <n>             run the optimizer n times (default 3)
-  --dump-anf     print the A-normalized program
+  --dump-knf         print the K-normalized program
   --dump-closure     print the closure-converted program
-  --dump-riscv          print the RISC-V code before register allocation
+  --dump-riscv       print the RISC-V code before register allocation
   --dump-regalloc    report rounds, coalesced moves and spills per function
+  --check-knf        fail if the normalized program is not in K-normal form
   --check-cfg        fail if any control-flow graph has a cycle
 ```
 
@@ -40,7 +41,7 @@ output that was actually produced.
 | [doc/modules.md](doc/modules.md) | モジュールとファンクタを名前解決だけで済ませる |
 | [doc/typing.md](doc/typing.md) | 型推論。単一化、レベル方式の一般化、値制限、rigid な型変数 |
 | [doc/matching.md](doc/matching.md) | パターンマッチ。網羅性・到達不能の判定、決定木、合流点 |
-| [doc/anf.md](doc/anf.md) | A正規化、α変換、最適化 |
+| [doc/knormal.md](doc/knormal.md) | K正規化、α変換、最適化 |
 | [doc/closure.md](doc/closure.md) | クロージャ変換 |
 | [doc/selection.md](doc/selection.md) | 命令選択、制御フローグラフ、生存解析 |
 | [doc/regalloc.md](doc/regalloc.md) | レジスタ割り付け。干渉グラフの実例、融合・スピル・callee-saved |
@@ -195,9 +196,9 @@ around a condition, commas where it has spaces.
 | type inference | `typing.ml` | let-polymorphism, generalized by levels |
 | match checking | `match_check.ml` | usefulness: exhaustiveness and redundancy |
 | match compilation | `match_compile.ml` | `match` into a decision tree |
-| A-normalization (ANF) | `anf.ml` | name every intermediate result |
+| K-normalization (KNF) | `knormal.ml` | name every intermediate result |
 | α-conversion | `alpha.ml` | make every binder unique |
-| optimization | `optim.ml` | let-flattening, copy and constant propagation, dead-let elimination |
+| optimization | `optim.ml` | copy and constant propagation, dead-let elimination |
 | closure conversion | `closure.ml` | lift functions to the top level |
 | instruction selection | `selection.ml` | RISC-V CFG over unlimited virtual registers |
 | control flow | `cfg.ml` | postorder, reachability, an acyclicity check and block layout |

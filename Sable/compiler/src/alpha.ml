@@ -5,7 +5,7 @@
    `let` without capturing anything, and Closure can compute free variables
    without worrying about shadowing. *)
 
-open Anf
+open Knormal
 
 let renamed x env = match Ident.Map.find_opt x env with Some y -> y | None -> x
 

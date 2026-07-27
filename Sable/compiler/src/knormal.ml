@@ -1,4 +1,20 @@
-(* A-normalization: every intermediate result is named by a `let`.
+(* K-normalization: every intermediate result is named by a `let`.
+
+   The form is MinCaml's K-normal form.  What makes a term K-normal is one
+   condition -- every operand is a variable -- and the type below is what
+   states it: `Bin of binop * Ident.t * Ident.t`, never `t * t`.  So a term of
+   this type is K-normal by construction, and [normalize] cannot produce
+   anything else.
+
+   Two conventions ride along, and neither is in the type:
+
+     - bindings are associated to the right, so a `let` never sits in the
+       right-hand side of a `let`.  This is MinCaml's Assoc pass; it takes a
+       K-normal term to a K-normal term, and [let_bind] does it while building
+       rather than in a pass afterwards, so the shape does not depend on `-O`.
+     - after Alpha, every binder in the program has a distinct name.
+
+   [check] states both for a term the type cannot; see the bottom of the file.
 
    This is the shape the whole back end wants.  Each subexpression a machine
    instruction consumes is already a variable, so instruction selection never
@@ -8,7 +24,11 @@
    Two representation choices worth stating: `unit`, `bool` and `int` are all
    one machine word (unit is 0, true is 1), and comparisons only exist as the
    test of a branch -- a comparison used as a value becomes an `if` yielding 1
-   or 0, which the optimizer usually folds back into a branch. *)
+   or 0, which the optimizer usually folds back into a branch.
+
+   A-normal form asks for one more condition on top of this: a conditional
+   appears only in tail position.  That one is not met and does not need to be
+   -- selection emits a join block (doc/knormal.md §1). *)
 
 type binop = Add | Sub | Mul | Div | Rem
 
@@ -86,12 +106,9 @@ let rec free_vars = function
 (* Build `let x = e1 in e2` associated to the right: if e1 binds anything
    itself, those bindings come out in front rather than nesting inside.
 
-   Every binding this module makes goes through here, so the form it hands on
-   never has a `let` as the right-hand side of a `let`.  That is one of the two
-   conditions A-normal form asks for, and the one worth having: no pass after
-   this has to walk into a binding position looking for more bindings.  (The
-   other condition, that a conditional only appears in tail position, is not
-   met and does not need to be -- selection emits a join block.) *)
+   Every binding the compiler makes goes through here -- this module's and the
+   optimizer's alike -- so no pass after normalization has to walk into a
+   binding position looking for more bindings. *)
 let rec let_bind xt e1 e2 =
   match e1 with
   | Let (yt, a, b) -> Let (yt, a, let_bind xt b e2)
@@ -112,7 +129,7 @@ let insert_let (e, t) k =
 let external_result name =
   match List.assoc_opt name Typing.externals with
   | Some (Types.Fun (_, tres)) -> tres
-  | _ -> failwith ("Anf: unknown external " ^ name)
+  | _ -> failwith ("Knormal: unknown external " ^ name)
 
 let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
   match exp with
@@ -237,11 +254,11 @@ let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
     (* Never returns; the 0 only gives the expression a value. *)
     (Let ((Ident.fresh "fail", Types.Unit), App_external ("match_failure", []), Int 0), t)
   | Syntax.Match _ ->
-    failwith "Anf: `match` should have been compiled away by Match_compile"
+    failwith "Knormal: `match` should have been compiled away by Match_compile"
   | Syntax.At (_, e) | Syntax.Annot (e, _) -> normalize_exp env e
   | Syntax.Type_decl _ | Syntax.Qualified _ | Syntax.Module _ | Syntax.Open _
   | Syntax.Module_type _ | Syntax.Functor _ ->
-    failwith "Anf: modules should have been resolved away by Modules"
+    failwith "Knormal: modules should have been resolved away by Modules"
 
 (* Name a whole list of subexpressions, left to right. *)
 and insert_lets env exps k =
@@ -252,3 +269,76 @@ and insert_lets env exps k =
   loop [] exps
 
 let normalize exp = fst (normalize_exp Ident.Map.empty exp)
+
+(* ------------------------------------------------------- the invariant *)
+
+(* What the type cannot say.
+
+   K-normality itself is carried by the type, so a term that type-checks has
+   it.  The two conventions from the top of the file are not, and a pass that
+   rebuilds a binding by hand rather than through [let_bind] breaks them
+   silently: the term still type-checks, and the damage surfaces several passes
+   later as a bad register or a name captured by the wrong binder.
+
+     - no binding is the right-hand side of a binding
+     - every variable mentioned is bound; after Alpha, bound exactly once
+
+   `--check-knf` runs this after normalization, after alpha renaming, and after
+   the optimizer, so a break is reported at the pass that caused it. *)
+
+exception Broken of string
+
+let broken fmt = Printf.ksprintf (fun s -> raise (Broken s)) fmt
+
+let describe = function
+  | Let _ -> "let"
+  | Let_rec _ -> "let rec"
+  | Let_tuple _ -> "let (...)"
+  | _ -> "a binding"
+
+let check ?(unique = false) exp =
+  (* Alpha's promise, checked across the whole term rather than per scope. *)
+  let bound_once = Hashtbl.create 64 in
+  let bind scope x =
+    if unique then
+      if Hashtbl.mem bound_once x then broken "%s is bound in two places" x
+      else Hashtbl.add bound_once x ();
+    Ident.Set.add x scope
+  in
+  let binds scope xts = List.fold_left (fun scope (x, _) -> bind scope x) scope xts in
+  let use scope x = if not (Ident.Set.mem x scope) then broken "%s is unbound" x in
+  let uses scope xs = List.iter (use scope) xs in
+  let rec walk scope = function
+    | Int _ | Static _ -> ()
+    | Var x | Neg x | Field (x, _) -> use scope x
+    | Bin (_, x, y) | Byte (x, y) | Array (x, y) | Get (x, y) ->
+      use scope x;
+      use scope y
+    | Put (x, y, z) -> uses scope [ x; y; z ]
+    | If_eq (x, y, e1, e2) | If_le (x, y, e1, e2) ->
+      use scope x;
+      use scope y;
+      walk scope e1;
+      walk scope e2
+    | Let ((x, _), e1, e2) ->
+      (match e1 with
+       | Let _ | Let_rec _ | Let_tuple _ ->
+         broken "the right-hand side of `let %s' is a %s" x (describe e1)
+       | _ -> ());
+      walk scope e1;
+      walk (bind scope x) e2
+    | Let_rec (fds, e) ->
+      (* The names are in scope in every body, including their own. *)
+      let scope = List.fold_left (fun scope fd -> bind scope (fst fd.name)) scope fds in
+      List.iter (fun fd -> walk (binds scope fd.args) fd.body) fds;
+      walk scope e
+    | App (f, xs) ->
+      use scope f;
+      uses scope xs
+    | App_external (_, xs) -> uses scope xs (* the name is a runtime symbol *)
+    | Tuple xs | Block (_, xs) -> uses scope xs
+    | Let_tuple (xts, y, e) ->
+      use scope y;
+      walk (binds scope xts) e
+  in
+  walk Ident.Set.empty exp

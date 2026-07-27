@@ -1,25 +1,25 @@
-# A正規化とその後 — `anf.ml`, `alpha.ml`, `optim.ml`
+# K正規化とその後 — `knormal.ml`, `alpha.ml`, `optim.ml`
 
 構文木を、バックエンドが読める形に均す3つのパスです。順に、**中間結果すべてに名前を付け**、
 **その名前を一意にし**、**付けすぎた名前を畳みます**。
 
-## 1. A正規化 — `anf.ml`
+## 1. K正規化 — `knormal.ml`
 
 **中間結果すべてに `let` で名前を付ける**変換です。
 
 ```
-$ sablec --dump-anf -o /dev/null a.sbl        let rec f a b c = (a + b) * (c - 1)
+$ sablec --dump-knf -o /dev/null a.sbl        let rec f a b c = (a + b) * (c - 1)
 let rec f.10 a.11 b.12 c.13 =
   let t.2.14 : int =
     a.11 + b.12                              ← 部分式に名前
   in
-  let t.3.16 : int =
+  let t.3.15 : int =
     1                                        ← 定数にも名前
   in
-  let t.4.15 : int =
-    c.13 - t.3.16
+  let t.4.16 : int =
+    c.13 - t.3.15
   in
-  t.2.14 * t.4.15
+  t.2.14 * t.4.16
 in
 ```
 
@@ -40,12 +40,12 @@ in
 
 ### 比較は分岐に融合される
 
-A正規形の `t` には比較演算がありません。**`if` の条件に現れた比較は、そのまま分岐命令に
+K正規形の `t` には比較演算がありません。**`if` の条件に現れた比較は、そのまま分岐命令に
 なります**（`If_eq` と `If_le`）。しかも到達するのはこの2つだけで、残る4つは枝か被演算子を
 入れ替えて表します。
 
 ```
-$ sablec --dump-anf -o /dev/null a.sbl
+$ sablec --dump-knf -o /dev/null a.sbl
 let rec g.10 x.11 y.12 =                      let rec g x y = if x < y then 1 else 2
   if y.12 <= x.11 then                        ← 被演算子も枝も入れ替わって `<=` に
     2
@@ -86,18 +86,31 @@ in
 組み直します。
 条件が比較でないただの真偽値なら、`false` と比べる `If_eq` にして同じ形に揃えます。
 
-### A正規形とK正規形
+### この形がK正規形であるということ
 
-[A正規形][anf]（Flanagan ら）が課す条件は2つあります。
+K正規形が課す条件は**1つだけ**です。
 
-1. **`let` の結合律** — `let x = (let y = e1 in e2) in e3` を
-   `let y = e1 in let x = e2 in e3` に平らにする
-2. **条件分岐は末尾位置だけ** — `let x = (if ...) in e` を許さない
+> **被演算子はすべて変数である。** 機械語命令が読む位置に、式が現れない。
 
-「中間結果すべてに名前を付ける」だけなら、MinCaml が **K正規形**と呼ぶものです。
+そしてこの条件は、**型が持っています**。
 
-**1 はこのパスが守ります。** 束縛はすべて `let_bind` を通して作り、右辺が自分でも束縛して
-いれば、それを前に出してから包みます。
+```ocaml
+type t =
+  | Bin of binop * Ident.t * Ident.t      (* `t * t` ではない *)
+  | If_eq of Ident.t * Ident.t * t * t
+  | App of Ident.t * Ident.t list
+  | Let of (Ident.t * Types.t) * t * t
+  ...
+```
+
+`Bin` の被演算子は `Ident.t` で、`t` ではありません。だから **`normalize` が K正規形でない
+ものを作ることはできません**。型検査が通れば K正規形です。
+
+型が持っていない約束が2つあります。
+
+**束縛は右結合。** `let` の右辺に `let` が来ません。MinCaml では `assoc.ml` という別のパスが
+これをやります。K正規形の項を K正規形の項に移す変換なので、**やってもやらなくても K正規形の
+ままです**。この実装ではパスにせず、束縛を作る `let_bind` の側で守ります。
 
 ```ocaml
 let rec let_bind xt e1 e2 =
@@ -108,15 +121,46 @@ let rec let_bind xt e1 e2 =
   | _ -> Let (xt, e1, e2)
 ```
 
-構築側で守るので、**`-O` に関係なく形が同じ**です。以前は §3 の最適化に平らにするパスが
+構築側で守ると、**`-O` に関係なく形が同じ**になります。以前は §3 の最適化に平らにするパスが
 あって、`-O 0` だと入れ子のまま出ていました。IR の形が最適化フラグで変わるのは、後続の
 パスにとって扱いにくいだけです。§3 の2つのパスも束縛を `let_bind` で組み直すので、分岐を
 畳んで右辺が `let` になっても入れ子は残りません。
 
-**2 のほうは満たしません。**
+**名前は一意。** §2 のα変換のあと、プログラム中のすべての束縛子が別の名前です。
+
+### 破れていないことを確かめる
+
+型が持っていない約束は、手で `Let` を組み直したパスが黙って破ります。項の型は合ったまま
+なので、壊れたことは何パスも先で「レジスタがおかしい」「名前が別の束縛に捕まった」として
+出てきます。`--check-knf` がその2つをその場で言います。
+
+正規化の直後・α変換の直後・最適化の直後の3箇所で走ります。**どのパスが壊したかがそのまま
+出る**ようにです。実際に壊して確かめると、`insert_let` が `let_bind` ではなく `Let` を
+呼ぶようにした場合が
 
 ```
-$ sablec --dump-anf -o /dev/null a.sbl          let x = (if a < b then a else b) in
+doc/sum.sbl: after normalization, the right-hand side of `let t.16' is a let
+```
+
+α変換を外した場合が、名前を二度使っているプログラムに対して
+
+```
+shadow.sbl: after alpha renaming, x is bound in two places
+```
+
+です。テストは例題9本を `-O 0` と既定の回数の両方で通します
+（[制御フローグラフの検査](selection.md#2-制御フローグラフ--cfgml)と同じ扱いです）。
+
+### A正規形との違い
+
+[A正規形][anf]（Flanagan ら）は、上の条件に**もう1つ**課します。
+
+> **条件分岐は末尾位置だけ。** `let x = (if ...) in e` を許さない。
+
+これは満たしません。
+
+```
+$ sablec --dump-knf -o /dev/null a.sbl          let x = (if a < b then a else b) in
 let rec g.7 a.8 b.9 =                            x + 1
   let x.10 : int =
     if b.9 <= a.8 then      ← let の右辺が if
@@ -135,17 +179,15 @@ let rec g.7 a.8 b.9 =                            x + 1
 満たしにいくと、条件分岐が束縛位置に来るたびに継続を複製するか、合流点を作る羽目になります。
 機械語のレベルで合流ブロックを出せる以上、中間表現でも同じことをやる意味がありません。
 
-というわけで、この実装が持っているのは**K正規形に結合律を足したもの**です。
-
 ### 表現についての決めごと
 
-`unit`・`bool`・`int` はどれも1ワードです（`unit` は 0、`true` は 1）。だから A正規形に
+`unit`・`bool`・`int` はどれも1ワードです（`unit` は 0、`true` は 1）。だから K正規形に
 真偽値専用の節点がありません。`Int 0` と `Int 1` で足ります。
 
 `sum` のダンプでは、これらが組み合わさった形が見えます。
 
 ```
-$ sablec --dump-anf -o /dev/null doc/sum.sbl
+$ sablec --dump-knf -o /dev/null doc/sum.sbl
 let rec sum.18 l.19 =
   let t.8.21 : int =
     l.19[0]                    ← タグの読み出し。match が決定木になっている
@@ -204,7 +246,7 @@ let rec g x = x - 1 in  ← f の x とは別物
 ダンプに出てくる `x.12`・`y.13` という接尾辞はここで付いたものです。
 
 ```
-$ sablec --dump-anf -o /dev/null a.sbl
+$ sablec --dump-knf -o /dev/null a.sbl
 let rec f.11 x.12 =
   ...
   let y.13 : int =
@@ -236,7 +278,7 @@ in
 
 だから後続のパスは名前をキーにした**ただの `Set`／`Map`** で仕事ができます。
 
-- 自由変数は集合の差で求まります（`anf.ml` の `free_vars`、`closure.ml` の `free_vars`）。
+- 自由変数は集合の差で求まります（`knormal.ml` の `free_vars`、`closure.ml` の `free_vars`）。
   シャドーイングがありうるなら、`Let` を降りるたびに「この名前は今どの束縛か」という対応を
   持って歩く必要がありました。
 - §3 の最適化は `let` を動かしたり畳んだりしますが、**捕獲**（動かした先で別の束縛に
@@ -257,7 +299,7 @@ in
 | `propagate` | コピー伝播、定数畳み込み、両辺が既知の分岐の畳み込み |
 | `eliminate` | 使われていない、かつ副作用のない `let` を落とす |
 
-見た目より効きます。A正規化は**定数にもフィールド読み出しにも名前を付ける**ので、伝播と
+見た目より効きます。K正規化は**定数にもフィールド読み出しにも名前を付ける**ので、伝播と
 除去を通すとそれらの名前が消え、レジスタを奪い合わなくなります。決定木が出すフィールド
 読み出しのうち、その分岐が読まないものもここで落ちます。
 
@@ -269,7 +311,7 @@ in
 **関数適用を展開しません。** `App (f, xs)` は、`f` の本体が1行でも、呼び出し1回でも、
 そのまま `App (f, xs)` として残ります。インライン展開は入っていません。
 
-`propagate` がやっているコピー伝播は、その退化した場合ではあります。A正規形の
+`propagate` がやっているコピー伝播は、その退化した場合ではあります。K正規形の
 `let x = y in e` は `(fun x -> e) y` の残骸で、これを `e[y/x]` にするのは β簡約です。
 ただし**右辺が変数か定数のときだけ**で、関数呼び出しには手を出しません。
 
@@ -282,15 +324,16 @@ in
 - 末尾呼び出しは本物なので、末尾再帰のループはスタックを伸ばしません
 - 呼び出しをまたがない値は[レジスタ割り付け](regalloc.md)がレジスタに載せたままにします
 
-入れるとすれば、ここが場所です。`App` を本体で置き換え、引数を `let` で束縛すれば A正規形の
+入れるとすれば、ここが場所です。`App` を本体で置き換え、引数を `let` で束縛すれば K正規形の
 まま済みます — α変換のあとなので**名前の衝突を気にする必要もありません**（§2）。
 
 ## 参考文献
 
 - C. Flanagan, A. Sabry, B. F. Duba, M. Felleisen,
-  [*The essence of compiling with continuations*][anf], PLDI 1993. A正規形。
+  [*The essence of compiling with continuations*][anf], PLDI 1993。A正規形。
+  §1 の最後で、こちらが課すもう1つの条件を満たさない理由を書いています。
 - E. Sumii, [*MinCaml: a simple and efficient compiler for a minimal functional
-  language*][mincaml], FDPE 2005（[PDF][mincaml-pdf]）。この並び — A正規化・α変換・
+  language*][mincaml], FDPE 2005（[PDF][mincaml-pdf]）。この並び — K正規化・α変換・
   最適化・クロージャ変換 — はこれに倣っています。
 
 [anf]: https://doi.org/10.1145/155090.155113
@@ -301,10 +344,11 @@ in
 
 | | |
 |---|---|
-| `anf.ml` 15–39行 | `t` — A正規形。部分式の位置に来るのは `Ident.t` だけです |
-| `anf.ml` 58–84行 | `free_vars`。クロージャ変換が使うのと同じ定義 |
-| `anf.ml` 95–115行 | `let_bind`（結合律）と `insert_let`（名前付け） |
-| `anf.ml` 117–254行 | `normalize_exp`。比較の融合は134–152行 |
+| `knormal.ml` 35–60行 | `t` — K正規形。被演算子の位置に来るのは `Ident.t` だけです |
+| `knormal.ml` 79–104行 | `free_vars`。クロージャ変換が使うのと同じ定義 |
+| `knormal.ml` 112–132行 | `let_bind`（結合律）と `insert_let`（名前付け） |
+| `knormal.ml` 134–271行 | `normalize_exp`。比較の融合は151–169行 |
+| `knormal.ml` 273–344行 | `check` — 型が持てない2つの約束。`--check-knf` |
 | `alpha.ml` | 束縛子を一意な名前に |
 | `optim.ml` | `propagate`・`eliminate` を規定回数まわす |
 

@@ -1,4 +1,4 @@
-(* A small optimizer on A-normal form.
+(* A small optimizer on K-normal form.
 
    Two passes, run a few times over:
 
@@ -7,12 +7,12 @@
      eliminate      drop a `let` whose name is unused and whose right-hand side
                     has no effect.
 
-   These matter to the back end more than they look.  A-normalization names
+   These matter to the back end more than they look.  K-normalization names
    every constant and every field access; after propagation and elimination
    those names are gone rather than competing for registers, and the decision
    trees Match_compile emits shed the field loads their branch never reads. *)
 
-open Anf
+open Knormal
 
 (* ---------------------------------------------------------- propagate *)
 
@@ -59,9 +59,9 @@ let rec propagate env exp =
     | Int n ->
       (* Keep the binding -- some uses may still need a register -- but
          remember the value.  If every use folds, elimination collects it. *)
-      Anf.let_bind (x, t) e1
+      Knormal.let_bind (x, t) e1
         (propagate { env with consts = Ident.Map.add x n env.consts } e2)
-    | _ -> Anf.let_bind (x, t) e1 (propagate env e2))
+    | _ -> Knormal.let_bind (x, t) e1 (propagate env e2))
   | Let_rec (fds, e) ->
     Let_rec
       (List.map (fun fd -> { fd with body = propagate env fd.body }) fds, propagate env e)
@@ -82,7 +82,7 @@ let rec propagate env exp =
 (* One bottom-up pass that hands back, for each node, what it needs from
    outside it and whether it can be dropped.  Asking for those separately at
    every binding -- which is what this did before -- walks the continuation
-   again per `let`, and A-normalization produces very long chains of them. *)
+   again per `let`, and K-normalization produces very long chains of them. *)
 let rec eliminate exp =
   let pure free = (exp, free, false) in
   let effectful free = (exp, free, true) in
@@ -101,7 +101,7 @@ let rec eliminate exp =
     let e1, free1, impure1 = eliminate e1 in
     let e2, free2, impure2 = eliminate e2 in
     if impure1 || Ident.Set.mem x free2 then
-      ( Anf.let_bind (x, t) e1 e2,
+      ( Knormal.let_bind (x, t) e1 e2,
         Ident.Set.union free1 (Ident.Set.remove x free2),
         impure1 || impure2 )
     else (e2, free2, impure2)
@@ -145,10 +145,10 @@ let eliminate exp = let e, _, _ = eliminate exp in e
 
 (* ------------------------------------------------------------- driver *)
 
-(* `flatten_lets` used to run here, re-associating what A-normalization left
-   nested.  Anf.let_bind builds every binding associated in the first place and
-   the two passes below rebuild theirs through it, so there is nothing left to
-   repair.
+(* `flatten_lets` used to run here, re-associating what normalization left
+   nested -- MinCaml's Assoc.  Knormal.let_bind now associates as it builds and
+   the two passes above rebuild their bindings through it, so there is nothing
+   left to repair.
 
    A fixed number of rounds rather than a fixed point: the terms carry mutable
    type variables, so structural equality on them is not something to lean on,

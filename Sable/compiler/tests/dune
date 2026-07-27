@@ -247,6 +247,39 @@
  (flags
   (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
 
+; The normal form is an invariant, not a hope: every binding associated, every
+; name bound, and after Alpha bound once.  Checked after each pass that touches
+; the form, at -O 0 and at the default rounds.
+
+(rule
+ (with-stdout-to
+  knf.out
+  (progn
+   (run %{exe:../src/sablec.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/tour.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -o /dev/null %{dep:../examples/tour.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/queens.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -o /dev/null %{dep:../examples/queens.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/sort.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -o /dev/null %{dep:../examples/sort.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/tree.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -o /dev/null %{dep:../examples/tree.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/pressure.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -o /dev/null %{dep:../examples/pressure.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/lists.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -o /dev/null %{dep:../examples/lists.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/strings.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -o /dev/null %{dep:../examples/strings.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/modules.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -o /dev/null %{dep:../examples/modules.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/functors.sbl})
+   (run %{exe:../src/sablec.exe} --check-knf -o /dev/null %{dep:../examples/functors.sbl})
+   (echo "every program stays in K-normal form\n"))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff knf.expected knf.out)))
+
 ; The back end reads the control-flow graph as acyclic in two places; this says
 ; so for every example rather than leaving it to a comment.
 (rule

@@ -17,7 +17,7 @@ type t =
   | Int of int
   | Var of Ident.t
   | Neg of Ident.t
-  | Bin of Anf.binop * Ident.t * Ident.t
+  | Bin of Knormal.binop * Ident.t * Ident.t
   | If_eq of Ident.t * Ident.t * t * t
   | If_le of Ident.t * Ident.t * t * t
   | Let of (Ident.t * Types.t) * t * t
@@ -89,40 +89,40 @@ let close_over env names body =
 let rec convert_exp env known exp =
   let recur = convert_exp env known in
   match exp with
-  | Anf.Int n -> Int n
-  | Anf.Var x -> Var x
-  | Anf.Neg x -> Neg x
-  | Anf.Bin (op, x, y) -> Bin (op, x, y)
-  | Anf.If_eq (x, y, e1, e2) -> If_eq (x, y, recur e1, recur e2)
-  | Anf.If_le (x, y, e1, e2) -> If_le (x, y, recur e1, recur e2)
-  | Anf.Let ((x, t), e1, e2) ->
+  | Knormal.Int n -> Int n
+  | Knormal.Var x -> Var x
+  | Knormal.Neg x -> Neg x
+  | Knormal.Bin (op, x, y) -> Bin (op, x, y)
+  | Knormal.If_eq (x, y, e1, e2) -> If_eq (x, y, recur e1, recur e2)
+  | Knormal.If_le (x, y, e1, e2) -> If_le (x, y, recur e1, recur e2)
+  | Knormal.Let ((x, t), e1, e2) ->
     Let ((x, t), recur e1, convert_exp (Ident.Map.add x t env) known e2)
-  | Anf.App (f, xs) when Ident.Set.mem f known -> Call_direct (Ident.to_label f, xs)
-  | Anf.App (f, xs) -> Call_closure (f, xs)
-  | Anf.App_external (f, xs) -> Call_direct (Ident.extern_label f, xs)
-  | Anf.Tuple xs -> Tuple xs
-  | Anf.Block (tag, xs) -> Block (tag, xs)
-  | Anf.Static label -> Static label
-  | Anf.Field (x, i) -> Field (x, i)
-  | Anf.Byte (x, y) -> Byte (x, y)
-  | Anf.Let_tuple (xts, y, e) ->
+  | Knormal.App (f, xs) when Ident.Set.mem f known -> Call_direct (Ident.to_label f, xs)
+  | Knormal.App (f, xs) -> Call_closure (f, xs)
+  | Knormal.App_external (f, xs) -> Call_direct (Ident.extern_label f, xs)
+  | Knormal.Tuple xs -> Tuple xs
+  | Knormal.Block (tag, xs) -> Block (tag, xs)
+  | Knormal.Static label -> Static label
+  | Knormal.Field (x, i) -> Field (x, i)
+  | Knormal.Byte (x, y) -> Byte (x, y)
+  | Knormal.Let_tuple (xts, y, e) ->
     let env = List.fold_left (fun env (x, t) -> Ident.Map.add x t env) env xts in
     Let_tuple (xts, y, convert_exp env known e)
-  | Anf.Array (x, y) -> Array (x, y)
-  | Anf.Get (x, y) -> Get (x, y)
-  | Anf.Put (x, y, z) -> Put (x, y, z)
-  | Anf.Let_rec (fds, cont) -> convert_group env known fds cont
+  | Knormal.Array (x, y) -> Array (x, y)
+  | Knormal.Get (x, y) -> Get (x, y)
+  | Knormal.Put (x, y, z) -> Put (x, y, z)
+  | Knormal.Let_rec (fds, cont) -> convert_group env known fds cont
 
 and convert_group env known fds cont =
-  let names = List.map (fun (fd : Anf.fundef) -> fst fd.name) fds in
+  let names = List.map (fun (fd : Knormal.fundef) -> fst fd.name) fds in
   let env =
     List.fold_left
-      (fun env (fd : Anf.fundef) -> Ident.Map.add (fst fd.name) (snd fd.name) env)
+      (fun env (fd : Knormal.fundef) -> Ident.Map.add (fst fd.name) (snd fd.name) env)
       env fds
   in
   let convert_bodies known =
     List.map
-      (fun (fd : Anf.fundef) ->
+      (fun (fd : Knormal.fundef) ->
         let body_env =
           List.fold_left (fun env (x, t) -> Ident.Map.add x t env) env fd.args
         in
@@ -136,7 +136,7 @@ and convert_group env known fds cont =
      those are code pointers, not captured values. *)
   let captured =
     List.fold_left2
-      (fun acc (fd : Anf.fundef) body ->
+      (fun acc (fd : Knormal.fundef) body ->
         Ident.Set.union acc
           (Ident.Set.diff (free_vars body)
              (Ident.Set.of_list (List.map fst fd.args @ names))))
@@ -146,7 +146,7 @@ and convert_group env known fds cont =
     (* Every member is directly callable.  A member used as a value inside a
        body just allocates a code-pointer-only closure there. *)
     List.iter2
-      (fun (fd : Anf.fundef) body ->
+      (fun (fd : Knormal.fundef) body ->
         lifted :=
           {
             label = Ident.to_label (fst fd.name);
@@ -169,13 +169,13 @@ and convert_group env known fds cont =
        any capture, so the cycle closes. *)
     let captures =
       List.map2
-        (fun (fd : Anf.fundef) body ->
+        (fun (fd : Knormal.fundef) body ->
           Ident.Set.elements
             (Ident.Set.diff (free_vars body) (Ident.Set.of_list (List.map fst fd.args))))
         fds bodies
     in
     List.iter2
-      (fun ((fd : Anf.fundef), body) captured ->
+      (fun ((fd : Knormal.fundef), body) captured ->
         lifted :=
           {
             label = Ident.to_label (fst fd.name);
@@ -188,7 +188,7 @@ and convert_group env known fds cont =
     let cont = convert_exp env known cont in
     let definitions =
       List.map2
-        (fun (fd : Anf.fundef) captured ->
+        (fun (fd : Knormal.fundef) captured ->
           ( (fst fd.name, snd fd.name),
             { entry = Ident.to_label (fst fd.name); captured } ))
         fds captures
