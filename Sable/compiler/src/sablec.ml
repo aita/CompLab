@@ -31,8 +31,13 @@ let parse_file path =
     (fun () ->
       let lexbuf = Lexing.from_channel channel in
       lexbuf.lex_curr_p <- { lexbuf.lex_curr_p with pos_fname = path };
-      try Parser.program Lexer.token lexbuf with
-      | Parser.Error ->
+      (* Two concrete syntaxes over one abstract syntax; the extension picks. *)
+      let kotlin = Filename.check_suffix path ".skt" in
+      try
+        if kotlin then Kotlin_parser.program Kotlin_lexer.token lexbuf
+        else Parser.program Lexer.token lexbuf
+      with
+      | Parser.Error | Kotlin_parser.Error ->
         let p = Lexing.lexeme_start_p lexbuf in
         failwith
           (Printf.sprintf "%s:%d:%d: syntax error at `%s'" p.pos_fname p.pos_lnum
@@ -70,7 +75,7 @@ let () =
   match !inputs with
   | [ path ] -> (
     try compile path with
-    | Lexer.Error msg | Failure msg ->
+    | Lexer.Error msg | Kotlin_lexer.Error msg | Failure msg ->
       Printf.eprintf "%s\n" msg;
       exit 1
     | Typing.Error msg ->

@@ -1,0 +1,164 @@
+// A tour of the Kotlin-flavoured syntax.
+//
+// This is the same language as the .sbl examples -- same type checker, same
+// back end, same generated code.  Only the concrete syntax differs: the parser
+// in kotlin_parser.mly builds exactly the abstract syntax the ML parser builds.
+//
+// Two places where it is Kotlin-flavoured rather than Kotlin.  Statements
+// inside a block are separated by `;`, because the lexer is not newline
+// sensitive.  And an anonymous function is `fun(x) = e`, which Kotlin does
+// have, rather than `{ x -> e }`, which cannot be told from a block with one
+// token of lookahead.
+
+sealed class Shape {
+    object Dot
+    class Circle(Int)
+    class Rect(Int, Int)
+}
+
+interface Ordered {
+    fun below(Int, Int): Boolean
+    val name: String
+}
+
+object Ascending {
+    val name = "ascending"
+    fun below(a, b) = a <= b
+}
+
+object Descending {
+    val name = "descending"
+    fun below(a, b) = b <= a
+}
+
+// A functor: `<Order : Ordered>` is the parameter, applied below as
+// `Sorting<Ascending>`.  Each application elaborates its own copy of the body.
+object Sorting<Order : Ordered> {
+    val label = Order.name
+
+    fun insert(x, l) = when (l) {
+        is Nil -> Cons(x, Nil);
+        is Cons(y, rest) ->
+            if (Order.below(x, y)) Cons(x, l) else Cons(y, insert(x, rest))
+    }
+
+    fun sort(l) = when (l) {
+        is Nil -> Nil;
+        is Cons(x, rest) -> insert(x, sort(rest))
+    }
+}
+
+object Up = Sorting<Ascending>
+object Down = Sorting<Descending>
+
+// Adjacent functions see one another, so mutual recursion needs no keyword.
+// They are split into strongly connected components first, which is what keeps
+// `length` below polymorphic while `even` and `odd` stay one group.
+fun even(n) = if (n == 0) true else odd(n - 1)
+fun odd(n) = if (n == 0) false else even(n - 1)
+
+fun length(l): Int = when (l) {
+    is Nil -> 0;
+    is Cons(_, rest) -> 1 + length(rest)
+}
+
+fun map(f, l) = when (l) {
+    is Nil -> Nil;
+    is Cons(x, rest) -> Cons(f(x), map(f, rest))
+}
+
+fun area(s): Int = when (s) {
+    is Dot -> 0;
+    is Circle(r) -> 3 * r * r;
+    is Rect(w, h) -> w * h
+}
+
+// Literal and wildcard patterns, and `else` as the catch-all.
+fun classify(n) = when (n) {
+    0 -> "zero";
+    1 -> "one";
+    else -> "many"
+}
+
+fun showInts(l) {
+    when (l) {
+        is Nil -> print_newline();
+        is Cons(x, rest) -> { print_int(x); print_char(32); showInts(rest) }
+    }
+}
+
+fun space() = print_char(32)
+
+fun main() {
+    // Values, blocks and arithmetic.
+    val numbers = listOf(5, 3, 9, 1, 7);
+    showInts(numbers);
+    showInts(Up.sort(numbers));
+    showInts(Down.sort(numbers));
+    showInts(map(fun(x) = x * x, numbers));
+
+    print_string(Up.label);
+    space();
+    print_string(Down.label);
+    print_newline();
+
+    // Numbers, comparisons and the boolean operators.
+    print_int(1 + 2 * 3 - 4 / 2);
+    space();
+    print_int(17 % 5);
+    space();
+    print_int(if (2 < 3 && !(4 >= 5)) 1 else 0);
+    space();
+    print_int(if (even(10) || odd(10)) 1 else 0);
+    print_newline();
+
+    // The same `length` at three element types.
+    print_int(length(numbers));
+    space();
+    print_int(length(listOf("a", "b")));
+    space();
+    print_int(length(listOf(listOf(1), Nil)));
+    print_newline();
+
+    // Datatypes.
+    print_int(area(Dot));
+    space();
+    print_int(area(Circle(4)));
+    space();
+    print_int(area(Rect(3, 5)));
+    space();
+    print_string(classify(0));
+    space();
+    print_string(classify(7));
+    print_newline();
+
+    // Strings: length, indexing, concatenation and equality, spelled as
+    // Kotlin spells them.
+    val greeting = "hello";
+    print_string(greeting.plus(", world"));
+    space();
+    print_int(greeting.length);
+    space();
+    print_int(greeting.charAt(1));
+    space();
+    print_int(if (greeting.equals("hello")) 1 else 0);
+    print_newline();
+
+    // Arrays, tuples, and a lambda kept in a value.
+    val cells = Array(3, 0);
+    cells[0] = 7;
+    cells[1] = cells[0] * 2;
+    cells[2] = cells[0] + cells[1];
+    print_int(cells[2]);
+    space();
+    val (a, b) = (11, 22);
+    print_int(a + b);
+    space();
+    val twice = fun(f: (Int) -> Int, x: Int): Int = f(f(x));
+    print_int(twice(fun(n) = n + 3, 1));
+    print_newline();
+
+    // An `if` with no `else` is a statement.
+    if (length(numbers) > 0) print_string("done");
+    print_newline()
+}

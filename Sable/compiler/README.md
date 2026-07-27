@@ -35,6 +35,25 @@ Two longer write-ups, in Japanese:
 - [doc/regalloc.md](doc/regalloc.md) — レジスタ割り付けの詳説。干渉グラフの実例、
   合体・スピル・callee-saved の扱い
 
+## Two syntaxes
+
+The same language has two concrete syntaxes. `.sbl` is ML; `.skt` is
+Kotlin-flavoured. The compiler picks by extension, and the two parsers build the
+same abstract syntax — the type checker, the optimizer and the back end never
+learn which one was used, and the generated code is identical.
+
+```
+let rec length l =                    fun length(l): Int = when (l) {
+  match l with                            is Nil -> 0;
+  | [] -> 0                               is Cons(_, rest) -> 1 + length(rest)
+  | _ :: rest -> 1 + length rest      }
+in
+```
+
+See [`examples/tour.skt`](examples/tour.skt) for the whole surface, and
+"[The Kotlin-flavoured syntax](#the-kotlin-flavoured-syntax)" below for the
+correspondence.
+
 ## The language
 
 A small ML. Functions take all their arguments at once (no currying), and `type`
@@ -99,11 +118,51 @@ Warning: this match case is unused: Blue
 A non-exhaustive match that actually falls through aborts the program rather
 than continuing with a wrong answer.
 
+## The Kotlin-flavoured syntax
+
+| | ML (`.sbl`) | Kotlin-flavoured (`.skt`) |
+|---|---|---|
+| value | `let x = e in ...` | `val x = e` |
+| function | `let rec f a b = e in ...` | `fun f(a, b) = e` or `fun f(a, b) { ... }` |
+| mutual recursion | `let rec f ... and g ...` | adjacent `fun`s |
+| anonymous function | `fun x y -> e` | `fun(x, y) = e` |
+| annotation | — | `val x: Int = e`, `fun f(a: Int): Int = e` |
+| condition | `if c then a else b` | `if (c) a else b` |
+| matching | `match e with p -> e \| ...` | `when (e) { p -> e; ... }` |
+| constructor pattern | `Node (l, v, r) -> e` | `is Node(l, v, r) -> e` |
+| catch-all | `_ -> e` | `else -> e` |
+| datatype | `type t = A \| B of int` | `sealed class T { object A; class B(Int) }` |
+| list | `[]`, `x :: xs`, `[a; b]` | `Nil`, `Cons(x, xs)`, `listOf(a, b)` |
+| string | `s.[i]`, `String.length s`, `a ^ b` | `s.charAt(i)`, `s.length`, `a.plus(b)` |
+| array | `Array.make n init`, `a.(i) <- v` | `Array(n, init)`, `a[i] = v` |
+| equality | `=`, `<>`, `not` | `==`, `!=`, `!` |
+| module | `module M = struct ... end in ...` | `object M { ... }` |
+| signature | `module type S = sig ... end` | `interface S { ... }` |
+| sealing | `module M : S = struct ... end` | `object M : S { ... }` |
+| functor | `module F (X : S) = struct ... end` | `object F<X : S> { ... }` |
+| application | `module M = F (Arg)` | `object M = F<Arg>` |
+| open | `open M in ...` | `import M` |
+| entry point | the program is one expression | `fun main() { ... }` |
+
+Two deliberate deviations from Kotlin. Statements inside a block are separated
+by `;`, because the lexer is not newline-sensitive and Kotlin's rule for where
+a statement ends needs that. And an anonymous function is `fun(x) = e` — which
+Kotlin does have — rather than `{ x -> e }`, which cannot be told from a block
+with one token of lookahead.
+
+One thing the Kotlin side does that the ML side leaves to the programmer: a run
+of adjacent `fun` declarations is split into the strongly connected components
+of its call graph before becoming recursive groups. Kotlin has no `and`, so
+functions written next to each other have to see one another; but putting them
+all in one group would make them monomorphic in each other, and a `length` used
+at two element types would stop working. The dependency analysis gives both.
+
 ## The pipeline
 
 | pass | file | what it does |
 |---|---|---|
 | lexing, parsing | `lexer.mll`, `parser.mly` | ocamllex and menhir |
+| — the other syntax | `kotlin_lexer.mll`, `kotlin_parser.mly`, `kotlin_build.ml` | the same abstract syntax from Kotlin-flavoured source |
 | name resolution | `modules.ml` | modules, functors and type declarations into path-carrying names |
 | type inference | `typing.ml` | let-polymorphism, generalized by levels |
 | match checking | `match_check.ml` | usefulness: exhaustiveness and redundancy |

@@ -32,26 +32,12 @@ let base_type = function
   | "string" -> Types.String
   | name -> Types.Named name
 
-(* `Node (l, v, r)` parses as an application of `Node` to one parenthesized
-   tuple; a constructor of matching arity takes the components as its
-   arguments, exactly as in OCaml.  Doing this here rather than in the grammar
-   keeps constructor application from conflicting with function application. *)
-let constr_args name args =
-  match (Datatype.find_constr name, args) with
-  | Some c, [ Tuple es ] when List.length c.Datatype.arg_types = List.length es -> es
-  | _ -> args
-
 (* `M`, `M.N`: a dotted run of capitalised names.  Keeping the constructor case
    and the module-path case behind one nonterminal is what stops the parser
    having to choose between them the moment it sees a dot.  Which one it is --
    and how many arguments a constructor takes -- is Modules' business, so the
    name travels as written and the arguments are left alone. *)
 let dotted path = String.concat "." path
-
-let constr_pattern_args name args =
-  match (Datatype.find_constr name, args) with
-  | Some c, Ptuple ps when List.length c.Datatype.arg_types = List.length ps -> ps
-  | _ -> [ args ]
 %}
 
 %token <int> INT

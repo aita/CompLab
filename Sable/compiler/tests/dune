@@ -157,6 +157,19 @@
  (action
   (diff functors.expected functors.out)))
 
+; The same language through the Kotlin-flavoured syntax.
+
+(rule
+ (with-stdout-to
+  kotlin.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:../examples/tour.skt})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff kotlin.expected kotlin.out)))
+
 ; A program the checker warns about, which then fails at run time exactly where
 ; the warning said it would.
 
