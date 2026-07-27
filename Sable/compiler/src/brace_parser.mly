@@ -12,24 +12,25 @@ let declare_variable name =
   Hashtbl.replace type_variables name t;
   t
 
+(* Built-in types are lower case, declared ones keep the name they were given,
+   and a name a `fun <T>` introduced is a variable of that declaration. *)
+let builtin_type = function
+  | "int" -> Types.Int
+  | "bool" -> Types.Bool
+  | "string" -> Types.String
+  | "unit" -> Types.Unit
+  | name -> failwith (Printf.sprintf "unknown type `%s`" name)
+
 let named_type name =
-  match Hashtbl.find_opt type_variables name with
-  | Some t -> t
-  | None -> (
-    match name with
-    | "Int" -> Types.Int
-    | "Boolean" -> Types.Bool
-    | "String" -> Types.String
-    | "Unit" -> Types.Unit
-    | name -> Types.Named name)
+  match Hashtbl.find_opt type_variables name with Some t -> t | None -> Types.Named name
 
 let applied_type name args =
   match (name, args) with
-  | "List", [ t ] -> Types.List t
-  | "Array", [ t ] -> Types.Array t
+  | "list", [ t ] -> Types.List t
+  | "array", [ t ] -> Types.Array t
   | _ ->
     failwith
-      (Printf.sprintf "`%s` does not take type arguments (only List and Array do)" name)
+      (Printf.sprintf "`%s` does not take type arguments (only list and array do)" name)
 
 (* A dotted run of capitalised names is a module path until something says
    otherwise, so both readings come out of one nonterminal and the action
@@ -60,12 +61,10 @@ let select owner name =
 let invoke owner name args =
   match (is_path owner, name, args) with
   | Some path, _, _ -> App (Qualified (path, name), args)
-  | None, "charAt", [ index ] -> Str_get (owner, index)
-  | None, "plus", [ other ] -> App (Var "string_concat", [ owner; other ])
+  | None, "at", [ index ] -> Str_get (owner, index)
   | None, "equals", [ other ] -> App (Var "string_equal", [ owner; other ])
   | None, _, _ ->
-    failwith
-      (Printf.sprintf "unknown method `%s` (a string has charAt, plus and equals)" name)
+    failwith (Printf.sprintf "unknown method `%s` (a string has `at` and `equals`)" name)
 
 (* `f()` is a call with no arguments; every function here takes at least one,
    so it is passed the unit value. *)
@@ -82,8 +81,8 @@ let call fn args =
 %token <string> STRING
 %token <string> IDENT
 %token <string> UIDENT
-%token VAL FUN IF ELSE WHEN IS OBJECT INTERFACE SEALED CLASS IMPORT ARRAY LIST_OF
-%token NIL CONS
+%token VAL FUN IF ELSE MATCH TYPE MODULE SIGNATURE OPEN ARRAY
+%token COLONCOLON PLUSPLUS
 %token PLUS MINUS STAR SLASH PERCENT BANG
 %token EQUAL EQUAL_EQUAL BANG_EQUAL LESS GREATER LESS_EQUAL GREATER_EQUAL
 %token AMPAMP BARBAR ARROW UNDERSCORE
@@ -111,17 +110,16 @@ declaration:
   | VAL LPAREN names RPAREN EQUAL expr { Dval_tuple (List.map typed $3, $6) }
   | FUN IDENT LPAREN parameters RPAREN opt_type function_body
       { Dfun (make_function $2 $4 $6 $7) }
-  | SEALED CLASS UIDENT LBRACE constructors RBRACE
-      { Dtype { tname = $3; tconstrs = $5 } }
-  | OBJECT UIDENT LBRACE declarations RBRACE
+  | TYPE UIDENT LBRACE constructors RBRACE { Dtype { tname = $2; tconstrs = $4 } }
+  | MODULE UIDENT LBRACE declarations RBRACE
       { Dmodule ($2, Mod_struct (to_items $4)) }
-  | OBJECT UIDENT COLON UIDENT LBRACE declarations RBRACE
+  | MODULE UIDENT COLON UIDENT LBRACE declarations RBRACE
       { Dmodule ($2, Mod_sealed (Mod_struct (to_items $6), Sig_name $4)) }
-  | OBJECT UIDENT EQUAL module_exp { Dmodule ($2, $4) }
-  | OBJECT UIDENT LESS UIDENT COLON UIDENT GREATER LBRACE declarations RBRACE
+  | MODULE UIDENT EQUAL module_exp { Dmodule ($2, $4) }
+  | MODULE UIDENT LESS UIDENT COLON UIDENT GREATER LBRACE declarations RBRACE
       { Dfunctor ($2, $4, Sig_name $6, to_items $9) }
-  | INTERFACE UIDENT LBRACE interface_items RBRACE { Dinterface ($2, Sig_items $4) }
-  | IMPORT path { Dimport $2 }
+  | SIGNATURE UIDENT LBRACE signature_items RBRACE { Dinterface ($2, Sig_items $4) }
+  | OPEN path { Dimport $2 }
 
 function_body:
   | EQUAL expr { $2 }
@@ -159,16 +157,20 @@ opt_type:
 
 constructors:
   | (* empty *) { [] }
-  | OBJECT UIDENT constructors { ($2, []) :: $3 }
-  | CLASS UIDENT LPAREN type_list RPAREN constructors { ($2, $4) :: $6 }
+  | constructor { [ $1 ] }
+  | constructor SEMI constructors { $1 :: $3 }
 
-(* ----------------------------------------------------------- interfaces *)
+constructor:
+  | UIDENT { ($1, []) }
+  | UIDENT LPAREN type_list RPAREN { ($1, $3) }
 
-interface_items:
+(* ---------------------------------------------------------- signatures *)
+
+signature_items:
   | (* empty *) { [] }
-  | SEALED CLASS UIDENT interface_items { Sig_type $3 :: $4 }
-  | VAL IDENT COLON reset signature_type interface_items { Sig_val ($2, $5) :: $6 }
-  | FUN reset generics IDENT LPAREN type_list RPAREN COLON signature_type interface_items
+  | TYPE UIDENT signature_items { Sig_type $2 :: $3 }
+  | VAL IDENT COLON reset signature_type signature_items { Sig_val ($2, $5) :: $6 }
+  | FUN reset generics IDENT LPAREN type_list RPAREN COLON signature_type signature_items
       { Sig_val ($4, Types.Fun ((if $6 = [] then [ Types.Unit ] else $6), $9)) :: $10 }
 
 reset:
@@ -192,8 +194,9 @@ type_exp:
   | atom_type { $1 }
 
 atom_type:
+  | IDENT { builtin_type $1 }
+  | IDENT LESS type_list GREATER { applied_type $1 $3 }
   | UIDENT { named_type $1 }
-  | UIDENT LESS type_list GREATER { applied_type $1 $3 }
   | LPAREN type_list RPAREN
       { match $2 with [ t ] -> t | ts -> Types.Tuple ts }
 
@@ -221,7 +224,7 @@ statement:
 expr:
   | IF LPAREN expr RPAREN expr %prec no_else { at $startpos (If ($3, $5, Unit)) }
   | IF LPAREN expr RPAREN expr ELSE expr { at $startpos (If ($3, $5, $7)) }
-  | WHEN LPAREN expr RPAREN LBRACE cases RBRACE
+  | MATCH LPAREN expr RPAREN LBRACE cases RBRACE
       { at $startpos
           (Match
              ( { scrutinee_type = Types.fresh_var (); result_type = Types.fresh_var () },
@@ -241,12 +244,19 @@ conjunction:
   | comparison { $1 }
 
 comparison:
-  | sum EQUAL_EQUAL sum { at $startpos (Cmp (Eq, $1, $3)) }
-  | sum BANG_EQUAL sum { at $startpos (Cmp (Ne, $1, $3)) }
-  | sum LESS sum { at $startpos (Cmp (Lt, $1, $3)) }
-  | sum LESS_EQUAL sum { at $startpos (Cmp (Le, $1, $3)) }
-  | sum GREATER sum { at $startpos (Cmp (Gt, $1, $3)) }
-  | sum GREATER_EQUAL sum { at $startpos (Cmp (Ge, $1, $3)) }
+  | cons EQUAL_EQUAL cons { at $startpos (Cmp (Eq, $1, $3)) }
+  | cons BANG_EQUAL cons { at $startpos (Cmp (Ne, $1, $3)) }
+  | cons LESS cons { at $startpos (Cmp (Lt, $1, $3)) }
+  | cons LESS_EQUAL cons { at $startpos (Cmp (Le, $1, $3)) }
+  | cons GREATER cons { at $startpos (Cmp (Gt, $1, $3)) }
+  | cons GREATER_EQUAL cons { at $startpos (Cmp (Ge, $1, $3)) }
+  | cons { $1 }
+
+(* `::` builds a list and `++` joins two strings; both associate to the right
+   and bind more loosely than arithmetic. *)
+cons:
+  | sum COLONCOLON cons { at $startpos (Cons ($1, $3)) }
+  | sum PLUSPLUS cons { at $startpos (App (Var "string_concat", [ $1; $3 ])) }
   | sum { $1 }
 
 sum:
@@ -280,9 +290,8 @@ primary:
   | IDENT { at $startpos (Var $1) }
   | UIDENT { Constr ($1, []) }
   | ARRAY LPAREN expr COMMA expr RPAREN { at $startpos (Array ($3, $5)) }
-  | LIST_OF LPAREN arguments RPAREN { list_of $3 }
-  | NIL { Nil }
-  | CONS LPAREN expr COMMA expr RPAREN { at $startpos (Cons ($3, $5)) }
+  | LBRACKET RBRACKET { Nil }
+  | LBRACKET arguments RBRACKET { list_of $2 }
   | LPAREN RPAREN { Unit }
   | LPAREN arguments RPAREN { match $2 with [ e ] -> e | es -> Tuple es }
   | block { $1 }
@@ -302,8 +311,13 @@ cases:
 case:
   | pattern ARROW expr { { pat = $1; action = $3 } }
 
+(* Constructors are capitalised and variables are not, so a pattern needs no
+   keyword to say which it is. *)
 pattern:
-  | ELSE { Pwild (Types.fresh_var ()) }
+  | simple_pattern COLONCOLON pattern { Pcons ($1, $3) }
+  | simple_pattern { $1 }
+
+simple_pattern:
   | UNDERSCORE { Pwild (Types.fresh_var ()) }
   | IDENT { Pvar ($1, Types.fresh_var ()) }
   | INT { Pint $1 }
@@ -311,10 +325,11 @@ pattern:
   | BOOL { Pbool $1 }
   | LPAREN RPAREN { Punit }
   | LPAREN patterns RPAREN { match $2 with [ p ] -> p | ps -> Ptuple ps }
-  | IS NIL { Pnil }
-  | IS CONS LPAREN pattern COMMA pattern RPAREN { Pcons ($4, $6) }
-  | IS path { Pconstr (Brace_build.dotted $2, []) }
-  | IS path LPAREN patterns RPAREN { Pconstr (Brace_build.dotted $2, $4) }
+  | LBRACKET RBRACKET { Pnil }
+  | LBRACKET patterns RBRACKET
+      { List.fold_right (fun p rest -> Pcons (p, rest)) $2 Pnil }
+  | path { Pconstr (Brace_build.dotted $1, []) }
+  | path LPAREN patterns RPAREN { Pconstr (Brace_build.dotted $1, $3) }
 
 patterns:
   | pattern { [ $1 ] }

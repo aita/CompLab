@@ -45,9 +45,9 @@ back end never learn which form a program was written in, and the generated code
 is identical.
 
 ```
-let rec length l =                    fun length(l): Int = when (l) {
-  match l with                            is Nil -> 0;
-  | [] -> 0                               is Cons(_, rest) -> 1 + length(rest)
+let rec length l =                    fun length(l): int = match (l) {
+  match l with                            [] -> 0;
+  | [] -> 0                               _ :: rest -> 1 + length(rest)
   | _ :: rest -> 1 + length rest      }
 in
 ```
@@ -129,22 +129,21 @@ Every construct of the language, in both forms.
 | function | `let rec f a b = e in ...` | `fun f(a, b) = e` or `fun f(a, b) { ... }` |
 | mutual recursion | `let rec f ... and g ...` | adjacent `fun`s |
 | anonymous function | `fun x y -> e` | `fun(x, y) = e` |
-| annotation | — | `val x: Int = e`, `fun f(a: Int): Int = e` |
+| annotation | — | `val x: int = e`, `fun f(a: int): int = e` |
 | condition | `if c then a else b` | `if (c) a else b` |
-| matching | `match e with p -> e \| ...` | `when (e) { p -> e; ... }` |
-| constructor pattern | `Node (l, v, r) -> e` | `is Node(l, v, r) -> e` |
-| catch-all | `_ -> e` | `else -> e` |
-| datatype | `type t = A \| B of int` | `sealed class T { object A; class B(Int) }` |
-| list | `[]`, `x :: xs`, `[a; b]` | `Nil`, `Cons(x, xs)`, `listOf(a, b)` |
-| string | `s.[i]`, `String.length s`, `a ^ b` | `s.charAt(i)`, `s.length`, `a.plus(b)` |
-| array | `Array.make n init`, `a.(i) <- v` | `Array(n, init)`, `a[i] = v` |
+| matching | `match e with p -> e \| ...` | `match (e) { p -> e; ... }` |
+| datatype | `type t = A \| B of int` | `type T { A; B(int) }` |
+| list | `[]`, `x :: xs`, `[a; b]` | `[]`, `x :: xs`, `[a, b]` |
+| string | `s.[i]`, `String.length s`, `a ^ b` | `s.at(i)`, `s.length`, `a ++ b` |
+| array | `Array.make n init`, `a.(i) <- v` | `array(n, init)`, `a[i] = v` |
 | equality | `=`, `<>`, `not` | `==`, `!=`, `!` |
-| module | `module M = struct ... end in ...` | `object M { ... }` |
-| signature | `module type S = sig ... end` | `interface S { ... }` |
-| sealing | `module M : S = struct ... end` | `object M : S { ... }` |
-| functor | `module F (X : S) = struct ... end` | `object F<X : S> { ... }` |
-| application | `module M = F (Arg)` | `object M = F<Arg>` |
-| open | `open M in ...` | `import M` |
+| types | `int`, `int list`, `int array` | `int`, `list<int>`, `array<int>` |
+| module | `module M = struct ... end in ...` | `module M { ... }` |
+| signature | `module type S = sig ... end` | `signature S { ... }` |
+| sealing | `module M : S = struct ... end` | `module M : S { ... }` |
+| functor | `module F (X : S) = struct ... end` | `module F<X : S> { ... }` |
+| application | `module M = F (Arg)` | `module M = F<Arg>` |
+| open | `open M in ...` | `open M` |
 | entry point | the program is one expression | `fun main() { ... }` |
 
 Three things about the brace form are worth saying outright, since each is a
@@ -166,8 +165,12 @@ used at two element types would stop working. The dependency analysis gives
 mutual recursion and polymorphism both. The ML form leaves the same decision to
 the programmer, who writes `and` for exactly the functions that need it.
 
-`+` is integer addition and nothing else — there is no overloading — so joining
-two strings is `a.plus(b)` rather than an operator.
+The two forms name the same things the same way: `type`, `module`, `signature`,
+`match`, `open`. Lists are `[]` and `::` in both, and a pattern needs no keyword
+to say whether a name is a constructor or a binding, because a capitalised name
+is always the first and a lower-case one always the second. What differs is
+punctuation and shape: braces where the ML form has `in` and `end`, parentheses
+around a condition, commas where it has spaces.
 
 ## The pipeline
 

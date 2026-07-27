@@ -13,19 +13,14 @@ let () =
       ("fun", FUN);
       ("if", IF);
       ("else", ELSE);
-      ("when", WHEN);
-      ("is", IS);
-      ("object", OBJECT);
-      ("interface", INTERFACE);
-      ("sealed", SEALED);
-      ("class", CLASS);
-      ("import", IMPORT);
+      ("match", MATCH);
+      ("type", TYPE);
+      ("module", MODULE);
+      ("signature", SIGNATURE);
+      ("open", OPEN);
+      ("array", ARRAY);
       ("true", BOOL true);
       ("false", BOOL false);
-      ("Array", ARRAY);
-      ("listOf", LIST_OF);
-      ("Nil", NIL);
-      ("Cons", CONS);
     ]
 
 let string_buffer = Buffer.create 64
@@ -58,6 +53,8 @@ rule token = parse
         | None -> error lexbuf "integer literal %s is out of range" n }
   | '"' { Buffer.clear string_buffer; string_literal lexbuf }
   | "->" { ARROW }
+  | "::" { COLONCOLON }
+  | "++" { PLUSPLUS }
   | "==" { EQUAL_EQUAL }
   | "!=" { BANG_EQUAL }
   | "<=" { LESS_EQUAL }
@@ -83,10 +80,7 @@ rule token = parse
   | ';' { SEMI }
   | ':' { COLON }
   | '.' { DOT }
-  | (upper alnum*) as name
-      { match Hashtbl.find_opt keywords name with
-        | Some tok -> tok
-        | None -> UIDENT name }
+  | (upper alnum*) as name { UIDENT name }
   | (lower alnum*) as name
       { match Hashtbl.find_opt keywords name with
         | Some tok -> tok
