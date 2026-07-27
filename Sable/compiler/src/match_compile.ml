@@ -88,6 +88,13 @@ let test_for head (occ, _) =
   | Check.Hunit | Check.Htuple _ ->
     failwith "Match_compile: a single-constructor head needs no test"
 
+(* Heads whose test compares against zero, which costs one instruction less. *)
+let tests_against_zero = function
+  | Check.Hconstr c -> c.Datatype.tag = 0
+  | Check.Hint n -> n = 0
+  | Check.Hbool b -> not b
+  | Check.Hunit | Check.Htuple _ -> false
+
 let rec build occs rows =
   match rows with
   | [] -> Fail
@@ -126,6 +133,17 @@ let rec build occs rows =
     in
     let fallback =
       if signature = None then build rest_occs (default_rows occ rows) else Fail
+    in
+    (* When the signature is complete, the head left for last needs no test at
+       all.  A tag of zero is the one head whose test would have been free
+       anyway -- machines have a register hard-wired to zero -- so it should be
+       tested rather than saved for last. *)
+    let heads =
+      if signature = None then heads
+      else
+        match List.partition tests_against_zero heads with
+        | free :: others, rest -> (free :: others) @ rest
+        | [], _ -> heads
     in
     let rec chain = function
       | [] -> fallback

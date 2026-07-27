@@ -49,6 +49,8 @@ let immediate_mnemonic = function
   | Riscv.Sll -> "slli"
   | Riscv.Sra -> "srai"
   | Riscv.Slt -> "slti"
+  (* RISC-V spells the unsigned immediate compare `sltiu`, not `sltui`. *)
+  | Riscv.Sltu -> "sltiu"
   | op -> failwith (Riscv.string_of_binop op ^ " has no immediate form")
 
 let instruction = function

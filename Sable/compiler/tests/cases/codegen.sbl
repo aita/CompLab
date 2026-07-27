@@ -1,0 +1,55 @@
+(* Instruction selection and the peephole pass.
+
+   Each group below exists to catch a specific way the back end can go wrong,
+   and several of them have. *)
+
+type box = Box of int * int
+
+let rec show n = print_int n; print_char 32 in
+
+(* Comparisons in value position become `slt` rather than a branch.  All six
+   operators, both orders, so a swapped or negated arm shows up immediately. *)
+let rec compare_all a b =
+  let lt = a < b in
+  let le = a <= b in
+  let gt = a > b in
+  let ge = a >= b in
+  let eq = a = b in
+  let ne = a <> b in
+  (if lt then 1 else 0) + (if le then 2 else 0) + (if gt then 4 else 0)
+  + (if ge then 8 else 0) + (if eq then 16 else 0) + (if ne then 32 else 0)
+in
+show (compare_all 3 5);   (* lt le ne          = 1 + 2 + 32  = 35 *)
+show (compare_all 5 3);   (* gt ge ne          = 4 + 8 + 32  = 44 *)
+show (compare_all 4 4);   (* le ge eq          = 2 + 8 + 16  = 26 *)
+show (compare_all 0 0);   (* the same, against zero          = 26 *)
+print_newline ();
+
+(* Comparisons against a literal zero, which use the zero register. *)
+let rec sign n = (if n < 0 then 0 - 1 else 0) + (if n > 0 then 1 else 0) in
+show (sign (- 7)); show (sign 0); show (sign 7);
+print_newline ();
+
+(* Multiplication by a power of two becomes a shift.  The middle one is the
+   case that once miscompiled: the result register is also an operand, so the
+   peephole must not remember `t = t * r` as a fact about the new t. *)
+let rec scale r = r * 8 + 3 * r * r - r * 2 + r * 1 in
+show (scale 0); show (scale 1); show (scale 4);
+print_newline ();
+
+(* Storing to one array and reading from another, where the two may be the
+   same.  If store-to-load forwarding ignores aliasing, `both a a` answers 1. *)
+let rec both p q = p.(0) <- 1; q.(0) <- 2; p.(0) in
+let a = Array.make 2 0 in
+let b = Array.make 2 0 in
+show (both a b); show (both a a);
+(* Distinct offsets from one base do not alias, so this may forward. *)
+let rec near u = u.(0) <- 10; u.(1) <- 20; u.(0) + u.(1) in
+show (near a);
+print_newline ();
+
+(* Tuples and constructors written then immediately read back. *)
+let rec unpack () = let (x, y) = (6, 7) in x * y in
+let rec reread n = match Box (n, n + 1) with Box (x, y) -> y - x in
+show (unpack ()); show (reread 41);
+print_newline ()

@@ -93,7 +93,7 @@ let name_of_reg r =
 
 (* ---------------------------------------------------------- instructions *)
 
-type binop = Add | Sub | Mul | Div | Rem | And | Or | Xor | Sll | Sra | Slt
+type binop = Add | Sub | Mul | Div | Rem | And | Or | Xor | Sll | Sra | Slt | Sltu
 type cond = Eq | Ne | Lt | Ge
 type callee = Direct of Ident.label | Indirect of reg
 
@@ -129,7 +129,7 @@ type func = {
 let fits_immediate n = n >= -2048 && n <= 2047
 
 let has_immediate_form = function
-  | Add | And | Or | Xor | Sll | Sra | Slt -> true
+  | Add | And | Or | Xor | Sll | Sra | Slt | Sltu -> true
   | Sub | Mul | Div | Rem -> false
 
 (* ------------------------------------------------- uses and definitions *)
@@ -217,6 +217,7 @@ let string_of_binop = function
   | Sll -> "sll"
   | Sra -> "sra"
   | Slt -> "slt"
+  | Sltu -> "sltu"
 
 let string_of_cond = function Eq -> "beq" | Ne -> "bne" | Lt -> "blt" | Ge -> "bge"
 

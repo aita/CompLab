@@ -91,6 +91,17 @@
  (action
   (diff closures.expected closures.out)))
 
+(rule
+ (with-stdout-to
+  codegen.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:cases/codegen.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff codegen.expected codegen.out)))
+
 ; A program the checker warns about, which then fails at run time exactly where
 ; the warning said it would.
 

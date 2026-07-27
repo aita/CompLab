@@ -139,6 +139,11 @@ simplify も合体も freeze もできない — 残った節点がすべて K �
 
 `sum` のラウンド数が 2 なのは、1回目で `v16` の賭けを外し、書き換えて2回目で成功したからです。
 
+書き換えは機械的なので、定義のすぐ後で使われる値には「書いて、すぐ読み戻す」という無駄が
+残ります。これは割り付けが終わってから[のぞき穴最適化](pipeline.md)が拾います。`sum` の
+スピルは書き込みと読み出しのあいだに呼び出しを挟むので、そちらは残ります — 挟まれた時点で
+レジスタはどのみち壊れているので、残っているのが正しい姿です。
+
 結果を見ると気づくことがあります。
 
 ```
@@ -191,7 +196,7 @@ sable_sum_15:
 
 ```
 sable_sum_15: 41/41 moves coalesced, 1 spill slot(s) [spilled v16]
-sable_main:   31/32 moves coalesced, 3 spill slot(s) [spilled v0 v1 v2]
+sable_main:   30/31 moves coalesced, 3 spill slot(s) [spilled v0 v1 v2]
 ```
 
 `sum` は callee-saved を1本も使わないので退避ゼロ。`main` は呼び出しをまたぐ値が3つあるので
@@ -245,7 +250,7 @@ $ ./sable --dump-regalloc examples/pressure.sbl
 sable_blend:      1 round(s), 27/27 moves coalesced, 0 spill slot(s)
 sable_pressure:   2 round(s), 46/75 moves coalesced, 16 spill slot(s)
 sable_accumulate: 2 round(s), 42/44 moves coalesced, 2 spill slot(s)
-sable_main:       1 round(s), 29/29 moves coalesced, 0 spill slot(s)
+sable_main:       1 round(s), 26/26 moves coalesced, 0 spill slot(s)
 ```
 
 16スロット。callee-saved が12本しかないところに、呼び出しをまたぐ値が16個あるためです。

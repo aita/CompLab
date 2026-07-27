@@ -55,7 +55,8 @@ let compile path =
       Liveness.eliminate_dead_code func;
       if !dump_riscv then Riscv.print_func stderr func;
       let report = Regalloc.allocate func in
-      if !dump_regalloc then Regalloc.print_report stderr func.Riscv.name report)
+      if !dump_regalloc then Regalloc.print_report stderr func.Riscv.name report;
+      Peephole.run func)
     functions;
   let channel = if !output_file = "-" then stdout else open_out !output_file in
   Emit.program channel functions;

@@ -105,9 +105,10 @@ than continuing with a wrong answer.
 | instruction selection | `selection.ml` | RISC-V CFG over unlimited virtual registers |
 | liveness | `liveness.ml` | backwards dataflow; also dead-code elimination |
 | **register allocation** | **`regalloc.ml`** | **graph colouring with iterated coalescing** |
+| peephole | `peephole.ml` | local rewrites once registers are assigned |
 | assembly | `emit.ml` | frame layout and instruction printing |
 
-The last four rows sit on `riscv.ml`, which holds the instruction and
+The last five rows sit on `riscv.ml`, which holds the instruction and
 control-flow types, the register file and the calling convention. It is
 deliberately not called `ir.ml`: it knows exactly one target, down to which
 operations take a 12-bit immediate. `liveness.ml` and `regalloc.ml` are the
@@ -256,7 +257,7 @@ $ ./sable --dump-regalloc examples/pressure.sbl
 sable_blend:      1 round(s), 27/27 moves coalesced, 0 spill slot(s)
 sable_pressure:   2 round(s), 46/75 moves coalesced, 16 spill slot(s) [spilled ...]
 sable_accumulate: 2 round(s), 42/44 moves coalesced, 2 spill slot(s) [spilled ...]
-sable_main:       1 round(s), 29/29 moves coalesced, 0 spill slot(s)
+sable_main:       1 round(s), 26/26 moves coalesced, 0 spill slot(s)
 ```
 
 `examples/pressure.sbl` is written to make this happen: sixteen values, all live
