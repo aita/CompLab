@@ -23,5 +23,5 @@ digraph build {
   d [label = <d<BR/><FONT POINT-SIZE="8" COLOR="#57606a">2</FONT>>];
 
   a -> b; a -> c; b -> c; a -> d; b -> d;
-  c -> d [style = dashed, color = "#0969da", label = "mv", fontcolor = "#0969da"];
+  c -> d [style = dashed, color = "#0969da", label = "mv d, c", fontcolor = "#0969da"];
 }
