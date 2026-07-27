@@ -1,0 +1,58 @@
+(* Patterns: literals, wildcards, tuples, nesting, and cases reached from more
+   than one leaf of the decision tree. *)
+
+type colour = Red | Green | Blue
+type shape = Dot | Circle of int | Rect of int * int
+type nest = Zero | Wrap of nest
+
+let rec area s = match s with Dot -> 0 | Circle r -> 3 * r * r | Rect (w, h) -> w * h in
+
+(* `(_, Circle r)` is reachable under all three colours, so Match_compile
+   emits it once as a local function and jumps to it. *)
+let rec score c s =
+  match (c, s) with
+  | (Red, Rect (w, h)) -> w - h
+  | (_, Circle r) -> r * 100
+  | (Green, _) -> 7
+  | (Blue, Rect (w, h)) -> w + h
+  | (Red, Dot) -> - 1
+  | (Blue, Dot) -> - 2
+in
+
+let rec classify n =
+  match n with
+  | 0 -> 100
+  | 1 -> 200
+  | 7 -> 300
+  | _ -> n
+in
+
+let rec both a b =
+  match (a, b) with
+  | (true, true) -> 3
+  | (true, false) -> 2
+  | (false, true) -> 1
+  | (false, false) -> 0
+in
+
+(* Nested constructor patterns, three levels deep. *)
+let rec depth n =
+  match n with
+  | Zero -> 0
+  | Wrap Zero -> 1
+  | Wrap (Wrap Zero) -> 2
+  | Wrap (Wrap rest) -> 2 + depth rest
+in
+
+let rec show n = print_int n; print_char 32 in
+show (area Dot); show (area (Circle 4)); show (area (Rect (3, 5)));
+print_newline ();
+show (score Red (Rect (9, 4))); show (score Red (Circle 1)); show (score Red Dot);
+show (score Green Dot); show (score Green (Circle 2)); show (score Blue (Rect (5, 6)));
+print_newline ();
+show (classify 0); show (classify 1); show (classify 7); show (classify 42);
+print_newline ();
+show (both true true); show (both true false); show (both false true); show (both false false);
+print_newline ();
+show (depth Zero); show (depth (Wrap Zero)); show (depth (Wrap (Wrap (Wrap (Wrap Zero)))));
+print_newline ()

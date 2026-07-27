@@ -1,0 +1,2 @@
+type pair = Pair of int * int
+print_int (match Pair (1, 2) with Pair x -> x)

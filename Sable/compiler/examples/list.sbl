@@ -1,0 +1,55 @@
+(* A list type, and the higher-order functions that go with it.  Every function
+   passed here is a closure, so this exercises indirect calls as much as it does
+   pattern matching. *)
+
+type list = Nil | Cons of int * list
+
+let rec range lo hi = if lo > hi then Nil else Cons (lo, range (lo + 1) hi) in
+
+let rec length l = match l with Nil -> 0 | Cons (_, rest) -> 1 + length rest in
+
+let rec map f l =
+  match l with Nil -> Nil | Cons (x, rest) -> Cons (f x, map f rest)
+in
+
+let rec filter keep l =
+  match l with
+  | Nil -> Nil
+  | Cons (x, rest) -> if keep x then Cons (x, filter keep rest) else filter keep rest
+in
+
+let rec fold_left f acc l =
+  match l with Nil -> acc | Cons (x, rest) -> fold_left f (f acc x) rest
+in
+
+let rec rev_append l acc =
+  match l with Nil -> acc | Cons (x, rest) -> rev_append rest (Cons (x, acc))
+in
+
+let rec show l =
+  match l with
+  | Nil -> print_newline ()
+  | Cons (x, rest) -> (print_int x; print_char 32; show rest)
+in
+
+(* Insertion sort, to have a match on two lists at once. *)
+let rec insert x l =
+  match l with
+  | Nil -> Cons (x, Nil)
+  | Cons (y, rest) -> if x <= y then Cons (x, l) else Cons (y, insert x rest)
+in
+let rec sort l = match l with Nil -> Nil | Cons (x, rest) -> insert x (sort rest) in
+
+let numbers = range 1 10 in
+show numbers;
+show (map (fun x -> x * x) numbers);
+show (filter (fun x -> x mod 3 = 0) numbers);
+show (rev_append numbers Nil);
+show (sort (map (fun x -> x * 37 mod 11) numbers));
+
+let total = fold_left (fun acc x -> acc + x) 0 numbers in
+let scale = 3 in
+let scaled = fold_left (fun acc x -> acc + (x * scale)) 0 numbers in
+print_int (length numbers); print_char 32;
+print_int total; print_char 32;
+print_int scaled; print_newline ()

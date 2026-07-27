@@ -1,0 +1,32 @@
+--- branches.sbl
+type error between the branches of `if`:
+  expected: int
+  but got:  bool
+--- compare_tuple.sbl
+`=` cannot compare values of type (int * int) (only int, bool and unit)
+--- constructor_arity.sbl
+the constructor `Pair` expects 2 argument(s) but is given 1
+--- duplicate_pattern_var.sbl
+the variable `x` is bound twice in the pattern `Pair (x, x)`
+--- mutual_capture.sbl
+the mutually recursive functions ping, pong capture the variable(s) n.
+Only a self-recursive function may capture its environment; pass the captured
+values as arguments instead.
+--- not_unit.sbl
+type error at the top level (a program must have type unit):
+  expected: unit
+  but got:  int
+--- syntax.sbl
+errors/syntax.sbl:1:18: syntax error at `in'
+--- too_many_args.sbl
+`f` takes 9 arguments; at most 8 are supported (pass a tuple)
+--- type_mismatch.sbl
+type error in a function application:
+  expected: (int -> int)
+  but got:  (bool -> '_a)
+--- unbound.sbl
+unbound variable `y`
+--- unknown_constructor.sbl
+unknown constructor `Blue`
+--- unknown_type.sbl
+unknown type `widget` in the declaration of `box`

@@ -1,0 +1,44 @@
+#!/bin/sh
+# Compile a Sable program and run it under qemu.  The source file comes last.
+#
+#   ./sable examples/tour.sbl                     run it
+#   ./sable -nregs 10 examples/tour.sbl           run it with a small register file
+#   ./sable -S examples/tour.sbl                  print the assembly and stop
+#   ./sable --dump-regalloc examples/tour.sbl     report on register allocation
+#
+# Options other than -S are passed straight through to sablec.
+
+set -e
+
+here=$(cd "$(dirname "$0")" && pwd)
+sablec=$here/_build/default/src/sablec.exe
+runtime=$here/runtime/sable_runtime.c
+
+[ -x "$sablec" ] || (cd "$here" && dune build)
+
+if [ $# -lt 1 ]; then
+  echo "usage: sable [options] <file.sbl>" >&2
+  exit 2
+fi
+
+assembly_only=no
+options=""
+while [ $# -gt 1 ]; do
+  if [ "$1" = "-S" ]; then assembly_only=yes; else options="$options $1"; fi
+  shift
+done
+source=$1
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+# shellcheck disable=SC2086
+"$sablec" $options -o "$work/program.s" "$source"
+
+if [ "$assembly_only" = yes ]; then
+  cat "$work/program.s"
+  exit 0
+fi
+
+riscv64-linux-gnu-gcc -static -o "$work/program" "$work/program.s" "$runtime"
+exec qemu-riscv64 "$work/program"

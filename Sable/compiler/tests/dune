@@ -1,0 +1,125 @@
+; Golden tests.  Each program is compiled, linked against the runtime, and run
+; under qemu twice -- with the full register file and with `-nregs 10` -- and
+; the two runs must agree before the output is compared with the .expected
+; file.  Update them all with `dune promote` after `dune test`.
+
+(rule
+ (with-stdout-to
+  tour.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:../examples/tour.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.out)))
+
+(rule
+ (with-stdout-to
+  tree.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:../examples/tree.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tree.expected tree.out)))
+
+(rule
+ (with-stdout-to
+  list.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:../examples/list.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff list.expected list.out)))
+
+(rule
+ (with-stdout-to
+  queens.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:../examples/queens.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff queens.expected queens.out)))
+
+(rule
+ (with-stdout-to
+  sort.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:../examples/sort.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff sort.expected sort.out)))
+
+(rule
+ (with-stdout-to
+  pressure.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:../examples/pressure.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff pressure.expected pressure.out)))
+
+(rule
+ (with-stdout-to
+  patterns.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:cases/patterns.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff patterns.expected patterns.out)))
+
+(rule
+ (with-stdout-to
+  closures.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:cases/closures.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff closures.expected closures.out)))
+
+; A program the checker warns about, which then fails at run time exactly where
+; the warning said it would.
+
+(rule
+ (with-stdout-to
+  match_failure.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:cases/match_failure.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff match_failure.expected match_failure.out)))
+
+; Every program under errors/ must be rejected; their messages go into one
+; golden file.
+
+(rule
+ (with-stdout-to
+  errors.out
+  (run sh %{dep:errors.sh} %{exe:../src/sablec.exe}
+    %{dep:errors/branches.sbl} %{dep:errors/compare_tuple.sbl}
+    %{dep:errors/constructor_arity.sbl} %{dep:errors/duplicate_pattern_var.sbl}
+    %{dep:errors/mutual_capture.sbl} %{dep:errors/not_unit.sbl}
+    %{dep:errors/syntax.sbl} %{dep:errors/too_many_args.sbl}
+    %{dep:errors/type_mismatch.sbl} %{dep:errors/unbound.sbl}
+    %{dep:errors/unknown_constructor.sbl} %{dep:errors/unknown_type.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff errors.expected errors.out)))

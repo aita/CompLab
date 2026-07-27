@@ -1,0 +1,54 @@
+(* Datatypes and pattern matching: an unbalanced binary search tree. *)
+
+type tree = Leaf | Node of tree * int * tree
+
+let rec insert t x =
+  match t with
+  | Leaf -> Node (Leaf, x, Leaf)
+  | Node (l, v, r) ->
+      if x < v then Node (insert l x, v, r)
+      else if x > v then Node (l, v, insert r x)
+      else t
+in
+
+let rec member t x =
+  match t with
+  | Leaf -> false
+  | Node (l, v, r) -> if x = v then true else if x < v then member l x else member r x
+in
+
+let rec size t = match t with Leaf -> 0 | Node (l, _, r) -> 1 + size l + size r in
+
+let rec depth t =
+  match t with
+  | Leaf -> 0
+  | Node (l, _, r) -> let dl = depth l in let dr = depth r in 1 + (if dl > dr then dl else dr)
+in
+
+let rec fold t acc =
+  match t with Leaf -> acc | Node (l, v, r) -> fold r (v + fold l acc)
+in
+
+(* A pattern deep enough to need a real decision tree: the first column is
+   split, then the second, and the rows below share the branches. *)
+let rec leftmost t =
+  match t with
+  | Leaf -> 0
+  | Node (Leaf, v, _) -> v
+  | Node (Node (Leaf, v, _), _, _) -> v
+  | Node (Node (l, _, _), _, _) -> leftmost l
+in
+
+let rec walk t = match t with Leaf -> () | Node (l, v, r) -> (walk l; print_int v; print_char 32; walk r) in
+
+let rec build t i = if i = 0 then t else build (insert t (i * 37 mod 101)) (i - 1) in
+let t = build Leaf 100 in
+
+walk t; print_newline ();
+print_int (size t); print_char 32;
+print_int (depth t); print_char 32;
+print_int (fold t 0); print_char 32;
+print_int (leftmost t); print_char 32;
+print_int (if member t 50 then 1 else 0);
+print_int (if member t 200 then 1 else 0);
+print_newline ()

@@ -1,0 +1,40 @@
+(* A program written to make the register allocator work.
+
+   Each `blend` below is a call, and every value computed before it is still
+   needed afterwards, so all of them are live across it.  A value live across a
+   call interferes with every caller-saved register, so the allocator has to
+   find it a callee-saved register -- and once those run out, a stack slot.
+
+   Compile it with `-nregs 10` and `--dump-regalloc` to watch the spilling grow.
+   The answer must not change. *)
+
+let rec blend x y = (x * 31 + y * 7 + 13) mod 1000003 in
+
+let rec pressure n =
+  let a = blend n 1 in
+  let b = blend n 2 in
+  let c = blend n 3 in
+  let d = blend n 4 in
+  let e = blend n 5 in
+  let f = blend n 6 in
+  let g = blend n 7 in
+  let h = blend n 8 in
+  let i = blend n 9 in
+  let j = blend n 10 in
+  let k = blend n 11 in
+  let l = blend n 12 in
+  let m = blend n 13 in
+  let o = blend n 14 in
+  let p = blend n 15 in
+  let q = blend n 16 in
+  (* Every one of the sixteen is read here, after all sixteen calls. *)
+  let low = a + b + c + d + e + f + g + h in
+  let high = i + j + k + l + m + o + p + q in
+  blend low high
+in
+
+let rec accumulate i total =
+  if i > 1000 then total else accumulate (i + 1) ((total + pressure i) mod 1000003)
+in
+print_int (accumulate 0 0);
+print_newline ()

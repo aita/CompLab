@@ -1,0 +1,2 @@
+type colour = Red | Green
+let rec f c = match c with Red -> 1 | Blue -> 2 in print_int (f Red)

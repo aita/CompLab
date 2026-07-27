@@ -1,0 +1,8 @@
+(* A match the checker cannot prove exhaustive: it warns, and the case it
+   describes really does abort at run time. *)
+
+type colour = Red | Green | Blue
+
+let rec name c = match c with Red -> 1 | Green -> 2 in
+print_int (name Red); print_int (name Green); print_newline ();
+print_int (name Blue); print_newline ()

@@ -1,0 +1,35 @@
+(* Counting the solutions to the n-queens problem.
+
+   Every inner function here captures something -- the board, the size, the
+   row being filled -- so each becomes a closure, and the recursion runs
+   through them. *)
+
+let rec queens n =
+  let board = Array.make n 0 in
+  let rec safe row col i =
+    if i >= row then true
+    else
+      let c = board.(i) in
+      if c = col then false
+      else if row - i = col - c then false
+      else if row - i = c - col then false
+      else safe row col (i + 1)
+  in
+  let rec place row =
+    if row >= n then 1
+    else
+      let rec try_column col found =
+        if col >= n then found
+        else if safe row col 0 then (board.(row) <- col; try_column (col + 1) (found + place (row + 1)))
+        else try_column (col + 1) found
+      in
+      try_column 0 0
+  in
+  place 0
+in
+
+let rec report n =
+  if n <= 9 then (print_int (queens n); print_char 32; report (n + 1))
+in
+report 1;
+print_newline ()

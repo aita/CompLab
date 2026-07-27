@@ -1,0 +1,64 @@
+(* A tour of Sable.  Everything the language has, in one program. *)
+
+let rec show n = print_int n; print_char 32 in
+let rec line () = print_newline () in
+
+(* Integers, booleans and the usual operators.  `unit`, `bool` and `int` are
+   all one machine word, so `if` is just a branch. *)
+show (1 + 2 * 3 - 4 / 2);
+show (17 mod 5);
+show (- 3 * - 3);
+show (if 2 < 3 && not (4 >= 5) then 1 else 0);
+show (if false || 3 <> 3 then 1 else 0);
+line ();
+
+(* Functions take all their arguments at once; there is no currying. *)
+let rec gcd a b = if b = 0 then a else gcd b (a mod b) in
+let rec max3 a b c = if a >= b then (if a >= c then a else c) else if b >= c then b else c in
+show (gcd 1071 462);
+show (max3 3 9 4);
+line ();
+
+(* Tail calls are jumps, so a loop written as recursion costs no stack. *)
+let rec count i limit acc = if i > limit then acc else count (i + 1) limit (acc + i) in
+show (count 1 1000000 0);
+line ();
+
+(* Mutual recursion. *)
+let rec even n = if n = 0 then true else odd (n - 1)
+and odd n = if n = 0 then false else even (n - 1) in
+show (if even 100 then 1 else 0);
+show (if odd 100 then 1 else 0);
+line ();
+
+(* Tuples are heap blocks; `let (a, b) = ...` takes them apart. *)
+let rec divmod a b = (a / b, a mod b) in
+let (q, r) = divmod 47 5 in
+show q; show r;
+line ();
+
+(* Anonymous functions, and closures over the enclosing scope. *)
+let rec adder n = fun x -> x + n in
+let add10 = adder 10 in
+let rec apply_twice f x = f (f x) in
+show (add10 5);
+show (apply_twice add10 0);
+show (apply_twice (fun x -> x * x) 3);
+line ();
+
+(* A closure that captures a mutable array is how state is kept. *)
+let rec make_counter () =
+  let cell = Array.make 1 0 in
+  fun step -> (cell.(0) <- cell.(0) + step; cell.(0))
+in
+let tick = make_counter () in
+show (tick 1); show (tick 2); show (tick 39);
+line ();
+
+(* Arrays. *)
+let squares = Array.make 10 0 in
+let rec fill i = if i < 10 then (squares.(i) <- i * i; fill (i + 1)) in
+fill 0;
+let rec total i acc = if i >= 10 then acc else total (i + 1) (acc + squares.(i)) in
+show (total 0 0);
+line ()

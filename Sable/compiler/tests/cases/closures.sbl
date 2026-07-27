@@ -1,0 +1,45 @@
+type opt = None | Some of int
+type pair = P of opt * opt
+
+(* shadowing, closures in a loop, nested match, same variable names in
+   different rows, a closure used as a value inside its own body *)
+let rec show n = print_int n; print_char 32 in
+
+let rec combine p =
+  match p with
+  | P (None, None) -> 0
+  | P (Some x, None) -> x
+  | P (None, Some x) -> 0 - x
+  | P (Some x, Some y) -> (match x - y with 0 -> 999 | d -> d)
+in
+
+let x = 1 in
+let x = x + 1 in
+let x = x * 10 in
+
+let slots = Array.make 5 0 in
+let rec build i =
+  if i < 5 then begin
+    let captured = i * i in
+    let f = fun k -> captured + k in
+    slots.(i) <- f 100;
+    build (i + 1)
+  end
+in
+build 0;
+
+(* self-recursive closure that also uses itself as a value *)
+let rec countdown n =
+  let go = countdown in
+  if n <= 0 then x else go (n - 1)
+in
+
+show (combine (P (None, None)));
+show (combine (P (Some 7, None)));
+show (combine (P (None, Some 7)));
+show (combine (P (Some 3, Some 3)));
+show (combine (P (Some 9, Some 4)));
+print_newline ();
+show slots.(0); show slots.(1); show slots.(4);
+show x; show (countdown 5);
+print_newline ()

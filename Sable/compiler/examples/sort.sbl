@@ -1,0 +1,53 @@
+(* Quicksort over an array, plus a binary search to check the result. *)
+
+let size = 200 in
+let data = Array.make size 0 in
+
+(* A linear congruential generator, so the input is the same everywhere. *)
+let rec seed_data i state =
+  if i < size then begin
+    let next = (state * 1103515245 + 12345) mod 2147483648 in
+    data.(i) <- next mod 100000;
+    seed_data (i + 1) next
+  end
+in
+seed_data 0 1;
+
+let rec swap a i j = let t = a.(i) in (a.(i) <- a.(j); a.(j) <- t) in
+
+let rec sort a lo hi =
+  if lo < hi then begin
+    let pivot = a.(hi) in
+    let rec partition scan boundary =
+      if scan >= hi then (swap a boundary hi; boundary)
+      else if a.(scan) <= pivot then (swap a boundary scan; partition (scan + 1) (boundary + 1))
+      else partition (scan + 1) boundary
+    in
+    let split = partition lo lo in
+    sort a lo (split - 1);
+    sort a (split + 1) hi
+  end
+in
+sort data 0 (size - 1);
+
+let rec search a lo hi x =
+  if lo > hi then (- 1)
+  else
+    let mid = (lo + hi) / 2 in
+    let v = a.(mid) in
+    if v = x then mid else if v < x then search a (mid + 1) hi x else search a lo (mid - 1) x
+in
+
+let rec sorted i =
+  if i >= size then true else if data.(i - 1) <= data.(i) then sorted (i + 1) else false
+in
+
+let rec show i count =
+  if count > 0 then (print_int data.(i); print_char 32; show (i + 1) (count - 1))
+in
+show 0 8;
+print_newline ();
+print_int (if sorted 1 then 1 else 0); print_char 32;
+print_int (search data 0 (size - 1) data.(123)); print_char 32;
+print_int (search data 0 (size - 1) (- 5));
+print_newline ()
