@@ -1,5 +1,5 @@
 {
-open Kotlin_parser
+open Brace_parser
 
 exception Error of string
 
@@ -106,7 +106,7 @@ and string_literal = parse
   | eof { error lexbuf "unterminated string literal" }
   | _ as c { Buffer.add_char string_buffer c; string_literal lexbuf }
 
-(* Block comments nest, as Kotlin's do. *)
+(* Block comments nest. *)
 and comment depth = parse
   | "*/" { if depth > 1 then comment (depth - 1) lexbuf }
   | "/*" { comment (depth + 1) lexbuf }

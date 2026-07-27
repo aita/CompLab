@@ -1,11 +1,12 @@
-(* Helpers shared by the Kotlin-flavoured parser.
+(* Helpers shared by the brace form's parser.
 
-   The Kotlin front end is a second concrete syntax over the same abstract
-   syntax: everything it builds is ordinary Syntax, so the type checker and the
-   whole back end are untouched.  What lives here is the part that does not fit
-   in a grammar action -- turning a run of declarations into the nested `let`s
-   the AST wants, and grouping adjacent functions into one recursive group so
-   that mutual recursion works without a keyword for it. *)
+   The brace form is a second concrete syntax for this language: everything it
+   builds is ordinary Syntax, so the type checker and the whole back end are
+   untouched and cannot tell which form a program was written in.  What lives
+   here is the part that does not fit in a grammar action -- turning a run of
+   declarations into the nested `let`s the abstract syntax wants, and working
+   out which functions are really mutually recursive, since the brace form has
+   no keyword to say so. *)
 
 open Syntax
 

@@ -1,6 +1,6 @@
 %{
 open Syntax
-open Kotlin_build
+open Brace_build
 
 (* Type variables declared by `fun <T> ...` inside an interface.  They are
    rigid, and belong to the one declaration that introduced them. *)
@@ -33,7 +33,7 @@ let applied_type name args =
 
 (* A dotted run of capitalised names is a module path until something says
    otherwise, so both readings come out of one nonterminal and the action
-   decides.  See the same trick in the ML parser. *)
+   decides.  See the same trick in the ML form's parser. *)
 let is_path e =
   match strip e with
   | Constr (name, []) -> Some (String.split_on_char '.' name)
@@ -99,7 +99,7 @@ let call fn args =
 %%
 
 program:
-  | declarations EOF { Kotlin_build.program $1 }
+  | declarations EOF { Brace_build.program $1 }
 
 
 declarations:
@@ -313,8 +313,8 @@ pattern:
   | LPAREN patterns RPAREN { match $2 with [ p ] -> p | ps -> Ptuple ps }
   | IS NIL { Pnil }
   | IS CONS LPAREN pattern COMMA pattern RPAREN { Pcons ($4, $6) }
-  | IS path { Pconstr (Kotlin_build.dotted $2, []) }
-  | IS path LPAREN patterns RPAREN { Pconstr (Kotlin_build.dotted $2, $4) }
+  | IS path { Pconstr (Brace_build.dotted $2, []) }
+  | IS path LPAREN patterns RPAREN { Pconstr (Brace_build.dotted $2, $4) }
 
 patterns:
   | pattern { [ $1 ] }

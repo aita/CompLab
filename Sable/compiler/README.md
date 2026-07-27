@@ -35,12 +35,14 @@ Two longer write-ups, in Japanese:
 - [doc/regalloc.md](doc/regalloc.md) — レジスタ割り付けの詳説。干渉グラフの実例、
   合体・スピル・callee-saved の扱い
 
-## Two syntaxes
+## Two forms
 
-The same language has two concrete syntaxes. `.sbl` is ML; `.skt` is
-Kotlin-flavoured. The compiler picks by extension, and the two parsers build the
-same abstract syntax — the type checker, the optimizer and the back end never
-learn which one was used, and the generated code is identical.
+One language, written two ways. The **ML form** (`.sbl`) is what the rest of
+this file uses; the **brace form** (`.sbb`) delimits blocks with braces and
+separates statements with `;`. The compiler picks by extension, and the two
+parsers build the same abstract syntax — the type checker, the optimizer and the
+back end never learn which form a program was written in, and the generated code
+is identical.
 
 ```
 let rec length l =                    fun length(l): Int = when (l) {
@@ -50,9 +52,8 @@ let rec length l =                    fun length(l): Int = when (l) {
 in
 ```
 
-See [`examples/tour.skt`](examples/tour.skt) for the whole surface, and
-"[The Kotlin-flavoured syntax](#the-kotlin-flavoured-syntax)" below for the
-correspondence.
+See [`examples/tour.sbb`](examples/tour.sbb) for the whole surface, and
+"[The brace form](#the-brace-form)" below for the correspondence.
 
 ## The language
 
@@ -118,9 +119,11 @@ Warning: this match case is unused: Blue
 A non-exhaustive match that actually falls through aborts the program rather
 than continuing with a wrong answer.
 
-## The Kotlin-flavoured syntax
+## The brace form
 
-| | ML (`.sbl`) | Kotlin-flavoured (`.skt`) |
+Every construct of the language, in both forms.
+
+| | ML form (`.sbl`) | brace form (`.sbb`) |
 |---|---|---|
 | value | `let x = e in ...` | `val x = e` |
 | function | `let rec f a b = e in ...` | `fun f(a, b) = e` or `fun f(a, b) { ... }` |
@@ -144,25 +147,34 @@ than continuing with a wrong answer.
 | open | `open M in ...` | `import M` |
 | entry point | the program is one expression | `fun main() { ... }` |
 
-Two deliberate deviations from Kotlin. Statements inside a block are separated
-by `;`, because the lexer is not newline-sensitive and Kotlin's rule for where
-a statement ends needs that. And an anonymous function is `fun(x) = e` — which
-Kotlin does have — rather than `{ x -> e }`, which cannot be told from a block
-with one token of lookahead.
+Three things about the brace form are worth saying outright, since each is a
+decision rather than an accident.
 
-One thing the Kotlin side does that the ML side leaves to the programmer: a run
-of adjacent `fun` declarations is split into the strongly connected components
-of its call graph before becoming recursive groups. Kotlin has no `and`, so
-functions written next to each other have to see one another; but putting them
-all in one group would make them monomorphic in each other, and a `length` used
-at two element types would stop working. The dependency analysis gives both.
+**Statements are separated by `;`.** The lexer is not newline-sensitive, and
+without a separator the parser cannot tell where `val x = f` ends and `(a)`
+begins.
+
+**An anonymous function is `fun(x) = e`, not a braced form.** `{ x -> e }` and
+`{ stmt; e }` cannot be told apart from the token that opens them, so the brace
+form spells a function the same way whether or not it has a name.
+
+**Adjacent `fun` declarations see one another**, so mutual recursion needs no
+keyword — but they are not all put in one recursive group. A run of them is
+split into the strongly connected components of its call graph first: putting
+them in one group would make them monomorphic in each other, and a `length`
+used at two element types would stop working. The dependency analysis gives
+mutual recursion and polymorphism both. The ML form leaves the same decision to
+the programmer, who writes `and` for exactly the functions that need it.
+
+`+` is integer addition and nothing else — there is no overloading — so joining
+two strings is `a.plus(b)` rather than an operator.
 
 ## The pipeline
 
 | pass | file | what it does |
 |---|---|---|
 | lexing, parsing | `lexer.mll`, `parser.mly` | ocamllex and menhir |
-| — the other syntax | `kotlin_lexer.mll`, `kotlin_parser.mly`, `kotlin_build.ml` | the same abstract syntax from Kotlin-flavoured source |
+| — the brace form | `brace_lexer.mll`, `brace_parser.mly`, `brace_build.ml` | the same abstract syntax, from the other form |
 | name resolution | `modules.ml` | modules, functors and type declarations into path-carrying names |
 | type inference | `typing.ml` | let-polymorphism, generalized by levels |
 | match checking | `match_check.ml` | usefulness: exhaustiveness and redundancy |

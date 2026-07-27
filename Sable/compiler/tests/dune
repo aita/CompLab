@@ -157,18 +157,18 @@
  (action
   (diff functors.expected functors.out)))
 
-; The same language through the Kotlin-flavoured syntax.
+; The same language written in the brace form.
 
 (rule
  (with-stdout-to
-  kotlin.out
+  brace.out
   (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
-    %{dep:../runtime/sable_runtime.c} %{dep:../examples/tour.skt})))
+    %{dep:../runtime/sable_runtime.c} %{dep:../examples/tour.sbb})))
 
 (rule
  (alias runtest)
  (action
-  (diff kotlin.expected kotlin.out)))
+  (diff brace.expected brace.out)))
 
 (rule
  (with-stdout-to

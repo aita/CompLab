@@ -1,14 +1,13 @@
-// A tour of the Kotlin-flavoured syntax.
+// A tour of the brace form.
 //
 // This is the same language as the .sbl examples -- same type checker, same
-// back end, same generated code.  Only the concrete syntax differs: the parser
-// in kotlin_parser.mly builds exactly the abstract syntax the ML parser builds.
+// back end, same generated code.  Only the way it is written differs:
+// brace_parser.mly builds exactly the abstract syntax the ML form's parser
+// builds, and nothing after the parser can tell them apart.
 //
-// Two places where it is Kotlin-flavoured rather than Kotlin.  Statements
-// inside a block are separated by `;`, because the lexer is not newline
-// sensitive.  And an anonymous function is `fun(x) = e`, which Kotlin does
-// have, rather than `{ x -> e }`, which cannot be told from a block with one
-// token of lookahead.
+// Braces delimit blocks, and statements inside a block are separated by `;`.
+// An anonymous function is `fun(x) = e` rather than a braced form, so that a
+// function and a block can be told apart on the token that opens them.
 
 sealed class Shape {
     object Dot
@@ -132,8 +131,8 @@ fun main() {
     print_string(classify(7));
     print_newline();
 
-    // Strings: length, indexing, concatenation and equality, spelled as
-    // Kotlin spells them.
+    // Strings.  `+` is integer addition and nothing else, so joining two
+    // strings is a method rather than an operator.
     val greeting = "hello";
     print_string(greeting.plus(", world"));
     space();

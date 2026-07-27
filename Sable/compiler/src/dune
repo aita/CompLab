@@ -3,13 +3,13 @@
  (flags
   (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
 
-(ocamllex lexer kotlin_lexer)
+(ocamllex lexer brace_lexer)
 
 (menhir
  (modules parser)
  (flags --explain))
 
-; A second concrete syntax over the same abstract syntax; see kotlin_parser.mly.
+; The brace form: a second concrete syntax for the same language.
 (menhir
- (modules kotlin_parser)
+ (modules brace_parser)
  (flags --explain))

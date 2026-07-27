@@ -31,13 +31,13 @@ let parse_file path =
     (fun () ->
       let lexbuf = Lexing.from_channel channel in
       lexbuf.lex_curr_p <- { lexbuf.lex_curr_p with pos_fname = path };
-      (* Two concrete syntaxes over one abstract syntax; the extension picks. *)
-      let kotlin = Filename.check_suffix path ".skt" in
+      (* Two forms of one language; the extension says which. *)
+      let brace_form = Filename.check_suffix path ".sbb" in
       try
-        if kotlin then Kotlin_parser.program Kotlin_lexer.token lexbuf
+        if brace_form then Brace_parser.program Brace_lexer.token lexbuf
         else Parser.program Lexer.token lexbuf
       with
-      | Parser.Error | Kotlin_parser.Error ->
+      | Parser.Error | Brace_parser.Error ->
         let p = Lexing.lexeme_start_p lexbuf in
         failwith
           (Printf.sprintf "%s:%d:%d: syntax error at `%s'" p.pos_fname p.pos_lnum
@@ -75,7 +75,7 @@ let () =
   match !inputs with
   | [ path ] -> (
     try compile path with
-    | Lexer.Error msg | Kotlin_lexer.Error msg | Failure msg ->
+    | Lexer.Error msg | Brace_lexer.Error msg | Failure msg ->
       Printf.eprintf "%s\n" msg;
       exit 1
     | Typing.Error msg ->
