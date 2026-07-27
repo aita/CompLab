@@ -144,6 +144,13 @@ RISC-V の標準規約に1つ足しただけです。
 コンパイラがポインタの在処を記述する必要があり、それはこのコンパイラが取り組んでいる
 主題とは別のプロジェクトです。
 
+## 参考文献
+
+- [RISC-V ABIs Specification][psabi]（riscv-non-isa）。引数は `a0`–`a7`、`s0`–`s11` は
+  呼ばれた側が保存、スタックは16バイト境界。§3 で足した1本を除いて、このとおりです。
+
+[psabi]: https://riscv-non-isa.github.io/riscv-elf-psabi-doc/
+
 ## 実装の地図
 
 | | |
@@ -154,4 +161,4 @@ RISC-V の標準規約に1つ足しただけです。
 
 ---
 
-隣の文書：[パイプライン全体](pipeline.md)、[レジスタ割り付け](regalloc.md)。
+[← 8. レジスタ割り付け](regalloc.md) ／ [目次](index.md)

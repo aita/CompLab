@@ -29,12 +29,13 @@ sablec [options] <file.sbl>
 registers and with 10, and the two runs must agree — which is how the spiller
 gets tested.
 
-Write-ups, in Japanese. [doc/pipeline.md](doc/pipeline.md) walks one program
-through everything and links out; the rest take a pass each.
+Write-ups, in Japanese, one chapter per pass, with a table of contents at
+[doc/index.md](doc/index.md). Every dump, warning and measurement in them is
+output that was actually produced.
 
 | | |
 |---|---|
-| [doc/pipeline.md](doc/pipeline.md) | 案内と、1本のプログラムを端から端まで |
+| [doc/pipeline.md](doc/pipeline.md) | 1本のプログラムを端から端まで |
 | [doc/syntax.md](doc/syntax.md) | 構文解析。1つの言語、2つの書き方 |
 | [doc/modules.md](doc/modules.md) | モジュールとファンクタを名前解決だけで済ませる |
 | [doc/typing.md](doc/typing.md) | 型推論。単一化、レベル方式の一般化、値制限、rigid な型変数 |
@@ -207,7 +208,7 @@ around a condition, commas where it has spaces.
 
 `bitset.ml` holds the sets the allocator lives on -- the worklists and the
 interference itself, a bit per pair. It is the one data-structure choice that
-shows up in the wall clock: see [the write-up](doc/regalloc.md), section 12.
+shows up in the wall clock: see [the write-up](doc/regalloc.md), section 11.
 
 The last five rows sit on `riscv.ml`, which holds the instruction and
 control-flow types, the register file and the calling convention. It is

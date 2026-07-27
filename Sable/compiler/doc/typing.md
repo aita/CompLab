@@ -424,4 +424,4 @@ text 7
 
 ---
 
-隣の文書：[パイプライン全体](pipeline.md)、[名前解決](modules.md)、[パターンマッチ](matching.md)。
+[← 2. 名前解決](modules.md) ／ [目次](index.md) ／ [4. パターンマッチ →](matching.md)

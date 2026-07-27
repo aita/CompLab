@@ -1,43 +1,16 @@
 # プログラムが機械語になるまで
 
-1本のプログラムが全パスを通り抜けるまでを、実際の出力で追います。各パスの中身はそれぞれの
-文書にあり、ここはその案内と、1つの例を端から端まで通したものです。
-
-```sh
-./sable -S doc/sum.sbl                          # 最終アセンブリ
-sablec --dump-anf     -o /dev/null doc/sum.sbl
-sablec --dump-closure -o /dev/null doc/sum.sbl
-sablec --dump-riscv   -o /dev/null doc/sum.sbl
-sablec --dump-regalloc -o /dev/null doc/sum.sbl
-```
-
-図は `doc/figures/` の `.dot` から起こしたもので、編集したら `doc/figures/render.sh` で
-描き直します。
+1本のプログラムが全パスを通り抜けるまでを、各パス1段落ずつで追います。ここで全体の形を
+つかんでから、1章以降でパスごとの中身に入ります（[目次](index.md)）。
 
 ![パス一覧](./figures/pipeline.png)
 
 **`Syntax` より下は、そのプログラムがどちらの形で書かれたかを知りません。** 2つの構文が
 1つの抽象構文に合流するのがこの図のいちばんの要点です。
 
-## パスごとの詳説
+## 題材
 
-| | | |
-|---|---|---|
-| 1 | [構文解析](syntax.md) | `lexer.mll`・`parser.mly`・`brace_*` — 1つの言語、2つの書き方 |
-| 2 | [名前解決](modules.md) | `modules.ml` — モジュールとファンクタを消す |
-| 3 | [型推論](typing.md) | `typing.ml`・`types.ml` — 単一化とレベル |
-| 4 | [パターンマッチ](matching.md) | `match_check.ml`・`match_compile.ml` — 検査と決定木 |
-| 5 | [A正規化とその後](anf.md) | `anf.ml`・`alpha.ml`・`optim.ml` |
-| 6 | [クロージャ変換](closure.md) | `closure.ml` — 関数をトップレベルへ |
-| 7 | [命令選択と制御フロー](selection.md) | `selection.ml`・`cfg.ml`・`liveness.ml` |
-| 8 | [レジスタ割り付け](regalloc.md) | `regalloc.ml`・`bitset.ml` — グラフ彩色 |
-| 9 | [のぞき穴最適化と出力](emit.md) | `peephole.ml`・`emit.ml`、呼び出し規約、実行時表現 |
-
----
-
-## 1本のプログラムで
-
-題材はリストの総和です。データ型、パターンマッチ、再帰呼び出し、ヒープ確保という、
+リストの総和です。データ型、パターンマッチ、再帰呼び出し、ヒープ確保という、
 このコンパイラの主な機構がひととおり入る最小の例です。
 
 ```
@@ -162,3 +135,7 @@ sable_sum_18:
 
 [mincaml]: https://doi.org/10.1145/1085114.1085122
 [mincaml-pdf]: https://esumii.github.io/min-caml/paper.pdf
+
+---
+
+[目次](index.md) ／ [1. 構文解析 →](syntax.md)

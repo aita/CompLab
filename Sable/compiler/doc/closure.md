@@ -131,6 +131,15 @@ sable_odd_15 (k.20) capturing (even.14) = ...
 - **捕獲する値を絞っていません。** 本体の自由変数をそのまま全部持ちます。使われ方によっては
   もっと減らせます。
 
+## 参考文献
+
+- E. Sumii, [*MinCaml: a simple and efficient compiler for a minimal functional
+  language*][mincaml], FDPE 2005（[PDF][mincaml-pdf]）。既知関数の楽観的な判定は
+  これに倣っています。
+
+[mincaml]: https://doi.org/10.1145/1085114.1085122
+[mincaml-pdf]: https://esumii.github.io/min-caml/paper.pdf
+
 ## 実装の地図
 
 | | |
@@ -141,15 +150,6 @@ sable_odd_15 (k.20) capturing (even.14) = ...
 | 90–116行 | `convert_exp` — `App` が `Call_direct` か `Call_closure` かを決めるところ |
 | 118–200行 | `convert_group` — 楽観的な不動点 |
 
-## 参考文献
-
-- E. Sumii, [*MinCaml: a simple and efficient compiler for a minimal functional
-  language*][mincaml], FDPE 2005（[PDF][mincaml-pdf]）。既知関数の楽観的な判定は
-  これに倣っています。
-
-[mincaml]: https://doi.org/10.1145/1085114.1085122
-[mincaml-pdf]: https://esumii.github.io/min-caml/paper.pdf
-
 ---
 
-隣の文書：[パイプライン全体](pipeline.md)、[A正規化](anf.md)、[命令選択](selection.md)。
+[← 5. A正規化とその後](anf.md) ／ [目次](index.md) ／ [7. 命令選択と制御フロー →](selection.md)

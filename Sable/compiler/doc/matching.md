@@ -424,4 +424,4 @@ $ echo $?
 
 ---
 
-隣の文書：[パイプライン全体](pipeline.md)、[型推論](typing.md)、[A正規化](anf.md)。
+[← 3. 型推論](typing.md) ／ [目次](index.md) ／ [5. A正規化とその後 →](anf.md)

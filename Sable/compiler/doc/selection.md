@@ -144,6 +144,12 @@ $ sablec --check-cfg -o /dev/null examples/queens.sbl
 呼び出し元の値がそれらに戻っていなければならない地点だからです。これを言っておくことが、
 復帰の `mv` を生かし、呼び出しをまたぐ値に正しい干渉を与えます。
 
+## 参考文献
+
+制御フローグラフ上のデータフロー解析は、[8章の参考文献](regalloc.md#参考文献)に挙げた
+Appel の *Modern Compiler Implementation* が10章で扱っています。生存解析の定式化も
+そこと同じです。命令選択のほうは構文木を辿るだけなので、特に拠っているものはありません。
+
 ## 実装の地図
 
 | | |
@@ -156,4 +162,4 @@ $ sablec --check-cfg -o /dev/null examples/queens.sbl
 
 ---
 
-隣の文書：[パイプライン全体](pipeline.md)、[クロージャ変換](closure.md)、[レジスタ割り付け](regalloc.md)。
+[← 6. クロージャ変換](closure.md) ／ [目次](index.md) ／ [8. レジスタ割り付け →](regalloc.md)
