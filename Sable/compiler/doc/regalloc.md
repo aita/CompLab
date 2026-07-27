@@ -6,7 +6,7 @@
 
 理論は [Chaitin][chaitin] と [Briggs ら][briggs]、実装の形は
 [George と Appel の反復合体][iterated]（iterated register coalescing）、およびそれを
-教科書の形にした Appel の *Modern Compiler Implementation* 11章に従っています。
+教科書の形にした [Appel の *Modern Compiler Implementation*][appel] 11章に従っています。
 
 以下、題材は[パイプライン解説](pipeline.md)と同じ `doc/sum.sbl` です。
 
@@ -308,14 +308,16 @@ sable_main:       1 round(s), 26/26 moves coalesced, 0 spill slot(s)
 - L. George, A. W. Appel, [*Iterated register coalescing*][iterated],
   ACM TOPLAS 18(3), 1996. **この実装が従っているアルゴリズム。** George の判定と、
   simplify・合体・freeze を交互に回す形。
-- A. W. Appel, *Modern Compiler Implementation in ML*, Cambridge University
-  Press, 1998, 11章. 上の論文を擬似コードに落としたもので、`regalloc.ml` の
-  worklist の構成はこれに対応します（読まれない集合を落とした点は本文のとおり）。
+- A. W. Appel, [*Modern Compiler Implementation in ML*][appel], Cambridge
+  University Press, 1998, 11章. 上の論文を擬似コードに落としたもので、
+  **`regalloc.ml` の worklist の構成はこれに直接対応します**（読まれない集合を
+  落とした点は本文のとおり）。リンク先は著者自身のページで、目次・正誤表があります。
 
 [kempe]: https://archive.org/details/jstor-2369235
 [chaitin]: https://dl.acm.org/doi/10.1145/872726.806984
 [briggs]: https://doi.org/10.1145/177492.177575
 [iterated]: https://doi.org/10.1145/229542.229546
+[appel]: https://www.cs.princeton.edu/~appel/modern/ml/index.html
 
 ## 実装の地図
 
