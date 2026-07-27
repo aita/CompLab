@@ -1,16 +1,15 @@
-// One state of the worked example in doc/regalloc.md, section 4.  K is 3.
+// One state of the worked example in doc/regalloc.md section 7.  K is 3.
 // The graph, the degrees and the order of the steps all come from
 // tests/walkthrough.exe; nothing here was worked out by hand.
 //
-// The wt-*.dot files share the style block and the pinned positions
-// below; keep them in step, or a node will jump between panels.
+// The wt-*.dot files share the style block and the pinned positions below;
+// keep them in step, or a node will jump from one panel to the next.
 // Render with ./render.sh (needs graphviz).
 graph wt {
   layout = neato;
   overlap = false;
   splines = true;
   bgcolor = "transparent";
-  sep = "+8";
   node [shape = circle, style = filled, fillcolor = "#f6f8fa",
         color = "#57606a", fontcolor = "#1f2328",
         fontname = "Helvetica", fontsize = 11, width = 0.62, fixedsize = true];
@@ -20,8 +19,8 @@ graph wt {
   v2 [label = <v2<BR/><FONT POINT-SIZE="8" COLOR="#57606a">a1</FONT>>, fillcolor = "#fff8c5", color = "#9a6700" pos = "0,-2.15!"];
   v3 [label = <v3<BR/><FONT POINT-SIZE="8" COLOR="#57606a">a0</FONT>>, fillcolor = "#dafbe1", color = "#1a7f37" pos = "0,-0.85!"];
   v5 [label = <v5<BR/><FONT POINT-SIZE="8" COLOR="#57606a">a0</FONT>>, fillcolor = "#dafbe1", color = "#1a7f37" pos = "0.1,1.9!"];
-  v6 [label = <v6<BR/><FONT POINT-SIZE="8" COLOR="#57606a">a0</FONT>>, fillcolor = "#dafbe1", color = "#1a7f37" pos = "3.05,0.25!"];
   v7 [label = <v7<BR/><FONT POINT-SIZE="8" COLOR="#57606a">a1</FONT>>, fillcolor = "#fff8c5", color = "#9a6700" pos = "2.6,1.55!"];
+  v6 [label = <v6<BR/><FONT POINT-SIZE="8" COLOR="#57606a">a0</FONT>>, fillcolor = "#dafbe1", color = "#1a7f37" pos = "3.05,0.25!"];
   v0 -- v1 [color = "#57606a"];
   v0 -- v2 [color = "#57606a"];
   v0 -- v3 [color = "#57606a"];
