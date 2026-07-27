@@ -28,6 +28,14 @@ let constr_args name args =
   | Some c, [ Tuple es ] when List.length c.Datatype.arg_types = List.length es -> es
   | _ -> args
 
+(* `M`, `M.N`: a dotted run of capitalised names.  Keeping the constructor case
+   and the module-path case behind one nonterminal is what stops the parser
+   having to choose between them the moment it sees a dot. *)
+let value_of_path path =
+  match path with
+  | [ name ] -> Constr (name, [])
+  | _ -> failwith (Printf.sprintf "`%s` is a module, not a value" (String.concat "." path))
+
 let constr_pattern_args name args =
   match (Datatype.find_constr name, args) with
   | Some c, Ptuple ps when List.length c.Datatype.arg_types = List.length ps -> ps
@@ -46,6 +54,7 @@ let constr_pattern_args name args =
 %token AMPAMP BARBAR
 %token LPAREN RPAREN COMMA SEMICOLON DOT LESS_MINUS ARROW
 %token LBRACKET RBRACKET COLONCOLON CARET STRING_LENGTH
+%token BEGIN END MODULE STRUCT OPEN
 %token EOF
 
 %right prec_let prec_match
@@ -114,12 +123,14 @@ type_expr:
 
 simple_exp:
   | LPAREN exp RPAREN { $2 }
+  | BEGIN exp END { $2 }
+  | long_name DOT IDENT { Qualified ($1, $3) }
   | LPAREN RPAREN { Unit }
   | BOOL { Bool $1 }
   | INT { Int $1 }
   | STRING { Str $1 }
   | IDENT { Var $1 }
-  | UIDENT { Constr ($1, []) }
+  | long_name { value_of_path $1 }
   | LBRACKET RBRACKET { Nil }
   | LBRACKET list_body RBRACKET { List.fold_right (fun e rest -> Cons (e, rest)) $2 Nil }
   | simple_exp DOT LPAREN exp RPAREN { Get ($1, $4) }
@@ -152,6 +163,9 @@ exp:
   | FUN formal_args ARROW exp %prec prec_let { lambda $2 $4 }
   | LET IDENT EQUAL exp IN exp %prec prec_let { Let (typed $2, $4, $6) }
   | LET REC fundefs IN exp %prec prec_let { Let_rec ($3, $5) }
+  | MODULE UIDENT EQUAL STRUCT items END IN exp %prec prec_let
+      { Module ($2, $5, $8) }
+  | OPEN long_name IN exp %prec prec_let { Open ($2, $4) }
   | LET LPAREN tuple_pat RPAREN EQUAL exp IN exp %prec prec_let
       { Let_tuple ($3, $6, $8) }
   | exp actual_args %prec prec_app
@@ -171,6 +185,21 @@ exp:
 list_body:
   | exp %prec prec_list { [ $1 ] }
   | list_body SEMICOLON exp %prec prec_list { $1 @ [ $3 ] }
+
+long_name:
+  | UIDENT { [ $1 ] }
+  | long_name DOT UIDENT { $1 @ [ $3 ] }
+
+items:
+  | (* empty *) { [] }
+  | item items { $1 :: $2 }
+
+item:
+  | LET IDENT EQUAL exp { Item_let (typed $2, $4) }
+  | LET LPAREN tuple_pat RPAREN EQUAL exp { Item_let_tuple ($3, $6) }
+  | LET REC fundefs { Item_let_rec $3 }
+  | MODULE UIDENT EQUAL STRUCT items END { Item_module ($2, $5) }
+  | OPEN long_name { Item_open $2 }
 
 fundefs:
   | fundef { [ $1 ] }

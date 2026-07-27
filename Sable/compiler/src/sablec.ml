@@ -42,6 +42,7 @@ let parse_file path =
 let compile path =
   Riscv.configure !register_budget;
   let ast = parse_file path in
+  let ast = Modules.resolve ast in
   let ast = Typing.check ast in
   let ast = Match_compile.compile ast in
   let normalized = Alpha.rename (Anf.normalize ast) in
@@ -76,6 +77,9 @@ let () =
       Printf.eprintf "%s\n" msg;
       exit 1
     | Datatype.Error msg ->
+      Printf.eprintf "%s\n" msg;
+      exit 1
+    | Modules.Error msg ->
       Printf.eprintf "%s\n" msg;
       exit 1
     | Closure.Error msg ->

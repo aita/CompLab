@@ -1,0 +1,76 @@
+(* Modules.
+
+   A module is a naming discipline and nothing else: `Modules` renames each
+   definition inside a `struct` to a name carrying its path and rewrites the
+   whole thing into ordinary nested `let`s.  By the time the type checker sees
+   the program there are no modules left, which is why a function defined in a
+   module is polymorphic exactly as it would be anywhere else. *)
+
+module List = struct
+  let empty = []
+
+  let rec length l = match l with [] -> 0 | _ :: rest -> 1 + length rest
+
+  let rec map f l = match l with [] -> [] | x :: rest -> f x :: map f rest
+
+  let rec filter keep l =
+    match l with
+    | [] -> []
+    | x :: rest -> if keep x then x :: filter keep rest else filter keep rest
+
+  let rec fold f acc l = match l with [] -> acc | x :: rest -> fold f (f acc x) rest
+
+  let rec rev l =
+    let rec go acc l = match l with [] -> acc | x :: rest -> go (x :: acc) rest in
+    go [] l
+
+  let rec range lo hi = if lo > hi then [] else lo :: range (lo + 1) hi
+end in
+
+module Text = struct
+  let rec is_space c = c = 32
+
+  let rec count_spaces s =
+    let rec go i n =
+      if i >= String.length s then n
+      else go (i + 1) (if is_space s.[i] then n + 1 else n)
+    in
+    go 0 0
+
+  (* Nested, and it may use the enclosing module's earlier definitions. *)
+  module Show = struct
+    let separator = ", "
+
+    let rec join pieces =
+      match pieces with
+      | [] -> ""
+      | s :: [] -> s
+      | s :: rest -> s ^ separator ^ join rest
+  end
+end in
+
+let numbers = List.range 1 6 in
+print_int (List.length numbers); print_char 32;
+print_int (List.fold (fun a x -> a + x) 0 numbers); print_char 32;
+print_int (List.length (List.filter (fun x -> x mod 2 = 0) numbers)); print_char 32;
+print_int (List.length List.empty);
+print_newline ();
+
+(* The same `List.length` at three element types. *)
+print_int (List.length [ "a"; "b"; "c" ]); print_char 32;
+print_int (List.length (List.map (fun x -> x > 3) numbers)); print_char 32;
+print_int (List.length [ (1, 2) ]);
+print_newline ();
+
+print_string (Text.Show.join [ "alpha"; "beta"; "gamma" ]); print_newline ();
+print_int (Text.count_spaces "one two three"); print_char 32;
+print_int (String.length Text.Show.separator);
+print_newline ();
+
+(* `open` brings a module's members into scope under their short names, and a
+   local binding still shadows them. *)
+open List in
+print_int (length (rev [ 1; 2; 3; 4 ])); print_char 32;
+let length = 99 in
+print_int length;
+print_newline ()

@@ -63,6 +63,7 @@ walk (insert (insert Leaf 2) 1); print_newline ()
 |---|---|
 | types | `int`, `bool`, `unit`, `string`, `'a list`, tuples, arrays, functions, `type t = A \| B of int * t` |
 | binding | `let`, `let rec ... and ...`, `let (a, b) = e`, `fun x y -> e` |
+| modules | `module M = struct ... end in e`, nested, `M.x`, `M.N.x`, `open M in e` |
 | control | `if`/`then`/`else` (the `else` may be left out when the branch is `unit`), `e1; e2`, `begin`/`end` |
 | matching | `match e with p -> e \| ...`, over literals, wildcards, variables, tuples, lists and constructors, nested |
 | operators | `+ - * / mod`, `= <> < <= > >=`, `&& \|\| not`, unary `-`, `::`, `^` |
@@ -101,7 +102,8 @@ than continuing with a wrong answer.
 | pass | file | what it does |
 |---|---|---|
 | lexing, parsing | `lexer.mll`, `parser.mly` | ocamllex and menhir |
-| type inference | `typing.ml` | destructive unification, occurs check |
+| name resolution | `modules.ml` | modules into path-carrying names and nested `let`s |
+| type inference | `typing.ml` | let-polymorphism, generalized by levels |
 | match checking | `match_check.ml` | usefulness: exhaustiveness and redundancy |
 | match compilation | `match_compile.ml` | `match` into a decision tree |
 | A-normalization (ANF) | `anf.ml` | name every intermediate result |
@@ -288,6 +290,15 @@ the same.
 Deliberate, and each one is a place the project could go next.
 
 - No garbage collector; the heap is a bump allocator.
+- Modules are namespaces: there are no signatures and no functors, so nothing
+  can be hidden or abstracted. Sealing a structure would need the inferred
+  scheme checked against a declared one with the signature's variables held
+  rigid, which is a real piece of work and is not here.
+- `type` declarations are global and come before the program, so a module cannot
+  declare one; its constructors would be global anyway.
+- `String.length`, `String.concat`, `String.equal` and `Array.make` are
+  recognized by the lexer as whole tokens, so a user module named `String` or
+  `Array` cannot override those particular spellings.
 - No polymorphic comparison: `=` works on `int`, `bool` and `unit` only.
 - Strings are immutable and there is no `String.sub` or `String.make`; the
   runtime offers length, indexing, concatenation and equality.

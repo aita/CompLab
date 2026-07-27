@@ -30,10 +30,22 @@ type t =
   | Str_get of t * t (* s.[i], the byte as an integer *)
   | Nil
   | Cons of t * t
+  | Qualified of string list * Ident.t (* M.x, M.N.x -- resolved away by Modules *)
+  | Module of string * item list * t (* module M = struct .. end in e *)
+  | Open of string list * t (* open M in e *)
   | Constr of string * t list (* a fully applied constructor *)
   | Match of match_info * t * case list
   | Field of t * int * Types.t (* generated: word i of a block *)
   | Match_failure of Types.t (* generated: no case applied *)
+
+(* The contents of a `struct`.  Modules are a naming discipline and nothing
+   else, so these become ordinary nested `let`s; see Modules. *)
+and item =
+  | Item_let of (Ident.t * Types.t) * t
+  | Item_let_tuple of (Ident.t * Types.t) list * t
+  | Item_let_rec of fundef list
+  | Item_module of string * item list
+  | Item_open of string list
 
 and case = { pat : pattern; action : t }
 

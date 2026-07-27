@@ -24,9 +24,11 @@ let () =
       ("match", MATCH);
       ("with", WITH);
       ("array", ARRAY_KW);
-      (* `begin`/`end` are only ever grouping, so they can be the brackets. *)
-      ("begin", LPAREN);
-      ("end", RPAREN);
+      ("begin", BEGIN);
+      ("end", END);
+      ("module", MODULE);
+      ("struct", STRUCT);
+      ("open", OPEN);
       ("true", BOOL true);
       ("false", BOOL false);
     ]

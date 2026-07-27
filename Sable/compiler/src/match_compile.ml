@@ -260,6 +260,8 @@ let rec compile exp =
     Cons (head, compile tail)
   | Constr (name, args) -> Constr (name, List.map compile args)
   | Field (e, i, t) -> Field (compile e, i, t)
+  | Qualified _ | Module _ | Open _ ->
+    failwith "Match_compile: modules should have been resolved away by Modules"
   | Match_failure _ -> exp
   | Match (info, scrutinee, cases) ->
     let scrutinee = compile scrutinee in

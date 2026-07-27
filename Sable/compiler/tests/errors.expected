@@ -15,6 +15,10 @@ type error in the tail of `::`:
 the constructor `Pair` expects 2 argument(s) but is given 1
 --- duplicate_pattern_var.sbl
 the variable `x` is bound twice in the pattern `Pair (x, x)`
+--- module_as_value.sbl
+`M.N` is a module, not a value
+--- module_member.sbl
+the module `M` has no value `y`
 --- mutual_capture.sbl
 the mutually recursive functions ping, pong capture the variable(s) n.
 Only a self-recursive function may capture its environment; pass the captured
@@ -37,6 +41,8 @@ type error in a function application:
   but got:  (bool -> 'a)
 --- unbound.sbl
 unbound variable `y`
+--- unbound_module.sbl
+unbound module `Missing`
 --- weak_comparison.sbl
 type error in a function application:
   expected: (int * int list -> bool)

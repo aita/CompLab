@@ -222,6 +222,8 @@ let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
     (Let ((Ident.fresh "fail", Types.Unit), App_external ("match_failure", []), Int 0), t)
   | Syntax.Match _ ->
     failwith "Anf: `match` should have been compiled away by Match_compile"
+  | Syntax.Qualified _ | Syntax.Module _ | Syntax.Open _ ->
+    failwith "Anf: modules should have been resolved away by Modules"
 
 (* Name a whole list of subexpressions, left to right. *)
 and insert_lets env exps k =

@@ -223,6 +223,8 @@ let rec infer_exp env exp =
     Types.assign info.scrutinee_type tscrutinee;
     Types.assign info.result_type tresult;
     tresult
+  | Qualified _ | Module _ | Open _ ->
+    failwith "Typing: modules should have been resolved away by Modules"
   | Field _ | Match_failure _ ->
     failwith "Typing: compiler-generated node reached the type checker"
 
