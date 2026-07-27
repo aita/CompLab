@@ -13,33 +13,42 @@ digraph calleesaved {
   edge [color = "#57606a", fontcolor = "#57606a", fontname = "Helvetica",
         fontsize = 9];
 
-  emitted [label = <<FONT POINT-SIZE="10">selection.ml emits, for each of s0..s11:</FONT><BR ALIGN="LEFT"/><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="11">at entry   mv v<SUB>i</SUB>, s<SUB>i</SUB></FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="11">at ret     mv s<SUB>i</SUB>, v<SUB>i</SUB></FONT><BR ALIGN="LEFT"/>>,
-            fillcolor = "#ffffff"];
+  // A table, so that the two instructions line up: the labels beside them are
+  // Japanese and Latin mixed, which no amount of spacing will align.
+  emitted [shape = plaintext, style = "",
+           label = <<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="4"
+                            COLOR="#57606a" BGCOLOR="#ffffff" STYLE="ROUNDED">
+    <TR><TD COLSPAN="2" ALIGN="LEFT">selection.ml が s0..s11 のそれぞれに出すもの</TD></TR>
+    <TR><TD ALIGN="LEFT">入口</TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="11">mv v<SUB>i</SUB>, s<SUB>i</SUB></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT">ret の直前</TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="11">mv s<SUB>i</SUB>, v<SUB>i</SUB></FONT></TD></TR>
+  </TABLE>>];
   ask [shape = diamond, fillcolor = "#ffffff", margin = "0.02,0.01",
-       label = "does the function want\nthat register for anything?"];
+       label = "その関数はこのレジスタを\n他のことに使う？"];
 
-  no [label = <<B>no</B> — coalesce merges v<SUB>i</SUB> with s<SUB>i</SUB><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="11">mv s<SUB>i</SUB>, s<SUB>i</SUB></FONT>, which apply_colours deletes<BR ALIGN="LEFT"/>>,
+  no [label = <<B>使わない</B> — 融合で v<SUB>i</SUB> と s<SUB>i</SUB> が1つになり<BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="11">mv s<SUB>i</SUB>, s<SUB>i</SUB></FONT> になって apply_colours が消す<BR ALIGN="LEFT"/>>,
        fillcolor = "#ddf4ff", color = "#0969da"];
-  yes [label = <<B>yes</B> — v<SUB>i</SUB> loses the colour and is spilled<BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="11">sd s<SUB>i</SUB>, N(sp)</FONT> at entry, <FONT FACE="Courier" POINT-SIZE="11">ld s<SUB>i</SUB>, N(sp)</FONT> at ret<BR ALIGN="LEFT"/>>,
+  yes [label = <<B>使う</B> — v<SUB>i</SUB> は色を取れずスピルされる<BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="11">sd s<SUB>i</SUB>, N(sp)</FONT> が入口、<FONT FACE="Courier" POINT-SIZE="11">ld s<SUB>i</SUB>, N(sp)</FONT> が ret 直前<BR ALIGN="LEFT"/>>,
         fillcolor = "#fff8c5", color = "#9a6700"];
 
-  none [label = "nothing is emitted.\na leaf function pays nothing",
+  none [label = "何も出ない。\n葉関数は何も払わない",
         fillcolor = "#ffffff", color = "#0969da", penwidth = 2];
-  save [label = "that is the save and restore\nthe ABI asks for, exactly",
+  save [label = "これが ABI の求める\n退避と復元そのもの",
         fillcolor = "#ffffff", color = "#9a6700", penwidth = 2];
 
   emitted -> ask;
-  ask -> no [label = "  no  "];
-  ask -> yes [label = "  yes  "];
+  ask -> no [label = "  使わない  "];
+  ask -> yes [label = "  使う  "];
   no -> none;
   yes -> save;
 
   note [shape = plaintext, style = "", fillcolor = "transparent",
         fontcolor = "#57606a", fontsize = 9,
-        label = "A function that uses 5 of them pays for 5, and the allocator has\l\
-no rule about callee-saved registers anywhere in it.  What decides\l\
-between the two arms is one edge: `ret` reads s0..s11, so the copy\l\
-back is live to the end and the value has to survive.\l"];
+        label = "5本使う関数はちょうど5本ぶん払う。アロケータの中に\l\
+callee-saved を名指しした規則は1行もない。どちらに転ぶかを\l\
+決めているのは辺1本で、`ret` が s0..s11 を読むために書き戻しの\l\
+mv が最後まで生き、値が残らざるをえなくなる。\l"];
   { rank = same; none; save; }
   save -> note [style = dotted, arrowhead = none, color = "#8c959f"];
 }

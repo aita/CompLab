@@ -13,7 +13,7 @@ digraph interference {
   edge [color = "#57606a", fontname = "Helvetica", fontsize = 9];
 
   subgraph cluster_saved {
-    label = "v0 – v11\nthe 12 callee-saved copies,\nlive from entry to every return";
+    label = "v0 – v11\n入口で退避した callee-saved の12本\n入口から全ての ret まで生きている";
     fontname = "Helvetica"; fontsize = 9; fontcolor = "#57606a";
     color = "#8c959f"; style = "rounded,dashed";
     v0 [label = "v0"]; v1 [label = "v1"]; vdots [label = "…", shape = plaintext,
@@ -23,7 +23,7 @@ digraph interference {
   }
 
   subgraph cluster_caller {
-    label = "a0 – a7,  t0 – t4\nthe 13 the call destroys";
+    label = "a0 – a7,  t0 – t4\n呼び出しが壊す13本";
     fontname = "Helvetica"; fontsize = 9; fontcolor = "#57606a";
     color = "#cf222e"; style = "rounded,dashed";
     a0 [label = "a0", fillcolor = "#ffebe9"];
@@ -47,8 +47,8 @@ digraph interference {
 
   legend [shape = plaintext, style = "", fillcolor = "transparent",
           fontcolor = "#57606a", fontsize = 9, width = 0, fixedsize = false,
-          label = "v16 holds x, which is live across the recursive call.\l\
-Its degree is 12 + 3 + 13 = 28, and K is 25,\l\
-so it cannot be simplified.\l"];
+          label = "v16 は x を持ち、再帰呼び出しをまたいで生きている。\l\
+次数は 12 + 3 + 13 = 28 で、K は 25。\l\
+だから simplify できない。\l"];
   v18 -> legend [style = dotted, arrowhead = none, color = "#8c959f"];
 }

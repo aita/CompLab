@@ -11,27 +11,27 @@ digraph levels {
   edge [color = "#57606a", fontcolor = "#57606a",
         fontname = "Helvetica", fontsize = 9];
 
-  start [label = "let rec id x = x in ...\lparsed: the binder carries a slot,\lmade before inference starts, so at level 0\l",
+  start [label = "let rec id x = x in ...\lパース時に束縛子へスロットが付く。\l推論の前なのでレベルは 0\l",
          fillcolor = "#ffffff"];
-  enter [label = "enter_level\lchecking the right-hand side, at level 1"];
-  fresh [label = "'a created here\llevel 1"];
+  enter [label = "enter_level\l右辺を検査中。レベル 1"];
+  fresh [label = "ここで 'a ができる\lレベル 1"];
 
   subgraph cluster_bad {
-    label = "unify the slot with it";
+    label = "スロットと単一化した場合";
     fontname = "Helvetica"; fontsize = 9; fontcolor = "#cf222e";
     color = "#cf222e"; style = "rounded,dashed";
-    lower [label = "a variable at level 0 pulls\lwhat it is linked to down with it\l'a : level 1 → 0", color = "#cf222e"];
-    nothing [label = "generalize at level 0\lquantifies variables deeper than 0\l'a is not deeper — nothing is quantified\l\lid : 'a → 'a  for one 'a only",
+    lower [label = "レベル 0 の変数は、繋いだ先を\l道連れに引き下げる\l'a : レベル 1 → 0", color = "#cf222e"];
+    nothing [label = "レベル 0 で一般化\l0 より深い変数だけを量化する\l'a は深くないので何も量化されない\l\lid : 'a → 'a（'a は1つに固定）",
              fillcolor = "#ffebe9", color = "#cf222e"];
     lower -> nothing;
   }
 
   subgraph cluster_good {
-    label = "assign the slot afterwards";
+    label = "あとからスロットへ書き込む場合";
     fontname = "Helvetica"; fontsize = 9; fontcolor = "#0969da";
     color = "#0969da"; style = "rounded,dashed";
-    keep [label = "the slot is written, not unified\lno level is disturbed\l'a : level 1", color = "#0969da"];
-    quant [label = "generalize at level 0\l'a is deeper than 0, so it is quantified\l\lid : ∀a. a → a",
+    keep [label = "スロットは書き込むだけで単一化しない\lどのレベルも動かない\l'a : レベル 1", color = "#0969da"];
+    quant [label = "レベル 0 で一般化\l'a は 0 より深いので量化される\l\lid : ∀a. a → a",
            fillcolor = "#ddf4ff", color = "#0969da"];
     keep -> quant;
   }

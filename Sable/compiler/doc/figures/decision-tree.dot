@@ -15,17 +15,17 @@ digraph decision {
   { node [shape = diamond, fillcolor = "#ffffff", margin = "0.02,0.01"];
     colour; shapeR; shapeG; shapeB; }
 
-  colour [label = "tag of the colour"];
-  shapeR [label = "tag of the shape"];
-  shapeG [label = "tag of the shape"];
-  shapeB [label = "tag of the shape"];
+  colour [label = "colour のタグ"];
+  shapeR [label = "shape のタグ"];
+  shapeG [label = "shape のタグ"];
+  shapeB [label = "shape のタグ"];
 
   redDot  [label = "-1"];
   redRect [label = "w - h"];
   green   [label = "7"];
   blueDot [label = "-2"];
   blueRect [label = "w + h"];
-  shared  [label = "r * 100\lreached from all three colours,\lso it is a function and these are calls\l",
+  shared  [label = "r * 100\l3色すべてから到達するので\l関数にまとめ、葉は呼び出しになる\l",
            fillcolor = "#ddf4ff", color = "#0969da", penwidth = 2];
 
   colour -> shapeR [label = "  0  Red"];
@@ -45,8 +45,8 @@ digraph decision {
 
   note [shape = plaintext, style = "", fillcolor = "transparent",
         fontcolor = "#57606a", fontsize = 9,
-        label = "Each test reads word 0 of the block and compares it.\l\
-The last arm of a node needs no test, so a node with n arms\l\
-costs n − 1 comparisons, not n.\l"];
+        label = "判定はどれもブロックの0語目を読んで比べるだけ。\l\
+最後の1本は判定が要らないので、枝が n 本の節点の\l\
+比較回数は n ではなく n − 1。\l"];
   shapeB -> note [style = dotted, arrowhead = none, color = "#8c959f"];
 }
