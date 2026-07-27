@@ -22,18 +22,22 @@
 
    Not Int64, which would give the other bit.  `float array` is the only array
    OCaml stores unboxed; an Int64.t is a custom block, so an `int64 array` is a
-   row of pointers to three-word blocks -- and writing to one allocates.
-   Measured here on 5.4.1 without flambda, a million distinct words:
+   row of pointers to three-word blocks -- and writing to one allocates.  The
+   two ways to get 64 real bits are Bytes with get/set_int64_ne and a Bigarray
+   of int64; both keep the storage flat and hand back a boxed Int64 at each
+   access, which flambda would remove and this build does not have.
 
-     int array     8 bytes each    union of two of them   1.2 ms
-     int64 array  32 bytes each                          31.6 ms
-     Bytes         8 bytes each                           2.5 ms
+   Union of two million-word sets, best of seven, 5.4.1 without flambda:
 
-   (`Array.make n 0L` looks like 8 bytes each only because every slot shares
-   the one box; the first write ends that.)  Bytes with get/set_int64_ne ties
-   on memory and gives the 64th bit, but the intermediate Int64 stays boxed
-   without flambda.  The price of the int array is one bit per word, which is
-   1.6% more words. *)
+     int array, 63 bits/word                    1.15 ms     8 bytes/word
+     Bigarray int64, unsafe_get/set              1.51 ms     8, off-heap
+     Bytes, get/set_int64_ne                     2.50 ms     8
+     int64 array                                31.69 ms    32
+
+   (`Array.make n 0L` looks like 8 bytes a word only because every slot shares
+   the one box; the first write ends that.)  Bigarray is the near miss: 1.3x
+   for the 64th bit, a dependency, and unsafe accessors to get even that.  The
+   int array costs one bit per word instead, which is 1.6% more words. *)
 let width = 63
 
 type t = { words : int array; capacity : int }
