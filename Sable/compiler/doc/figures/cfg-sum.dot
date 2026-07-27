@@ -1,0 +1,28 @@
+// The control-flow graph of `sum`, straight out of --dump-riscv.
+// See doc/selection.md.
+// Render with ./render.sh (needs graphviz).
+digraph cfg {
+  rankdir = TB;
+  bgcolor = "transparent";
+  ranksep = 0.34;
+  node [shape = box, style = "rounded,filled", fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 10, margin = "0.16,0.09"];
+  edge [color = "#57606a", fontcolor = "#57606a", fontname = "Helvetica",
+        fontsize = 9];
+
+  entry [label = <<FONT FACE="Courier" POINT-SIZE="10">sable_sum_18:</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  mv v0, s0 … mv v11, s11</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  mv v12, a0</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  ld v13, 0(v12)</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  beq v13, zero</FONT><BR ALIGN="LEFT"/>>];
+  thn [label = <<FONT FACE="Courier" POINT-SIZE="10">.Lthen36:</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  li v15, 0</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  …復帰…</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  ret a0</FONT><BR ALIGN="LEFT"/>>];
+  els [label = <<FONT FACE="Courier" POINT-SIZE="10">.Lelse37:</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  ld v16, 8(v12)</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  ld v17, 16(v12)</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  call sable_sum_18</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  add v19, v16, v18</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  ret a0</FONT><BR ALIGN="LEFT"/>>];
+
+  entry -> thn [label = "  タグ 0（Nil）"];
+  entry -> els [label = "  それ以外"];
+
+  note [shape = plaintext, style = "", fillcolor = "transparent",
+        fontsize = 9, fontcolor = "#57606a",
+        label = "辺が2本、閉路なし。ソース上の再帰は `call` で、\l\
+呼び出しは関数から出ていくので、この中には戻ってこない。\l\
+後ろ向きの生存解析が1パスで済むのはこれのおかげ。\l"];
+  els -> note [style = dotted, arrowhead = none, color = "#8c959f"];
+  { rank = same; thn; els; }
+}

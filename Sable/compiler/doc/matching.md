@@ -426,5 +426,4 @@ $ echo $?
 
 ---
 
-隣の文書：[パイプライン全体](pipeline.md)、[型推論](typing.md)、
-[レジスタ割り付け](regalloc.md)。
+隣の文書：[パイプライン全体](pipeline.md)、[型推論](typing.md)、[A正規化](anf.md)。

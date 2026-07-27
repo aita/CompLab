@@ -424,5 +424,4 @@ text 7
 
 ---
 
-隣の文書：[パイプライン全体](pipeline.md)、[パターンマッチ](matching.md)、
-[レジスタ割り付け](regalloc.md)。
+隣の文書：[パイプライン全体](pipeline.md)、[名前解決](modules.md)、[パターンマッチ](matching.md)。

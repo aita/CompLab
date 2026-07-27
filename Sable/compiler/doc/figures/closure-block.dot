@@ -1,0 +1,56 @@
+// What a closure is on the heap, and why a mutually recursive pair has to be
+// built in two stages.  See doc/closure.md.
+// Render with ./render.sh (needs graphviz).
+digraph closure {
+  rankdir = TB;
+  bgcolor = "transparent";
+  nodesep = 0.40;
+  ranksep = 0.45;
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10,
+        fontcolor = "#1f2328"];
+  edge [color = "#57606a", fontname = "Helvetica", fontsize = 9,
+        fontcolor = "#57606a"];
+
+  t1 [label = "捕獲しない関数"];
+  none [label = <<TABLE BORDER="1" CELLBORDER="0" CELLSPACING="0" CELLPADDING="6"
+                        COLOR="#0969da" BGCOLOR="#ddf4ff" STYLE="ROUNDED">
+    <TR><TD><FONT FACE="Courier" POINT-SIZE="10">call sable_f_3 (x)</FONT></TD></TR>
+    <TR><TD><FONT POINT-SIZE="9">ヒープに何も置かない</FONT></TD></TR>
+  </TABLE>>];
+
+  t2 [label = "捕獲する関数"];
+  one [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6"
+                       COLOR="#57606a">
+    <TR><TD BGCOLOR="#f6f8fa"><FONT FACE="Courier" POINT-SIZE="10">&amp;sable_add_8</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="10">n</FONT></TD></TR>
+    <TR><TD><FONT POINT-SIZE="8" COLOR="#57606a">コードポインタ</FONT></TD>
+        <TD><FONT POINT-SIZE="8" COLOR="#57606a">捕獲した値</FONT></TD></TR>
+  </TABLE>>];
+
+  t3 [label = "相互再帰は互いを捕獲する"];
+  even [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6"
+                        COLOR="#9a6700">
+    <TR><TD BGCOLOR="#fff8c5"><FONT FACE="Courier" POINT-SIZE="10">&amp;sable_even_14</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="10">n</FONT></TD>
+        <TD PORT="odd"><FONT FACE="Courier" POINT-SIZE="10">odd</FONT></TD></TR>
+  </TABLE>>];
+  odd [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6"
+                       COLOR="#9a6700">
+    <TR><TD BGCOLOR="#fff8c5"><FONT FACE="Courier" POINT-SIZE="10">&amp;sable_odd_15</FONT></TD>
+        <TD PORT="even"><FONT FACE="Courier" POINT-SIZE="10">even</FONT></TD></TR>
+  </TABLE>>];
+
+  t1 -> none [style = invis];
+  t2 -> one [style = invis];
+  t3 -> even [style = invis];
+  even:odd -> odd [color = "#9a6700"];
+  odd:even -> even [color = "#9a6700", constraint = false];
+
+  note [shape = plaintext, fontsize = 9, fontcolor = "#57606a",
+        label = "互いを指すので、1つずつ作って中身を書き込む順では作れない。\l\
+Make_closures は組をまとめて受け取り、先に全部のブロックを確保して\l\
+名前を束縛してから、中身を書き込む。\l"];
+  odd -> note [style = dotted, arrowhead = none, color = "#8c959f"];
+  { rank = same; t1; t2; t3; }
+  { rank = same; none; one; even; }
+}

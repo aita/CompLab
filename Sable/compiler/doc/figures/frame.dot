@@ -1,0 +1,22 @@
+// The stack frame emit.ml lays out.  See doc/emit.md.
+// Render with ./render.sh (needs graphviz).
+digraph frame {
+  rankdir = TB;
+  bgcolor = "transparent";
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10];
+  f [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="7"
+                     COLOR="#57606a">
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="10">sp + F-8</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#fff8c5">退避した戻り番地 <FONT FACE="Courier" POINT-SIZE="10">ra</FONT>
+            <FONT POINT-SIZE="8">— 何かを呼ぶ関数だけ</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="10">…</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ffebe9">スピルスロット <FONT POINT-SIZE="8">— 1つにつき8バイト</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="10">sp + 8</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ffebe9">スピルスロット</TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="10">sp + 0</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ffebe9">スピルスロット</TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="10">sp</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="9" COLOR="#57606a">ABI 通り16バイト境界。フレームポインタは持たず、
+            大きさ F は固定</FONT></TD></TR>
+  </TABLE>>];
+}

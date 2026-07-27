@@ -29,17 +29,21 @@ sablec [options] <file.sbl>
 registers and with 10, and the two runs must agree — which is how the spiller
 gets tested.
 
-Longer write-ups, in Japanese. The first is the tour; the other three go into
-one pass each.
+Write-ups, in Japanese. [doc/pipeline.md](doc/pipeline.md) walks one program
+through everything and links out; the rest take a pass each.
 
-- [doc/pipeline.md](doc/pipeline.md) — 1本のプログラムが全パスを通り抜けるまでを、
-  実際のダンプで追ったもの
-- [doc/typing.md](doc/typing.md) — 型推論の詳説。単一化、レベル方式の一般化、
-  値制限、シグネチャ照合の rigid な型変数
-- [doc/matching.md](doc/matching.md) — パターンマッチの詳説。網羅性・到達不能の
-  判定、決定木の作り方、合流点
-- [doc/regalloc.md](doc/regalloc.md) — レジスタ割り付けの詳説。干渉グラフの実例、
-  融合・スピル・callee-saved の扱い
+| | |
+|---|---|
+| [doc/pipeline.md](doc/pipeline.md) | 案内と、1本のプログラムを端から端まで |
+| [doc/syntax.md](doc/syntax.md) | 構文解析。1つの言語、2つの書き方 |
+| [doc/modules.md](doc/modules.md) | モジュールとファンクタを名前解決だけで済ませる |
+| [doc/typing.md](doc/typing.md) | 型推論。単一化、レベル方式の一般化、値制限、rigid な型変数 |
+| [doc/matching.md](doc/matching.md) | パターンマッチ。網羅性・到達不能の判定、決定木、合流点 |
+| [doc/anf.md](doc/anf.md) | A正規化、α変換、最適化 |
+| [doc/closure.md](doc/closure.md) | クロージャ変換 |
+| [doc/selection.md](doc/selection.md) | 命令選択、制御フローグラフ、生存解析 |
+| [doc/regalloc.md](doc/regalloc.md) | レジスタ割り付け。干渉グラフの実例、融合・スピル・callee-saved |
+| [doc/emit.md](doc/emit.md) | のぞき穴最適化、アセンブリ出力、呼び出し規約、実行時表現 |
 
 ## Two forms
 
@@ -413,11 +417,8 @@ Deliberate, and each one is a place the project could go next.
 
 ## References
 
-Each write-up carries the reading its own subject rests on:
-[the pipeline](doc/pipeline.md#参考文献) for ANF, modules and the rest,
-[type inference](doc/typing.md#参考文献), [pattern matching](doc/matching.md#参考文献),
-and [register allocation](doc/regalloc.md#参考文献). The four the code follows
-most closely:
+Each write-up carries the reading its own pass rests on; the four the code
+follows most closely:
 
 - L. George, A. W. Appel, [*Iterated register coalescing*][iterated],
   ACM TOPLAS 18(3), 1996 — the allocator.
@@ -443,7 +444,7 @@ src/          the compiler
 runtime/      sable_runtime.c: entry point, heap, primitives
 examples/     programs, all run by the test suite
 tests/        golden tests, including the compile-error messages
-doc/          the write-ups, and the graphviz sources for their figures
+doc/          one write-up per pass, and the graphviz sources for their figures
 sable         compile + link + run under qemu
 ```
 
