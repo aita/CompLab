@@ -174,6 +174,12 @@ and generate_value ctx dest exp =
    | Closure.Var x -> emit ctx.builder (Riscv.Move (target, operand ctx x))
    | Closure.Neg x -> emit ctx.builder (Riscv.Arith (Riscv.Sub, target, Riscv.zero, operand ctx x))
    | Closure.Field (x, i) -> emit ctx.builder (Riscv.Load (target, reg_of ctx x, i * word))
+   | Closure.Byte (s, i) ->
+     (* The bytes start one word into the block, so the length word is the
+        offset and the index is added to the base. *)
+     let address = Riscv.fresh_reg () in
+     emit ctx.builder (Riscv.Arith (Riscv.Add, address, reg_of ctx s, operand ctx i));
+     emit ctx.builder (Riscv.Load_byte (target, address, word))
    | Closure.Bin (op, x, y) -> generate_arith ctx target op x y
    (* Comparisons in value position; see generate. *)
    | Closure.If_eq (x, y, Closure.Int a, _) -> generate_equality ctx target x y ~negated:(a = 0)

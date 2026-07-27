@@ -1,0 +1,4 @@
+(* `=` pins its operands, so this function cannot be used at two types. *)
+let rec member x l = match l with [] -> false | y :: r -> x = y || member x r in
+print_int (if member 1 [ 1 ] then 1 else 0);
+print_int (if member true [ true ] then 1 else 0)

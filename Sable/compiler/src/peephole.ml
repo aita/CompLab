@@ -24,6 +24,11 @@ type facts = {
 let no_facts () =
   { equal = []; consts = []; labels = []; memory = []; computed = []; computed_imm = [] }
 
+(* Byte accesses take part in none of this.  The memory facts assume every
+   slot is a whole aligned word, which is what lets two different offsets from
+   one base be treated as disjoint; a byte load overlaps a word and would break
+   that reasoning, so it is neither consulted nor recorded. *)
+
 (* Anything said about [r] stops being true once [r] is written. *)
 let forget facts r =
   facts.equal <- List.filter (fun (a, b) -> a <> r && b <> r) facts.equal;
@@ -46,7 +51,8 @@ let destinations = function
   | Riscv.Move (d, _)
   | Riscv.Arith (_, d, _, _)
   | Riscv.Arith_imm (_, d, _, _)
-  | Riscv.Load (d, _, _) ->
+  | Riscv.Load (d, _, _)
+  | Riscv.Load_byte (d, _, _) ->
     [ d ]
   | Riscv.Store _ | Riscv.Call _ -> []
 

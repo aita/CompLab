@@ -2,8 +2,15 @@
 type error between the branches of `if`:
   expected: int
   but got:  bool
+--- compare_string.sbl
+`=` cannot compare strings; use `String.equal`
 --- compare_tuple.sbl
-`=` cannot compare values of type (int * int) (only int, bool and unit)
+`=` cannot compare values of type (int * int).
+Only int, bool and unit compare as a single machine word.
+--- list_element_types.sbl
+type error in the tail of `::`:
+  expected: int list
+  but got:  bool list
 --- constructor_arity.sbl
 the constructor `Pair` expects 2 argument(s) but is given 1
 --- duplicate_pattern_var.sbl
@@ -20,12 +27,20 @@ type error at the top level (a program must have type unit):
 errors/syntax.sbl:1:18: syntax error at `in'
 --- too_many_args.sbl
 `f` takes 9 arguments; at most 8 are supported (pass a tuple)
+--- string_index.sbl
+type error in a string index:
+  expected: int
+  but got:  bool
 --- type_mismatch.sbl
 type error in a function application:
   expected: (int -> int)
-  but got:  (bool -> '_a)
+  but got:  (bool -> 'a)
 --- unbound.sbl
 unbound variable `y`
+--- weak_comparison.sbl
+type error in a function application:
+  expected: (int * int list -> bool)
+  but got:  (bool * bool list -> 'a)
 --- unknown_constructor.sbl
 unknown constructor `Blue`
 --- unknown_type.sbl

@@ -62,6 +62,7 @@ let instruction = function
   | Riscv.Arith_imm (op, d, a, n) ->
     line "%s %s, %s, %d" (immediate_mnemonic op) reg.(d) reg.(a) n
   | Riscv.Load (d, base, off) -> memory "ld" d base off
+  | Riscv.Load_byte (d, base, off) -> memory "lbu" d base off
   | Riscv.Store (src, base, off) -> memory "sd" src base off
   | Riscv.Call (Riscv.Direct l, _) -> line "call %s" l
   | Riscv.Call (Riscv.Indirect r, _) -> line "jalr %s" reg.(r)
@@ -122,6 +123,29 @@ let function_ func =
   blocks func.Riscv.blocks;
   Printf.fprintf !out "\t.size %s, .-%s\n" func.Riscv.name func.Riscv.name
 
+(* Printable text for `.ascii`, with everything else spelled out in octal. *)
+let escape text =
+  let b = Buffer.create (String.length text + 8) in
+  String.iter
+    (fun c ->
+      match c with
+      | '"' -> Buffer.add_string b "\\\""
+      | '\\' -> Buffer.add_string b "\\\\"
+      | c when c >= ' ' && c <= '~' -> Buffer.add_char b c
+      | c -> Buffer.add_string b (Printf.sprintf "\\%03o" (Char.code c)))
+    text;
+  Buffer.contents b
+
+(* A string is one word of length followed by its bytes. *)
+let string_literals () =
+  List.iter
+    (fun (label_name, text) ->
+      Printf.fprintf !out "\t.p2align 3\n";
+      label label_name;
+      line ".quad %d" (String.length text);
+      if text <> "" then line ".ascii \"%s\"" (escape text))
+    (Literals.all ())
+
 (* One read-only block per constant constructor, so that `Leaf` costs an
    address rather than an allocation. *)
 let constant_constructors () =
@@ -131,8 +155,11 @@ let constant_constructors () =
       (fun (d : Datatype.decl) -> List.filter Datatype.is_constant d.constrs)
       decls
   in
+  Printf.fprintf !out "\n\t.section .rodata\n\t.p2align 3\n";
+  comment "the empty list";
+  label Datatype.nil_label;
+  line ".quad 0";
   if constants <> [] then begin
-    Printf.fprintf !out "\n\t.section .rodata\n\t.p2align 3\n";
     List.iter
       (fun (c : Datatype.constr) ->
         comment (Printf.sprintf "%s.%s" c.owner c.cname);
@@ -145,4 +172,5 @@ let program channel functions =
   out := channel;
   Printf.fprintf !out "\t.text\n";
   List.iter function_ functions;
-  constant_constructors ()
+  constant_constructors ();
+  string_literals ()

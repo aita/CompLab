@@ -37,6 +37,7 @@ let constr_pattern_args name args =
 %token <int> INT
 %token <bool> BOOL
 %token <string> IDENT
+%token <string> STRING
 %token <string> UIDENT
 %token LET IN REC AND IF THEN ELSE FUN NOT ARRAY_MAKE
 %token TYPE OF MATCH WITH BAR UNDERSCORE ARRAY_KW
@@ -44,10 +45,12 @@ let constr_pattern_args name args =
 %token EQUAL LESS_GREATER LESS GREATER LESS_EQUAL GREATER_EQUAL
 %token AMPAMP BARBAR
 %token LPAREN RPAREN COMMA SEMICOLON DOT LESS_MINUS ARROW
+%token LBRACKET RBRACKET COLONCOLON CARET STRING_LENGTH
 %token EOF
 
 %right prec_let prec_match
 %right SEMICOLON
+%nonassoc prec_list
 %right prec_if
 %nonassoc ELSE
 %right LESS_MINUS
@@ -56,6 +59,8 @@ let constr_pattern_args name args =
 %right BARBAR
 %right AMPAMP
 %left EQUAL LESS_GREATER LESS GREATER LESS_EQUAL GREATER_EQUAL
+%right CARET
+%right COLONCOLON
 %left PLUS MINUS
 %left AST SLASH PERCENT
 %right prec_unary_minus
@@ -112,9 +117,13 @@ simple_exp:
   | LPAREN RPAREN { Unit }
   | BOOL { Bool $1 }
   | INT { Int $1 }
+  | STRING { Str $1 }
   | IDENT { Var $1 }
   | UIDENT { Constr ($1, []) }
+  | LBRACKET RBRACKET { Nil }
+  | LBRACKET list_body RBRACKET { List.fold_right (fun e rest -> Cons (e, rest)) $2 Nil }
   | simple_exp DOT LPAREN exp RPAREN { Get ($1, $4) }
+  | simple_exp DOT LBRACKET exp RBRACKET { Str_get ($1, $4) }
 
 exp:
   | simple_exp { $1 }
@@ -151,8 +160,17 @@ exp:
         | f -> App (f, $2) }
   | elems %prec prec_tuple { Tuple $1 }
   | ARRAY_MAKE simple_exp simple_exp %prec prec_app { Array ($2, $3) }
+  | STRING_LENGTH simple_exp %prec prec_app { Str_length $2 }
+  | exp CARET exp { App (Var "string_concat", [ $1; $3 ]) }
   | simple_exp DOT LPAREN exp RPAREN LESS_MINUS exp { Put ($1, $4, $7) }
+  | exp COLONCOLON exp { Cons ($1, $3) }
   | exp SEMICOLON exp { sequence $1 $3 }
+
+(* `[a; b]` is a two-element list, not a one-element list of a sequence: the
+   rule below outranks the sequencing operator, exactly as in OCaml. *)
+list_body:
+  | exp %prec prec_list { [ $1 ] }
+  | list_body SEMICOLON exp %prec prec_list { $1 @ [ $3 ] }
 
 fundefs:
   | fundef { [ $1 ] }
@@ -179,8 +197,12 @@ elems:
   | exp COMMA exp { [ $1; $3 ] }
 
 tuple_pat:
-  | tuple_pat COMMA IDENT { $1 @ [ typed $3 ] }
-  | IDENT COMMA IDENT { [ typed $1; typed $3 ] }
+  | tuple_pat COMMA tuple_pat_name { $1 @ [ $3 ] }
+  | tuple_pat_name COMMA tuple_pat_name { [ $1; $3 ] }
+
+tuple_pat_name:
+  | IDENT { typed $1 }
+  | UNDERSCORE { typed (Ident.fresh "unused") }
 
 (* -------------------------------------------------------------- patterns *)
 
@@ -202,6 +224,10 @@ pattern_comma_list:
   | constr_pattern COMMA pattern_comma_list { $1 :: $3 }
 
 constr_pattern:
+  | applied_pattern { $1 }
+  | applied_pattern COLONCOLON constr_pattern { Pcons ($1, $3) }
+
+applied_pattern:
   | simple_pattern { $1 }
   | UIDENT simple_pattern { Pconstr ($1, constr_pattern_args $1 $2) }
 
@@ -213,4 +239,11 @@ simple_pattern:
   | BOOL { Pbool $1 }
   | LPAREN RPAREN { Punit }
   | UIDENT { Pconstr ($1, []) }
+  | LBRACKET RBRACKET { Pnil }
+  | LBRACKET pattern_list RBRACKET
+      { List.fold_right (fun p rest -> Pcons (p, rest)) $2 Pnil }
   | LPAREN pattern RPAREN { $2 }
+
+pattern_list:
+  | constr_pattern { [ $1 ] }
+  | constr_pattern SEMICOLON pattern_list { $1 :: $3 }

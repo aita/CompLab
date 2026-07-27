@@ -31,6 +31,8 @@ let () =
       ("false", BOOL false);
     ]
 
+let string_buffer = Buffer.create 64
+
 let error lexbuf fmt =
   Printf.ksprintf
     (fun msg ->
@@ -57,6 +59,16 @@ rule token = parse
         | Some v -> INT v
         | None -> error lexbuf "integer literal %s is out of range" n }
   | "Array.make" | "Array.create" { ARRAY_MAKE }
+  | "String.length" { STRING_LENGTH }
+  (* The rest of the String module is provided by the runtime, so the source
+     spelling just maps onto the name the runtime exports. *)
+  | "String.concat" { IDENT "string_concat" }
+  | "String.equal" { IDENT "string_equal" }
+  | '^' { CARET }
+  | '"' { Buffer.clear string_buffer; string_literal lexbuf }
+  | "::" { COLONCOLON }
+  | '[' { LBRACKET }
+  | ']' { RBRACKET }
   | '(' { LPAREN }
   | ')' { RPAREN }
   | ',' { COMMA }
@@ -86,6 +98,18 @@ rule token = parse
           | None -> IDENT name }
   | eof { EOF }
   | _ as c { error lexbuf "unexpected character %C" c }
+
+and string_literal = parse
+  | '"' { STRING (Buffer.contents string_buffer) }
+  | "\\n" { Buffer.add_char string_buffer '\n'; string_literal lexbuf }
+  | "\\t" { Buffer.add_char string_buffer '\t'; string_literal lexbuf }
+  | "\\r" { Buffer.add_char string_buffer '\r'; string_literal lexbuf }
+  | "\\\\" { Buffer.add_char string_buffer '\\'; string_literal lexbuf }
+  | "\\\"" { Buffer.add_char string_buffer '"'; string_literal lexbuf }
+  | '\\' _ as bad { error lexbuf "unknown escape %s in a string" bad }
+  | '\n' { error lexbuf "a string literal may not span lines" }
+  | eof { error lexbuf "unterminated string literal" }
+  | _ as c { Buffer.add_char string_buffer c; string_literal lexbuf }
 
 (* Comments nest, as in OCaml. *)
 and comment depth = parse

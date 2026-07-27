@@ -103,7 +103,8 @@ type instr =
   | Move of reg * reg
   | Arith of binop * reg * reg * reg
   | Arith_imm of binop * reg * reg * int
-  | Load of reg * reg * int (* dst <- [base + offset] *)
+  | Load of reg * reg * int (* dst <- the 64-bit word at [base + offset] *)
+  | Load_byte of reg * reg * int (* dst <- the byte at [base + offset], zero-extended *)
   | Store of reg * reg * int (* [base + offset] <- src *)
   | Call of callee * reg list (* the argument registers it reads *)
 
@@ -141,14 +142,15 @@ let uses = function
   | Move (_, src) -> keep [ src ]
   | Arith (_, _, a, b) -> keep [ a; b ]
   | Arith_imm (_, _, a, _) -> keep [ a ]
-  | Load (_, base, _) -> keep [ base ]
+  | Load (_, base, _) | Load_byte (_, base, _) -> keep [ base ]
   | Store (src, base, _) -> keep [ src; base ]
   | Call (Direct _, args) -> keep args
   | Call (Indirect r, args) -> keep (r :: args)
 
 let defines = function
   | Li (d, _) | La (d, _) | Move (d, _) | Arith (_, d, _, _) | Arith_imm (_, d, _, _)
-  | Load (d, _, _) ->
+  | Load (d, _, _)
+  | Load_byte (d, _, _) ->
     keep [ d ]
   | Store _ -> []
   (* A call destroys every caller-saved register: a value that has to survive
@@ -186,6 +188,7 @@ let map_regs ~use ~def instr =
   | Arith (op, d, a, b) -> Arith (op, def d, use a, use b)
   | Arith_imm (op, d, a, n) -> Arith_imm (op, def d, use a, n)
   | Load (d, b, off) -> Load (def d, use b, off)
+  | Load_byte (d, b, off) -> Load_byte (def d, use b, off)
   | Store (s, b, off) -> Store (use s, use b, off)
   | Call (Direct l, args) -> Call (Direct l, List.map use args)
   | Call (Indirect r, args) -> Call (Indirect (use r), List.map use args)
@@ -236,6 +239,7 @@ let string_of_instr instr =
   | Arith_imm (op, d, a, n) ->
     Printf.sprintf "%si %s, %s, %d" (string_of_binop op) (r d) (r a) n
   | Load (d, b, off) -> Printf.sprintf "ld %s, %d(%s)" (r d) off (r b)
+  | Load_byte (d, b, off) -> Printf.sprintf "lbu %s, %d(%s)" (r d) off (r b)
   | Store (s, b, off) -> Printf.sprintf "sd %s, %d(%s)" (r s) off (r b)
   | Call (c, args) ->
     Printf.sprintf "call %s(%s)" (string_of_callee c)

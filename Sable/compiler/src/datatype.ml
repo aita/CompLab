@@ -64,6 +64,11 @@ let arity c = List.length c.arg_types
 let is_constant c = c.arg_types = []
 let all_decls () = List.rev_map (fun n -> Hashtbl.find decls n) !order
 
+(* The empty list, which is built in rather than declared, but is represented
+   exactly like any other constant constructor: a read-only block holding the
+   tag 0.  `x :: xs` is the block [ 1 | x | xs ]. *)
+let nil_label = "sable_list_nil"
+
 (* The read-only block standing for a constant constructor. *)
 let const_label c = Printf.sprintf "sable_const_%s_%s" c.owner c.cname
 

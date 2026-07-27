@@ -14,6 +14,7 @@ let rec anf out level exp =
   | Anf.Bin (op, x, y) -> say "%s %s %s" x (Anf.string_of_binop op) y
   | Anf.Static l -> say "&%s" l
   | Anf.Field (x, i) -> say "%s[%d]" x i
+  | Anf.Byte (x, i) -> say "%s.[%s]" x i
   | Anf.Block (tag, xs) -> say "block %d (%s)" tag (vars xs)
   | Anf.Tuple xs -> say "(%s)" (vars xs)
   | Anf.Array (n, v) -> say "Array.make %s %s" n v
@@ -57,6 +58,7 @@ let rec closure out level exp =
   | Closure.Bin (op, x, y) -> say "%s %s %s" x (Anf.string_of_binop op) y
   | Closure.Static l -> say "&%s" l
   | Closure.Field (x, i) -> say "%s[%d]" x i
+  | Closure.Byte (x, i) -> say "%s.[%s]" x i
   | Closure.Block (tag, xs) -> say "block %d (%s)" tag (vars xs)
   | Closure.Tuple xs -> say "(%s)" (vars xs)
   | Closure.Array (n, v) -> say "Array.make %s %s" n v

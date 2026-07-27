@@ -37,8 +37,8 @@ Two longer write-ups, in Japanese:
 
 ## The language
 
-Monomorphic ML. Functions take all their arguments at once (no currying), and
-`type` declarations come before the program body.
+A small ML. Functions take all their arguments at once (no currying), and `type`
+declarations come before the program body.
 
 ```
 type tree = Leaf | Node of tree * int * tree
@@ -61,23 +61,29 @@ walk (insert (insert Leaf 2) 1); print_newline ()
 
 | | |
 |---|---|
-| types | `int`, `bool`, `unit`, tuples, arrays, functions, `type t = A \| B of int * t` |
+| types | `int`, `bool`, `unit`, `string`, `'a list`, tuples, arrays, functions, `type t = A \| B of int * t` |
 | binding | `let`, `let rec ... and ...`, `let (a, b) = e`, `fun x y -> e` |
 | control | `if`/`then`/`else` (the `else` may be left out when the branch is `unit`), `e1; e2`, `begin`/`end` |
-| matching | `match e with p -> e \| ...`, over literals, wildcards, variables, tuples and constructors, nested |
-| operators | `+ - * / mod`, `= <> < <= > >=`, `&& \|\| not`, unary `-` |
+| matching | `match e with p -> e \| ...`, over literals, wildcards, variables, tuples, lists and constructors, nested |
+| operators | `+ - * / mod`, `= <> < <= > >=`, `&& \|\| not`, unary `-`, `::`, `^` |
+| lists | `[]`, `x :: xs`, `[a; b; c]`, and the same in patterns |
+| strings | `"text"` with `\n \t \r \\ \"`, `String.length s`, `s.[i]`, `s1 ^ s2`, `String.equal` |
 | arrays | `Array.make n init`, `a.(i)`, `a.(i) <- e` |
-| runtime | `print_int`, `print_char`, `print_newline`, `read_int` |
+| runtime | `print_int`, `print_char`, `print_string`, `print_newline`, `read_int` |
 
-`unit`, `bool` and `int` are all one machine word, so comparison is a single
-instruction — which is why `=` is restricted to those three types rather than
-silently comparing addresses.
+Type inference is Hindley–Milner with let-polymorphism, generalized by levels.
+One compiled `length` serves `int list`, `string list` and `int list list`: every
+value is one machine word, so a function that never looks inside its elements
+does not care what they are, and no specialization is needed. Only syntactic
+values are generalized — the usual value restriction, without which a
+polymorphic value held in a mutable array would let a program store an integer
+and read back a pointer.
 
-Type inference is Hindley–Milner without generalization: a `let` is not
-polymorphic. The constructs that need polymorphism in practice — `=`,
-`Array.make`, tuples — are syntax rather than functions, so each occurrence
-gets its own type variables and the usual idioms still work. What does not work
-is `let id x = x in (id 1, id true)`.
+`unit`, `bool` and `int` are all one machine word, so `=` is a single
+instruction. It is restricted to those three types rather than silently
+comparing addresses, and its operands are held back from generalization so that
+they settle on a type that can be compared that way. `String.equal` compares
+strings.
 
 Pattern matching is checked for exhaustiveness and for unreachable cases, with a
 witness:
@@ -118,11 +124,17 @@ instruction-selection half of `selection.ml`, and leaving the allocator alone.
 
 ### Representation
 
-Everything is a 64-bit word. Tuples and constructor arguments are heap blocks;
-a datatype block keeps its tag in word 0, so `Node (l, v, r)` is
-`[1 | l | v | r]` and `Leaf` is the address of a read-only `[0]` emitted once
-into `.rodata`. Keeping constant constructors boxed costs an indirection and
-buys a back end that never has to ask whether a word is a pointer.
+Everything is a 64-bit word. Tuples and constructor arguments are heap blocks; a
+datatype block keeps its tag in word 0, so `Node (l, v, r)` is `[1 | l | v | r]`
+and `Leaf` is the address of a read-only `[0]` emitted once into `.rodata`.
+Lists are built in but represented no differently: `[]` is a shared `[0]` and
+`x :: xs` is `[1 | x | xs]`. Keeping constant constructors boxed costs an
+indirection and buys a back end that never has to ask whether a word is a
+pointer — which is also what makes polymorphism free.
+
+A string is `[length | bytes...]`, packed, immutable, and literals with the same
+text share one block. `s.[i]` is the only place the compiler emits a byte-sized
+load; everything else moves whole words.
 
 A closure is `[code pointer | captured values...]`. A function that captures
 nothing is called directly and has no runtime representation at all; closure
@@ -276,7 +288,9 @@ the same.
 Deliberate, and each one is a place the project could go next.
 
 - No garbage collector; the heap is a bump allocator.
-- No polymorphism: `let` is monomorphic.
+- No polymorphic comparison: `=` works on `int`, `bool` and `unit` only.
+- Strings are immutable and there is no `String.sub` or `String.make`; the
+  runtime offers length, indexing, concatenation and equality.
 - Functions are uncurried and take at most eight arguments (they arrive in
   `a0`–`a7`); more should be a tuple.
 - Mutually recursive functions may not capture their environment. A

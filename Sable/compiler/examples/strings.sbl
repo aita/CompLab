@@ -1,0 +1,74 @@
+(* Strings.
+
+   A string is a read-only block: one word of length, then the bytes, packed.
+   Literals live in `.rodata` and equal ones share a block, which is safe
+   because there is no way to modify a string.  `s.[i]` is the only place this
+   compiler emits a byte-sized load; everything else it does moves whole words.
+
+   Characters are integers, as they are for `print_char`. *)
+
+let rec is_space c = c = 32 || c = 9 || c = 10 in
+let rec is_upper c = c >= 65 && c <= 90 in
+let rec lower c = if is_upper c then c + 32 else c in
+
+let rec show_string s = print_string s; print_char 32 in
+
+let rec count_if test s i n =
+  if i >= String.length s then n
+  else count_if test s (i + 1) (if test s.[i] then n + 1 else n)
+in
+
+let rec index_of s c i =
+  if i >= String.length s then - 1 else if s.[i] = c then i else index_of s c (i + 1)
+in
+
+let rec starts_with prefix s i =
+  if i >= String.length prefix then true
+  else if i >= String.length s then false
+  else if prefix.[i] = s.[i] then starts_with prefix s (i + 1)
+  else false
+in
+
+(* Split on spaces, returning the pieces as a list of (start, length) pairs so
+   that no string has to be built. *)
+let rec words s i start acc =
+  if i >= String.length s then if i > start then (start, i - start) :: acc else acc
+  else if is_space s.[i] then
+    words s (i + 1) (i + 1) (if i > start then (start, i - start) :: acc else acc)
+  else words s (i + 1) start acc
+in
+
+let rec print_slice s start len =
+  if len > 0 then (print_char s.[start]; print_slice s (start + 1) (len - 1))
+in
+let rec print_words s pieces =
+  match pieces with
+  | [] -> print_newline ()
+  | (start, len) :: rest -> (print_slice s start len; print_char 32; print_words s rest)
+in
+
+let text = "the quick brown fox" in
+print_string text; print_newline ();
+print_string ("[" ^ text ^ "]"); print_newline ();
+
+print_int (String.length text); print_char 32;
+print_int (String.length ""); print_char 32;
+print_int text.[0]; print_char 32;
+print_int (lower 84); print_char 32;
+print_int (count_if is_space text 0 0); print_char 32;
+print_int (index_of text 113 0); print_char 32;
+print_int (index_of text 122 0);
+print_newline ();
+
+print_int (if starts_with "the" text 0 then 1 else 0);
+print_int (if starts_with "fox" text 0 then 1 else 0);
+print_int (if String.equal text "the quick brown fox" then 1 else 0);
+print_int (if String.equal text "something else" then 1 else 0);
+print_int (if String.equal ("a" ^ "b") "ab" then 1 else 0);
+print_newline ();
+
+(* The list is built back to front, so reverse it to read in order. *)
+let rec rev l = let rec go acc l = match l with [] -> acc | x :: r -> go (x :: acc) r in go [] l in
+print_words text (rev (words text 0 0 []));
+
+show_string "escapes:"; print_string "a\tb\\c\"d"; print_newline ()

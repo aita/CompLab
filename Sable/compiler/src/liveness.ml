@@ -67,7 +67,8 @@ let writes_dead_register live = function
   | Riscv.Move (d, _)
   | Riscv.Arith (_, d, _, _)
   | Riscv.Arith_imm (_, d, _, _)
-  | Riscv.Load (d, _, _) ->
+  | Riscv.Load (d, _, _)
+  | Riscv.Load_byte (d, _, _) ->
     Riscv.is_tracked d && not (RegSet.mem d live)
   | Riscv.Store _ | Riscv.Call _ -> false
 

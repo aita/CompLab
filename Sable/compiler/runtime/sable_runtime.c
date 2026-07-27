@@ -40,6 +40,31 @@ word sable_make_array(word length, word init) {
   return (word)array;
 }
 
+/* A string is a block: one word of length, then that many bytes. */
+static long string_length(word s) { return *(const long *)s; }
+static const char *string_bytes(word s) { return (const char *)(s + (word)sizeof(word)); }
+
+void sable_print_string(word s) {
+  fwrite(string_bytes(s), 1, (size_t)string_length(s), stdout);
+}
+
+word sable_string_concat(word a, word b) {
+  long na = string_length(a);
+  long nb = string_length(b);
+  word block = sable_alloc((word)sizeof(word) + na + nb);
+  *(long *)block = na + nb;
+  char *bytes = (char *)(block + (word)sizeof(word));
+  memcpy(bytes, string_bytes(a), (size_t)na);
+  memcpy(bytes + na, string_bytes(b), (size_t)nb);
+  return block;
+}
+
+word sable_string_equal(word a, word b) {
+  long n = string_length(a);
+  if (n != string_length(b)) return 0;
+  return memcmp(string_bytes(a), string_bytes(b), (size_t)n) == 0;
+}
+
 void sable_print_int(word n) { printf("%ld", n); }
 void sable_print_char(word c) { putchar((int)c); }
 void sable_print_newline(word unit) { (void)unit; putchar('\n'); }

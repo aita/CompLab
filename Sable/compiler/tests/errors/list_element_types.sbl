@@ -1,0 +1,2 @@
+let rec length l = match l with [] -> 0 | _ :: r -> 1 + length r in
+print_int (length [ 1; true ])

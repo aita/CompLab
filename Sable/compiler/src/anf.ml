@@ -28,6 +28,7 @@ type t =
   | Block of int * Ident.t list (* a tagged block: a constructor's value *)
   | Static of Ident.label (* a read-only block: a constant constructor *)
   | Field of Ident.t * int (* word i of a block *)
+  | Byte of Ident.t * Ident.t (* byte i of a string, past its length word *)
   | Array of Ident.t * Ident.t
   | Get of Ident.t * Ident.t
   | Put of Ident.t * Ident.t * Ident.t
@@ -58,6 +59,7 @@ let binop_of_arith = function
 let rec free_vars = function
   | Int _ | Static _ -> Ident.Set.empty
   | Var x | Neg x | Field (x, _) -> Ident.Set.singleton x
+  | Byte (x, y) -> Ident.Set.of_list [ x; y ]
   | Bin (_, x, y) | Array (x, y) | Get (x, y) -> Ident.Set.of_list [ x; y ]
   | Put (x, y, z) -> Ident.Set.of_list [ x; y; z ]
   | If_eq (x, y, e1, e2) | If_le (x, y, e1, e2) ->
@@ -195,6 +197,19 @@ let rec normalize_exp env (exp : Syntax.t) : t * Types.t =
     insert_let (normalize_exp env arr) (fun a ->
         insert_let (normalize_exp env idx) (fun i ->
             insert_let (normalize_exp env v) (fun x -> (Put (a, i, x), Types.Unit))))
+  | Syntax.Str text -> (Static (Literals.intern text), Types.String)
+  | Syntax.Str_length e ->
+    (* The length is the first word of the block. *)
+    insert_let (normalize_exp env e) (fun s -> (Field (s, 0), Types.Int))
+  | Syntax.Str_get (s, i) ->
+    insert_let (normalize_exp env s) (fun s ->
+        insert_let (normalize_exp env i) (fun i -> (Byte (s, i), Types.Int)))
+  | Syntax.Nil -> (Static Datatype.nil_label, Types.List (Types.fresh_var ()))
+  | Syntax.Cons (head, tail) ->
+    let head', telement = normalize_exp env head in
+    insert_let (head', telement) (fun h ->
+        insert_let (normalize_exp env tail) (fun t ->
+            (Block (1, [ h; t ]), Types.List telement)))
   | Syntax.Constr (name, args) ->
     let c = Datatype.constr_exn name in
     let t = Types.Named c.Datatype.owner in

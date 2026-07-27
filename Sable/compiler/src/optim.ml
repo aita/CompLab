@@ -60,6 +60,7 @@ let rec propagate env exp =
   | Var x -> ( match const x with Some n -> Int n | None -> Var (var x))
   | Neg x -> ( match const x with Some n -> Int (-n) | None -> Neg (var x))
   | Field (x, i) -> Field (var x, i)
+  | Byte (x, y) -> Byte (var x, var y)
   | Bin (op, x, y) -> (
     match (const x, const y) with
     | Some a, Some b -> (

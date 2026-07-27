@@ -102,6 +102,39 @@
  (action
   (diff codegen.expected codegen.out)))
 
+(rule
+ (with-stdout-to
+  lists.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:../examples/lists.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff lists.expected lists.out)))
+
+(rule
+ (with-stdout-to
+  strings.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:../examples/strings.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff strings.expected strings.out)))
+
+(rule
+ (with-stdout-to
+  polymorphism.out
+  (run sh %{dep:run.sh} %{exe:../src/sablec.exe}
+    %{dep:../runtime/sable_runtime.c} %{dep:cases/polymorphism.sbl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff polymorphism.expected polymorphism.out)))
+
 ; A program the checker warns about, which then fails at run time exactly where
 ; the warning said it would.
 
@@ -123,11 +156,13 @@
  (with-stdout-to
   errors.out
   (run sh %{dep:errors.sh} %{exe:../src/sablec.exe}
-    %{dep:errors/branches.sbl} %{dep:errors/compare_tuple.sbl}
+    %{dep:errors/branches.sbl} %{dep:errors/compare_string.sbl}
+    %{dep:errors/compare_tuple.sbl} %{dep:errors/list_element_types.sbl}
     %{dep:errors/constructor_arity.sbl} %{dep:errors/duplicate_pattern_var.sbl}
     %{dep:errors/mutual_capture.sbl} %{dep:errors/not_unit.sbl}
     %{dep:errors/syntax.sbl} %{dep:errors/too_many_args.sbl}
-    %{dep:errors/type_mismatch.sbl} %{dep:errors/unbound.sbl}
+    %{dep:errors/string_index.sbl} %{dep:errors/type_mismatch.sbl}
+    %{dep:errors/unbound.sbl} %{dep:errors/weak_comparison.sbl}
     %{dep:errors/unknown_constructor.sbl} %{dep:errors/unknown_type.sbl})))
 
 (rule

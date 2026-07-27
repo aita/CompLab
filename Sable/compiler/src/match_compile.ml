@@ -81,8 +81,10 @@ let column_heads rows = Check.column_heads (List.map (fun row -> row.pats) rows)
    heads are never tested: reaching them is already proof. *)
 let test_for head (occ, _) =
   match head with
-  | Check.Hconstr c ->
-    Cmp (Eq, Field (Var occ, 0, Types.Int), Int c.Datatype.tag)
+  | Check.Hconstr c -> Cmp (Eq, Field (Var occ, 0, Types.Int), Int c.Datatype.tag)
+  (* `[]` and `::` are the tags 0 and 1 of one built-in datatype. *)
+  | Check.Hnil -> Cmp (Eq, Field (Var occ, 0, Types.Int), Int 0)
+  | Check.Hcons -> Cmp (Eq, Field (Var occ, 0, Types.Int), Int 1)
   | Check.Hint n -> Cmp (Eq, Var occ, Int n)
   | Check.Hbool b -> Cmp (Eq, Var occ, Bool b)
   | Check.Hunit | Check.Htuple _ ->
@@ -90,6 +92,8 @@ let test_for head (occ, _) =
 
 (* Heads whose test compares against zero, which costs one instruction less. *)
 let tests_against_zero = function
+  | Check.Hnil -> true
+  | Check.Hcons -> false
   | Check.Hconstr c -> c.Datatype.tag = 0
   | Check.Hint n -> n = 0
   | Check.Hbool b -> not b
@@ -121,7 +125,7 @@ let rec build occs rows =
       let field_types = Check.sub_types occ_type head in
       (* A datatype block keeps its tag in word 0, so its fields start at 1;
          a tuple has no tag. *)
-      let offset = match head with Check.Hconstr _ -> 1 | _ -> 0 in
+      let offset = match head with Check.Hconstr _ | Check.Hcons -> 1 | _ -> 0 in
       let fields = List.map (fun t -> (Ident.fresh "fld", t)) field_types in
       let body = build (fields @ rest_occs) (specialize_rows head occ rows) in
       let rec load i = function
@@ -222,7 +226,7 @@ let compile_match info scrutinee cases =
 
 let rec compile exp =
   match exp with
-  | Unit | Bool _ | Int _ | Var _ -> exp
+  | Unit | Bool _ | Int _ | Str _ | Var _ | Nil -> exp
   | Not e -> Not (compile e)
   | Neg e -> Neg (compile e)
   | Arith (op, a, b) -> Arith (op, compile a, compile b)
@@ -247,6 +251,13 @@ let rec compile exp =
   | Array (a, b) -> Array (compile a, compile b)
   | Get (a, b) -> Get (compile a, compile b)
   | Put (a, b, c) -> Put (compile a, compile b, compile c)
+  | Str_length e -> Str_length (compile e)
+  | Str_get (a, b) ->
+    let a = compile a in
+    Str_get (a, compile b)
+  | Cons (head, tail) ->
+    let head = compile head in
+    Cons (head, compile tail)
   | Constr (name, args) -> Constr (name, List.map compile args)
   | Field (e, i, t) -> Field (compile e, i, t)
   | Match_failure _ -> exp

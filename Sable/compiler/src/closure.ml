@@ -29,6 +29,7 @@ type t =
   | Block of int * Ident.t list
   | Static of Ident.label
   | Field of Ident.t * int
+  | Byte of Ident.t * Ident.t
   | Array of Ident.t * Ident.t
   | Get of Ident.t * Ident.t
   | Put of Ident.t * Ident.t * Ident.t
@@ -47,6 +48,7 @@ exception Error of string
 let rec free_vars = function
   | Int _ | Static _ -> Ident.Set.empty
   | Var x | Neg x | Field (x, _) -> Ident.Set.singleton x
+  | Byte (x, y) -> Ident.Set.of_list [ x; y ]
   | Bin (_, x, y) | Array (x, y) | Get (x, y) -> Ident.Set.of_list [ x; y ]
   | Put (x, y, z) -> Ident.Set.of_list [ x; y; z ]
   | If_eq (x, y, e1, e2) | If_le (x, y, e1, e2) ->
@@ -94,6 +96,7 @@ let rec convert_exp env known exp =
   | Anf.Block (tag, xs) -> Block (tag, xs)
   | Anf.Static label -> Static label
   | Anf.Field (x, i) -> Field (x, i)
+  | Anf.Byte (x, y) -> Byte (x, y)
   | Anf.Let_tuple (xts, y, e) ->
     let env = List.fold_left (fun env (x, t) -> Ident.Map.add x t env) env xts in
     Let_tuple (xts, y, convert_exp env known e)

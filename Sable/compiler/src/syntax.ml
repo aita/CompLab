@@ -25,6 +25,11 @@ type t =
   | Array of t * t (* Array.make size init *)
   | Get of t * t
   | Put of t * t * t
+  | Str of string
+  | Str_length of t
+  | Str_get of t * t (* s.[i], the byte as an integer *)
+  | Nil
+  | Cons of t * t
   | Constr of string * t list (* a fully applied constructor *)
   | Match of match_info * t * case list
   | Field of t * int * Types.t (* generated: word i of a block *)
@@ -43,6 +48,8 @@ and pattern =
   | Pbool of bool
   | Punit
   | Ptuple of pattern list
+  | Pnil
+  | Pcons of pattern * pattern
   | Pconstr of string * pattern list
 
 and fundef = {
@@ -73,12 +80,15 @@ let rec string_of_pattern = function
   | Pbool b -> if b then "true" else "false"
   | Punit -> "()"
   | Ptuple ps -> "(" ^ String.concat ", " (List.map string_of_pattern ps) ^ ")"
+  | Pnil -> "[]"
+  | Pcons (head, tail) -> string_of_pattern head ^ " :: " ^ string_of_pattern tail
   | Pconstr (c, []) -> c
   | Pconstr (c, ps) ->
     c ^ " (" ^ String.concat ", " (List.map string_of_pattern ps) ^ ")"
 
 (* Variables bound by a pattern, left to right. *)
 let rec pattern_vars = function
-  | Pwild _ | Pint _ | Pbool _ | Punit -> []
+  | Pwild _ | Pint _ | Pbool _ | Punit | Pnil -> []
   | Pvar (x, t) -> [ (x, t) ]
+  | Pcons (head, tail) -> pattern_vars head @ pattern_vars tail
   | Ptuple ps | Pconstr (_, ps) -> List.concat_map pattern_vars ps

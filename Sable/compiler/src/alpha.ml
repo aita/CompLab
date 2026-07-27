@@ -16,6 +16,7 @@ let rec rename_exp env exp =
   | Var x -> Var (var x)
   | Neg x -> Neg (var x)
   | Field (x, i) -> Field (var x, i)
+  | Byte (x, y) -> Byte (var x, var y)
   | Bin (op, x, y) -> Bin (op, var x, var y)
   | If_eq (x, y, e1, e2) -> If_eq (var x, var y, rename_exp env e1, rename_exp env e2)
   | If_le (x, y, e1, e2) -> If_le (var x, var y, rename_exp env e1, rename_exp env e2)

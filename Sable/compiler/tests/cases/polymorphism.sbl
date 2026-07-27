@@ -1,0 +1,41 @@
+(* let-polymorphism: what is generalized, and what deliberately is not. *)
+
+let rec show n = print_int n; print_char 32 in
+let rec flag b = print_int (if b then 1 else 0); print_char 32 in
+
+(* One definition, several types. *)
+let rec id x = x in
+let rec compose f g = fun x -> f (g x) in
+let rec twice f x = f (f x) in
+show (id 1); flag (id true); show (id (id 7));
+show (twice (fun n -> n + 3) 1);
+(* functions are uncurried, so the result of `compose` is applied separately *)
+show ((compose (fun n -> n * 2) (fun n -> n + 1)) 5);
+print_newline ();
+
+(* Polymorphic over structures the function never looks inside. *)
+let rec fst p = let (a, _) = p in a in
+let rec swap p = let (a, b) = p in (b, a) in
+let rec length l = match l with [] -> 0 | _ :: r -> 1 + length r in
+show (fst (4, true));
+flag (fst (true, 4));
+show (fst (swap (1, 2)));
+show (length [ 1; 2; 3 ]);
+show (length [ "a"; "b" ]);
+show (length [ [ 1 ]; [] ]);
+
+print_newline ();
+
+(* `fun` is a value, so a let-bound function generalizes. *)
+let apply_to_one = fun f -> f 1 in
+show (apply_to_one (fun n -> n + 41));
+flag (apply_to_one (fun n -> n = 1));
+print_newline ();
+
+(* The value restriction: this is an application, so it stays monomorphic and
+   takes whatever type its uses demand.  Generalizing it would let the array
+   hold an integer and hand back a function. *)
+let cell = Array.make 1 (fun x -> x) in
+cell.(0) <- (fun n -> n + 1);
+show ((cell.(0)) 41);
+print_newline ()
