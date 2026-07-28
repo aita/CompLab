@@ -49,6 +49,9 @@ let trace : (string -> unit) ref = ref (fun _ -> ())
 let say fmt = Printf.ksprintf (fun s -> !trace s) fmt
 let name = Riscv.name_of_reg
 
+(* The worklists are sets: which element comes out next is free.  Taking the
+   lowest index rather than whatever is convenient is what makes the allocator
+   deterministic -- same input, same registers, every run. *)
 let pick set = Bitset.min_elt set
 
 let allocate ?(report = no_report ()) (func : Riscv.func) =
