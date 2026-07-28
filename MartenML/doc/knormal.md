@@ -419,7 +419,8 @@ external print_int t.7.18
 | `knormal.ml` 134–271行 | `normalize_exp`。比較の融合は151–169行 |
 | `knormal.ml` 273–344行 | `check` — 型が持てない2つの約束。`--check-knf` |
 | `alpha.ml` | 束縛子を一意な名前に。`rename_exp` は環境を取るので §3 が再利用します |
-| `inline.ml` | 小さな非再帰関数を呼び出し地点へ展開 |
+| `inline.ml` 26–33行 | `size` — 閾値と比べる節点数 |
+| `inline.ml` 41–73行 | `apply` — 呼び出しを本体の複製に置き換える |
 | `optim.ml` | `propagate`・`eliminate` を規定回数まわす |
 
 ---
