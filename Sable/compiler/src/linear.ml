@@ -6,9 +6,9 @@
    code is a graph: blocks that end in a terminator naming their successors.
    Somebody has to turn one into the other, and this is that pass.
 
-   It used to be part of Selection, which meant the control-flow graph did not
-   exist until the code was already RISC-V.  Splitting it out draws the line
-   this compiler wants:
+   Selection could do it on the way past, but then the control-flow graph does
+   not exist until the code is already RISC-V.  Keeping it separate draws the
+   line this compiler wants:
 
      Linear  blocks, values, calls.  Knows nothing about registers, the calling
              convention, or which instructions the target has.

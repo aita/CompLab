@@ -145,10 +145,9 @@ let eliminate exp = let e, _, _ = eliminate exp in e
 
 (* ------------------------------------------------------------- driver *)
 
-(* `flatten_lets` used to run here, re-associating what normalization left
-   nested -- MinCaml's Assoc.  Knormal.let_bind now associates as it builds and
-   the two passes above rebuild their bindings through it, so there is nothing
-   left to repair.
+(* No re-association pass here -- MinCaml's Assoc.  Knormal.let_bind associates
+   as it builds and the two passes above rebuild their bindings through it, so
+   there is nothing left to repair.
 
    A fixed number of rounds rather than a fixed point: the terms carry mutable
    type variables, so structural equality on them is not something to lean on,

@@ -76,8 +76,8 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
     (* ------------------------------------------------------- the graph *)
     (* One row of bits per node, holding that node's neighbours.  The row is
        filled in both directions whatever the nodes are, so it answers "do
-       these two interfere?" as well as "who are your neighbours?" -- the
-       adjacency used to be a separate Hashtbl keyed on the pair.  Only the
+       these two interfere?" as well as "who are your neighbours?", where a
+       Hashtbl keyed on the pair answers only the first.  Only the
        rows of nodes that get simplified are ever iterated, so the rows
        belonging to machine registers cost their bits and nothing else.
 
@@ -186,9 +186,9 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
     Array.iteri (fun i (d, s) -> say "graph move %d: %s -- %s" i (name d) (name s)) moves;
 
     (* ------------------------------------------------------- primitives *)
-    (* The neighbours still in the graph, and the moves still live.  Both used
-       to build a set and hand it back; now they walk the row and skip, which
-       is the same order and allocates nothing.  Nothing below mutates the row
+    (* The neighbours still in the graph, and the moves still live.  Both walk
+       the row and skip rather than building a set to hand back: the same
+       order, and no allocation.  Nothing below mutates the row
        it is walking: add_edge only ever touches the two nodes named, and
        neither is the one being iterated. *)
     let iter_adjacent node f =

@@ -10,7 +10,7 @@
    it wants to see a block after everything it can reach; that is depth-first
    postorder.  And the same depth-first walk finds a back edge if there is one,
    which is how `is_acyclic` answers -- a claim the rest of the back end leans
-   on and nothing used to check.  See doc/regalloc.md §10. *)
+   on, so it is worth checking rather than assuming.  See doc/regalloc.md §10. *)
 
 type t = {
   blocks : Riscv.block array; (* by index, in the function's own order *)
