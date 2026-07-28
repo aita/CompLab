@@ -6,7 +6,7 @@ import {
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { SPEC_BY_TYPE, ports, portValue, type NodeData } from "./spec";
+import { SPEC_BY_TYPE, describe, portValue, type NodeData } from "./spec";
 import { ConnectedContext, ErrorContext, portKey } from "./errors";
 
 export type FerretNode = Node<NodeData, string>;
@@ -14,9 +14,9 @@ export type FerretNode = Node<NodeData, string>;
 // The header is 42px tall, so this is the line the flow runs along.
 const HEADER_MID = 21;
 
-// One renderer for every kind: the spec says which ports to draw, so adding a
-// node kind is a matter of adding an entry to SPECS (and a case in the OCaml
-// lowering).
+// One renderer for every kind: the catalogue says which ports to draw, so a
+// new node kind is an entry in `compiler/lib/spec.ml` and a case in the
+// lowering next to it -- nothing here.
 function FlowNode({ id, type, data, selected }: NodeProps<FerretNode>) {
   const spec = SPEC_BY_TYPE[type];
   const problems = useContext(ErrorContext).get(id);
@@ -24,13 +24,12 @@ function FlowNode({ id, type, data, selected }: NodeProps<FerretNode>) {
   const { updateNodeData } = useReactFlow();
   if (!spec) return <div className="fnode">unknown node {type}</div>;
 
-  const inputs = ports(spec.inputs, data);
-  const outputs = ports(spec.outputs, data);
+  // What this one node looks like -- its name, its sign, the ports it draws
+  // -- is worked out by the compiler, which is also the thing that reads
+  // those port ids back.
+  const { title, glyph, badge, inputs, outputs } = describe(type, data);
   const headerExec = spec.execOut.length === 1 ? spec.execOut[0] : undefined;
   const bodyExec = headerExec ? [] : spec.execOut;
-  const badge = spec.badge?.(data);
-  const title = spec.titleOf?.(data) ?? spec.title;
-  const glyph = spec.glyphOf?.(data) ?? spec.glyph;
 
   const setPortValue = (port: string, text: string) => {
     const values = { ...((data.values as Record<string, number>) ?? {}) };
@@ -76,7 +75,7 @@ function FlowNode({ id, type, data, selected }: NodeProps<FerretNode>) {
         {data.breakpoint === true && (
           <span className="fnode-dot" title="Breakpoint" />
         )}
-        {badge !== undefined && badge !== "" && (
+        {badge !== null && badge !== "" && (
           <span className="fnode-badge">{badge}</span>
         )}
       </div>

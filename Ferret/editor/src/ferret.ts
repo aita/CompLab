@@ -38,10 +38,28 @@ interface RawResult {
 
 interface FerretApi {
   compile(source: string): RawResult;
+  /** The node catalogue, as JSON text. */
+  specs(): string;
+  /** What one node of a kind looks like, given its settings, as JSON text. */
+  describe(kind: string, data: string): string;
+}
+
+function loaded(): FerretApi | undefined {
+  return (globalThis as { ferret?: FerretApi }).ferret;
+}
+
+// The catalogue and the per-node answers are handed over as JSON text rather
+// than reached into as an OCaml value; `spec.ts` gives them their types.
+export function rawSpecs(): string | undefined {
+  return loaded()?.specs();
+}
+
+export function rawDescribe(kind: string, data: string): string | undefined {
+  return loaded()?.describe(kind, data);
 }
 
 export function compile(graph: unknown): CompileResult {
-  const api = (globalThis as { ferret?: FerretApi }).ferret;
+  const api = loaded();
   if (!api) {
     return {
       ok: false,

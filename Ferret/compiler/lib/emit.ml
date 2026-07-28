@@ -43,8 +43,8 @@ and scratch_of_stmt ty = function
   | Assign (_, e) | Log e | Ret e | Drop e -> scratch_of_expr ty e
   | If (c, t, e) ->
       scratch_of_expr ty c @ scratch_of_block ty t @ scratch_of_block ty e
-  | While (pre, c, body) ->
-      scratch_of_block ty pre @ scratch_of_expr ty c @ scratch_of_block ty body
+  | Block (_, body) | Loop (_, body) -> scratch_of_block ty body
+  | Br _ -> []
 
 (* The imports come first, in the order they are declared. *)
 let log_index = 0
@@ -55,7 +55,23 @@ let main_index = 3
 type env = {
   ty : expr -> vtype;
   mutable scratch_next : int;  (* the scratch locals are taken in order *)
+  (* innermost last; an [if] counts as a level even though nothing lands on
+     it, which is why the depth is worked out here rather than by hand *)
+  mutable labels : label option list;
 }
+
+let depth_of env l =
+  let rec find n = function
+    | [] -> invalid_arg "Emit: branch to a label that is not open"
+    | Some x :: _ when x = l -> n
+    | _ :: rest -> find (n + 1) rest
+  in
+  find 0 env.labels
+
+let inside env l f =
+  env.labels <- l :: env.labels;
+  f ();
+  env.labels <- List.tl env.labels
 
 let take_scratch env n =
   let i = env.scratch_next in
@@ -220,19 +236,15 @@ and stmt env b = function
       Wasm.op b Wasm.op_return
   | If (c, t, e) ->
       expr env b c;
-      Wasm.if_else b
-        ~then_:(fun () -> block env b t)
-        ~else_:(if e = [] then None else Some (fun () -> block env b e))
-  | While (pre, c, body) ->
-      (* block { loop { pre; br_if 1 (!cond); body; br 0 } } *)
-      Wasm.block b (fun () ->
-          Wasm.loop b (fun () ->
-              block env b pre;
-              expr env b c;
-              Wasm.op b Wasm.i32_eqz;
-              Wasm.br_if b 1;
-              block env b body;
-              Wasm.br b 0))
+      inside env None (fun () ->
+          Wasm.if_else b
+            ~then_:(fun () -> block env b t)
+            ~else_:(if e = [] then None else Some (fun () -> block env b e)))
+  | Block (l, body) ->
+      inside env (Some l) (fun () -> Wasm.block b (fun () -> block env b body))
+  | Loop (l, body) ->
+      inside env (Some l) (fun () -> Wasm.loop b (fun () -> block env b body))
+  | Br l -> Wasm.br b (depth_of env l)
 
 let wasm_type = function
   | VInt -> Wasm.I64
@@ -260,7 +272,11 @@ let module_of_func (f : func) : string =
   let ty = Ir.type_of (local_types f) in
   let scratch = scratch_of_block ty f.body in
   let env =
-    { ty; scratch_next = List.length f.params + List.length f.vars }
+    {
+      ty;
+      scratch_next = List.length f.params + List.length f.vars;
+      labels = [];
+    }
   in
   let code = Wasm.create () in
   block env code f.body;

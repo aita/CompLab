@@ -1,9 +1,13 @@
 fun main() -> f64 {
   var i : int = 0
   i = 0
-  while (i < 10) {
-    log float((i % 3))
-    i = (i + 1)
+  loop $1 {
+    if (i < 10) {
+      log float((i % 3))
+      i = (i + 1)
+      br $1
+    } else {
+      return (float(i) / 2)
+    }
   }
-  return (float(i) / 2)
 }

@@ -9,9 +9,18 @@ type env = {
   names : string array;  (* local index -> $name *)
   ty : expr -> vtype;
   mutable scratch_next : int;
+  mutable labels : label option list;
   b : Buffer.t;
   mutable indent : int;
 }
+
+let depth_of env l =
+  let rec find n = function
+    | [] -> -1
+    | Some x :: _ when x = l -> n
+    | _ :: rest -> find (n + 1) rest
+  in
+  find 0 env.labels
 
 let line env fmt =
   Printf.ksprintf
@@ -192,24 +201,26 @@ and stmt env = function
   | If (c, t, e) ->
       expr env c;
       line env "if";
+      env.labels <- None :: env.labels;
       nested env (fun () -> block env t);
       if e <> [] then (
         line env "else";
         nested env (fun () -> block env e));
+      env.labels <- List.tl env.labels;
       line env "end"
-  | While (pre, c, body) ->
-      line env "block";
-      nested env (fun () ->
-          line env "loop";
-          nested env (fun () ->
-              block env pre;
-              expr env c;
-              line env "i32.eqz";
-              line env "br_if 1";
-              block env body;
-              line env "br 0");
-          line env "end");
+  | Block (l, body) ->
+      line env "block  ;; $%d" l;
+      env.labels <- Some l :: env.labels;
+      nested env (fun () -> block env body);
+      env.labels <- List.tl env.labels;
       line env "end"
+  | Loop (l, body) ->
+      line env "loop  ;; $%d" l;
+      env.labels <- Some l :: env.labels;
+      nested env (fun () -> block env body);
+      env.labels <- List.tl env.labels;
+      line env "end"
+  | Br l -> line env "br %d  ;; $%d" (depth_of env l) l
 
 let of_func (f : func) : string =
   let ty = Ir.type_of (Emit.local_types f) in
@@ -228,6 +239,7 @@ let of_func (f : func) : string =
       names;
       ty;
       scratch_next = List.length f.params + List.length f.vars;
+      labels = [];
       b = Buffer.create 512;
       indent = 0;
     }

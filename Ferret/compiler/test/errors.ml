@@ -31,16 +31,16 @@ let () =
   case "a number where a condition belongs"
     {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
                    { "id": "c", "type": "const", "data": { "value": 1 } },
-                   { "id": "w", "type": "while",
-                     "data": { "states": [ { "name": "i" } ] } } ],
+                   { "id": "w", "type": "condition", "data": {} },
+                   { "id": "e", "type": "end", "data": { "values": { "value": 0 } } } ],
         "edges": [ { "source": "s", "sourceHandle": "next",
                      "target": "w", "targetHandle": "in" },
                    { "source": "c", "sourceHandle": "out",
                      "target": "w", "targetHandle": "cond" },
-                   { "source": "c", "sourceHandle": "out",
-                     "target": "w", "targetHandle": "init:i" },
-                   { "source": "c", "sourceHandle": "out",
-                     "target": "w", "targetHandle": "step:i" } ] }|};
+                   { "source": "w", "sourceHandle": "true",
+                     "target": "e", "targetHandle": "in" },
+                   { "source": "w", "sourceHandle": "false",
+                     "target": "e", "targetHandle": "in" } ] }|};
 
   case "a condition where a number belongs"
     {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
@@ -71,25 +71,48 @@ let () =
                    { "source": "one", "sourceHandle": "out",
                      "target": "add", "targetHandle": "b" } ] }|};
 
-  case "two chains running into one node"
+  case "a condition with only one way out"
     {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
-                   { "id": "w", "type": "while", "data": { "states": [] } },
-                   { "id": "c", "type": "const", "data": { "value": 1 } },
-                   { "id": "cmp", "type": "compare", "data": { "op": "lt" } },
-                   { "id": "e", "type": "end", "data": {} } ],
+                   { "id": "t", "type": "compare",
+                     "data": { "op": "lt", "values": { "a": 1, "b": 2 } } },
+                   { "id": "w", "type": "condition", "data": {} },
+                   { "id": "e", "type": "end", "data": { "values": { "value": 0 } } } ],
         "edges": [ { "source": "s", "sourceHandle": "next",
                      "target": "w", "targetHandle": "in" },
-                   { "source": "c", "sourceHandle": "out",
-                     "target": "cmp", "targetHandle": "a" },
-                   { "source": "c", "sourceHandle": "out",
-                     "target": "cmp", "targetHandle": "b" },
-                   { "source": "cmp", "sourceHandle": "out",
+                   { "source": "t", "sourceHandle": "out",
                      "target": "w", "targetHandle": "cond" },
-                   { "source": "c", "sourceHandle": "out",
-                     "target": "e", "targetHandle": "value" },
-                   { "source": "w", "sourceHandle": "body",
-                     "target": "e", "targetHandle": "in" },
-                   { "source": "w", "sourceHandle": "next",
+                   { "source": "w", "sourceHandle": "true",
+                     "target": "e", "targetHandle": "in" } ] }|};
+
+  (* Two ways into the middle of a loop is the shape wasm's blocks cannot
+     express without duplicating code, so it is refused rather than guessed
+     at. *)
+  case "a loop entered two ways"
+    {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
+                   { "id": "t", "type": "compare",
+                     "data": { "op": "lt", "values": { "a": 1, "b": 2 } } },
+                   { "id": "c1", "type": "condition", "data": {} },
+                   { "id": "c2", "type": "condition", "data": {} },
+                   { "id": "a", "type": "log", "data": { "values": { "value": 1 } } },
+                   { "id": "b", "type": "log", "data": { "values": { "value": 2 } } },
+                   { "id": "e", "type": "end", "data": { "values": { "value": 0 } } } ],
+        "edges": [ { "source": "s", "sourceHandle": "next",
+                     "target": "c1", "targetHandle": "in" },
+                   { "source": "t", "sourceHandle": "out",
+                     "target": "c1", "targetHandle": "cond" },
+                   { "source": "t", "sourceHandle": "out",
+                     "target": "c2", "targetHandle": "cond" },
+                   { "source": "c1", "sourceHandle": "true",
+                     "target": "a", "targetHandle": "in" },
+                   { "source": "c1", "sourceHandle": "false",
+                     "target": "b", "targetHandle": "in" },
+                   { "source": "a", "sourceHandle": "next",
+                     "target": "c2", "targetHandle": "in" },
+                   { "source": "b", "sourceHandle": "next",
+                     "target": "c2", "targetHandle": "in" },
+                   { "source": "c2", "sourceHandle": "true",
+                     "target": "a", "targetHandle": "in" },
+                   { "source": "c2", "sourceHandle": "false",
                      "target": "e", "targetHandle": "in" } ] }|};
 
   case "an unknown start input"
@@ -100,24 +123,5 @@ let () =
                      "target": "e", "targetHandle": "in" },
                    { "source": "s", "sourceHandle": "var:m",
                      "target": "e", "targetHandle": "value" } ] }|};
-
-  case "an unknown loop state"
-    {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
-                   { "id": "w", "type": "while",
-                     "data": { "states": [ { "name": "i" } ] } },
-                   { "id": "e", "type": "end", "data": {} } ],
-        "edges": [ { "source": "s", "sourceHandle": "next",
-                     "target": "w", "targetHandle": "in" },
-                   { "source": "w", "sourceHandle": "next",
-                     "target": "e", "targetHandle": "in" },
-                   { "source": "w", "sourceHandle": "var:j",
-                     "target": "e", "targetHandle": "value" } ] }|};
-
-  case "a loop state declared twice"
-    {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
-                   { "id": "w", "type": "while",
-                     "data": { "states": [ { "name": "i" }, { "name": "i" } ] } } ],
-        "edges": [ { "source": "s", "sourceHandle": "next",
-                     "target": "w", "targetHandle": "in" } ] }|};
 
   case "not JSON at all" {|{ "nodes": [ |}

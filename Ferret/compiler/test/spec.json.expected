@@ -1,0 +1,276 @@
+{
+  "categories": [ "Flow", "Operators", "Values" ],
+  "nodes": [
+    {
+      "type": "start",
+      "title": "Start",
+      "glyph": "▶",
+      "color": "#12b76a",
+      "category": "Flow",
+      "hint": "Where the flow begins. Its inputs are the exported function's parameters.",
+      "execIn": false,
+      "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
+      "inputs": [],
+      "outputs": [],
+      "data": { "params": [ { "name": "n" } ] },
+      "fields": [
+        {
+          "key": "params",
+          "label": "Inputs",
+          "kind": "names",
+          "itemLabel": "input"
+        }
+      ],
+      "unique": true
+    },
+    {
+      "type": "end",
+      "title": "End",
+      "glyph": "■",
+      "color": "#f79009",
+      "category": "Flow",
+      "hint": "Return a value and stop.",
+      "execIn": true,
+      "execOut": [],
+      "inputs": [ { "id": "value", "label": "result", "kind": "num" } ],
+      "outputs": [],
+      "data": {},
+      "fields": [],
+      "unique": false
+    },
+    {
+      "type": "select",
+      "title": "Choose",
+      "glyph": "?",
+      "color": "#f04438",
+      "category": "Flow",
+      "hint": "The only branch there is: pick one of two numbers by a condition. Both are evaluated, which is safe because nothing in an expression has an effect.",
+      "execIn": false,
+      "execOut": [],
+      "inputs": [
+        { "id": "cond", "label": "if", "kind": "bool" },
+        { "id": "a", "label": "then", "kind": "num" },
+        { "id": "b", "label": "else", "kind": "num" }
+      ],
+      "outputs": [ { "id": "out", "label": "result", "kind": "num" } ],
+      "data": {},
+      "fields": [],
+      "unique": false
+    },
+    {
+      "type": "condition",
+      "title": "Condition",
+      "glyph": "Y",
+      "color": "#f04438",
+      "category": "Flow",
+      "hint": "Sends the flow one way or the other. A loop is a Condition with a wire running back into it from the end of the body.",
+      "execIn": true,
+      "execOut": [
+        { "id": "true", "label": "true", "kind": "exec" },
+        { "id": "false", "label": "false", "kind": "exec" }
+      ],
+      "inputs": [ { "id": "cond", "label": "test", "kind": "bool" } ],
+      "outputs": [],
+      "data": {},
+      "fields": [],
+      "unique": false
+    },
+    {
+      "type": "counter",
+      "title": "Counter",
+      "glyph": "i",
+      "color": "#06aed4",
+      "category": "Flow",
+      "hint": "The only node that holds anything. It starts at one value, and every time the flow passes through it, it moves by another. Wire `by` to something other than a constant and it accumulates.",
+      "execIn": true,
+      "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
+      "inputs": [
+        { "id": "from", "label": "starts at", "kind": "num" },
+        { "id": "by", "label": "moves by", "kind": "num" }
+      ],
+      "outputs": [ { "id": "value", "label": "value", "kind": "num" } ],
+      "data": { "name": "i", "mode": "by", "values": { "from": 0, "by": 1 } },
+      "fields": [
+        { "key": "name", "label": "Name", "kind": "text" },
+        {
+          "key": "mode",
+          "label": "Each pass it",
+          "kind": "select",
+          "options": [
+            [ "by", "moves by the step" ], [ "becomes", "becomes the step" ]
+          ]
+        }
+      ],
+      "unique": false
+    },
+    {
+      "type": "log",
+      "title": "Log",
+      "glyph": "✎",
+      "color": "#0ba5ec",
+      "category": "Flow",
+      "hint": "Hand a value to the host. In the module this is a call to env.log.",
+      "execIn": true,
+      "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
+      "inputs": [ { "id": "value", "label": "value", "kind": "num" } ],
+      "outputs": [],
+      "data": {},
+      "fields": [],
+      "unique": false
+    },
+    {
+      "type": "binop",
+      "title": "Arithmetic",
+      "glyph": "+",
+      "color": "#2e90fa",
+      "category": "Operators",
+      "hint": "Combine two numbers.",
+      "execIn": false,
+      "execOut": [],
+      "inputs": [
+        { "id": "a", "label": "A", "kind": "num" },
+        { "id": "b", "label": "B", "kind": "num" }
+      ],
+      "outputs": [ { "id": "out", "label": "result", "kind": "num" } ],
+      "data": { "op": "add" },
+      "fields": [
+        {
+          "key": "op",
+          "label": "Operator",
+          "kind": "select",
+          "options": [
+            [ "add", "Add  +" ],
+            [ "sub", "Subtract  −" ],
+            [ "mul", "Multiply  ×" ],
+            [ "div", "Divide  ÷" ],
+            [ "mod", "Remainder  %" ],
+            [ "min", "Minimum  min" ],
+            [ "max", "Maximum  max" ]
+          ]
+        }
+      ],
+      "unique": false
+    },
+    {
+      "type": "unop",
+      "title": "Math function",
+      "glyph": "ƒ",
+      "color": "#2e90fa",
+      "category": "Operators",
+      "hint": "A built-in that takes one number.",
+      "execIn": false,
+      "execOut": [],
+      "inputs": [ { "id": "a", "label": "A", "kind": "num" } ],
+      "outputs": [ { "id": "out", "label": "result", "kind": "num" } ],
+      "data": { "op": "abs" },
+      "fields": [
+        {
+          "key": "op",
+          "label": "Function",
+          "kind": "select",
+          "options": [
+            [ "neg", "Negate  neg" ],
+            [ "abs", "Absolute value  abs" ],
+            [ "sqrt", "Square root  sqrt" ],
+            [ "floor", "Round down  floor" ],
+            [ "ceil", "Round up  ceil" ],
+            [ "round", "Round  round" ]
+          ]
+        }
+      ],
+      "unique": false
+    },
+    {
+      "type": "compare",
+      "title": "Comparison",
+      "glyph": "<",
+      "color": "#7a5af8",
+      "category": "Operators",
+      "hint": "Compare two numbers and produce true or false.",
+      "execIn": false,
+      "execOut": [],
+      "inputs": [
+        { "id": "a", "label": "A", "kind": "num" },
+        { "id": "b", "label": "B", "kind": "num" }
+      ],
+      "outputs": [ { "id": "out", "label": "result", "kind": "bool" } ],
+      "data": { "op": "lt" },
+      "fields": [
+        {
+          "key": "op",
+          "label": "Test",
+          "kind": "select",
+          "options": [
+            [ "lt", "Less than  <" ],
+            [ "le", "At most  ≤" ],
+            [ "gt", "Greater than  >" ],
+            [ "ge", "At least  ≥" ],
+            [ "eq", "Equal  =" ],
+            [ "ne", "Not equal  ≠" ]
+          ]
+        }
+      ],
+      "unique": false
+    },
+    {
+      "type": "logic",
+      "title": "Logic",
+      "glyph": "&",
+      "color": "#7a5af8",
+      "category": "Operators",
+      "hint": "Combine true and false. And and Or evaluate both sides.",
+      "execIn": false,
+      "execOut": [],
+      "inputs": [
+        { "id": "a", "label": "A", "kind": "bool" },
+        { "id": "b", "label": "B", "kind": "bool" }
+      ],
+      "outputs": [ { "id": "out", "label": "result", "kind": "bool" } ],
+      "data": { "op": "and" },
+      "fields": [
+        {
+          "key": "op",
+          "label": "Operator",
+          "kind": "select",
+          "options": [
+            [ "and", "And  and" ], [ "or", "Or  or" ], [ "not", "Not  not" ]
+          ]
+        }
+      ],
+      "unique": false
+    },
+    {
+      "type": "const",
+      "title": "Constant",
+      "glyph": "#",
+      "color": "#667085",
+      "category": "Values",
+      "hint": "One f64.const, for when the same number is wanted in several places. A single use can be typed into the port instead.",
+      "execIn": false,
+      "execOut": [],
+      "inputs": [],
+      "outputs": [ { "id": "out", "label": "value", "kind": "num" } ],
+      "data": { "value": 0 },
+      "fields": [ { "key": "value", "label": "Value", "kind": "number" } ],
+      "unique": false
+    },
+    {
+      "type": "random",
+      "title": "Random",
+      "glyph": "~",
+      "color": "#ee46bc",
+      "category": "Values",
+      "hint": "A number in [min, max), drawn from the host. The one impure node: it is drawn once each time the node is reached, and every reader of that node sees the same draw.",
+      "execIn": false,
+      "execOut": [],
+      "inputs": [
+        { "id": "min", "label": "min", "kind": "num" },
+        { "id": "max", "label": "max", "kind": "num" }
+      ],
+      "outputs": [ { "id": "out", "label": "value", "kind": "num" } ],
+      "data": { "values": { "min": 0, "max": 1 } },
+      "fields": [],
+      "unique": false
+    }
+  ]
+}

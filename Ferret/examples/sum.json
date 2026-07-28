@@ -1,18 +1,150 @@
 {
   "name": "Sum of 1 to n",
   "nodes": [
-    {"id":"start","type":"start","position":{"x":0,"y":40},"data":{"params":[{"name":"n"}]}},
-    {"id":"count","type":"for","position":{"x":400,"y":0},"data":{"name":"i","states":[{"name":"total"}],"values":{"from":1,"by":1,"init:total":0}}},
-    {"id":"done","type":"end","position":{"x":1120,"y":0},"data":{}},
-    {"id":"add","type":"binop","position":{"x":760,"y":420},"data":{"op":"add"}}
+    {
+      "id": "start",
+      "type": "start",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "params": [
+          {
+            "name": "n"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cond",
+      "type": "condition",
+      "position": {
+        "x": 420,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "total",
+      "type": "counter",
+      "position": {
+        "x": 820,
+        "y": 0
+      },
+      "data": {
+        "name": "total",
+        "values": {
+          "from": 0
+        }
+      }
+    },
+    {
+      "id": "i",
+      "type": "counter",
+      "position": {
+        "x": 1160,
+        "y": 0
+      },
+      "data": {
+        "name": "i",
+        "values": {
+          "from": 1,
+          "by": 1
+        }
+      }
+    },
+    {
+      "id": "done",
+      "type": "end",
+      "position": {
+        "x": 420,
+        "y": 520
+      },
+      "data": {}
+    },
+    {
+      "id": "test",
+      "type": "compare",
+      "position": {
+        "x": 820,
+        "y": 300
+      },
+      "data": {
+        "op": "le"
+      }
+    }
   ],
   "edges": [
-    {"id":"e1","source":"start","sourceHandle":"next","target":"count","targetHandle":"in"},
-    {"id":"e2","source":"count","sourceHandle":"next","target":"done","targetHandle":"in"},
-    {"id":"e3","source":"start","sourceHandle":"var:n","target":"count","targetHandle":"to"},
-    {"id":"e4","source":"count","sourceHandle":"var:total","target":"add","targetHandle":"a"},
-    {"id":"e5","source":"count","sourceHandle":"i","target":"add","targetHandle":"b"},
-    {"id":"e6","source":"add","sourceHandle":"out","target":"count","targetHandle":"step:total"},
-    {"id":"e7","source":"count","sourceHandle":"var:total","target":"done","targetHandle":"value"}
+    {
+      "id": "x1",
+      "source": "start",
+      "sourceHandle": "next",
+      "target": "cond",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x2",
+      "source": "cond",
+      "sourceHandle": "true",
+      "target": "total",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x3",
+      "source": "total",
+      "sourceHandle": "next",
+      "target": "i",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x4",
+      "source": "i",
+      "sourceHandle": "next",
+      "target": "cond",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x5",
+      "source": "cond",
+      "sourceHandle": "false",
+      "target": "done",
+      "targetHandle": "in"
+    },
+    {
+      "id": "e1",
+      "source": "i",
+      "sourceHandle": "value",
+      "target": "test",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e3",
+      "source": "test",
+      "sourceHandle": "out",
+      "target": "cond",
+      "targetHandle": "cond"
+    },
+    {
+      "id": "e4",
+      "source": "i",
+      "sourceHandle": "value",
+      "target": "total",
+      "targetHandle": "by"
+    },
+    {
+      "id": "e5",
+      "source": "total",
+      "sourceHandle": "value",
+      "target": "done",
+      "targetHandle": "value"
+    },
+    {
+      "id": "p",
+      "source": "start",
+      "sourceHandle": "var:n",
+      "target": "test",
+      "targetHandle": "b"
+    }
   ]
 }

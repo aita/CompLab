@@ -1,10 +1,12 @@
 fun main(n) -> f64 {
   var i : int = 0
   i = 0
-  loop {
-    watch#0(i)
-    exit unless (float(i) < n)
-    i = watch#1((i + 1))
+  loop $1 {
+    if watch#0((float(i) < n)) {
+      i = watch#1((i + 1))
+      br $1
+    } else {
+      return float(i)
+    }
   }
-  return float(i)
 }

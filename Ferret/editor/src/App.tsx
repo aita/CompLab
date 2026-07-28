@@ -21,12 +21,14 @@ import Inspector from "./Inspector";
 import RunPanel from "./RunPanel";
 import CodePanel from "./CodePanel";
 import ContextMenu, { type MenuItem } from "./ContextMenu";
+import Wire from "./Wire";
 import { ConnectedContext, ErrorContext, portKey } from "./errors";
-import { SPECS, SPEC_BY_TYPE, portKind, type NodeData } from "./spec";
+import { SPECS, SPEC_BY_TYPE, describe, portKind, type NodeData } from "./spec";
 import { compile, type CompileResult } from "./ferret";
 import { EXAMPLES, blank } from "./examples";
 
 const nodeTypes = Object.fromEntries(SPECS.map((s) => [s.type, FlowNode]));
+const edgeTypes = { wire: Wire };
 const STORAGE_KEY = "ferret.graph";
 
 const EXEC_COLOR = "#94a3b8";
@@ -167,7 +169,7 @@ export default function App() {
     (nodeId: string, handle: string | null) => {
       const node = nodes.find((n) => n.id === nodeId);
       if (!node?.type) return undefined;
-      return portKind(SPEC_BY_TYPE[node.type], node.data, handle);
+      return portKind(node.type, node.data, handle);
     },
     [nodes],
   );
@@ -186,26 +188,28 @@ export default function App() {
     (c) => {
       const kind = kindOf(c.source, c.sourceHandle ?? null);
       setEdges((current) => {
-        // An input takes one connection, and so does an exec output: dropping
-        // a new edge on an occupied port replaces what was there.
-        let kept = current.filter(
-          (e) => !(e.target === c.target && e.targetHandle === c.targetHandle),
-        );
-        if (kind === "exec")
-          kept = kept.filter(
-            (e) => !(e.source === c.source && e.sourceHandle === c.sourceHandle),
-          );
+        // A value input takes one connection and an exec output leads one
+        // place, so dropping a new wire on either replaces what was there.
+        // An exec *input* takes as many as it likes: that is how a loop is
+        // closed, with the end of the body running back into a condition.
+        let kept =
+          kind === "exec"
+            ? current.filter(
+                (e) =>
+                  !(e.source === c.source && e.sourceHandle === c.sourceHandle),
+              )
+            : current.filter(
+                (e) =>
+                  !(e.target === c.target && e.targetHandle === c.targetHandle),
+              );
         return addEdge(c, kept);
       });
     },
     [kindOf, setEdges],
   );
 
-  // Everything is routed with right angles.  A loop's next value has to travel
-  // from a node's output back to the loop's input, which is right-to-left, and
-  // a curve for that swings out across half the canvas; a step route turns the
-  // corner instead.  While a node is selected, every wire that does not touch
-  // it fades, which is the only way to follow one thread through the feedback.
+  // While a node is selected, every wire that does not touch it fades, which
+  // is the only way to follow one thread through a loop's feedback.
   const styledEdges = useMemo(
     () =>
       edges.map((e) => {
@@ -218,37 +222,26 @@ export default function App() {
             : NUM_COLOR;
         const near =
           selected === null || e.source === selected || e.target === selected;
-        // Parallel routes would otherwise stack into one line, and a line that
-        // lands on a card's border reads as part of the card.  Spread them by
-        // a fixed amount per edge so each gets its own corridor.
-        const lane =
-          (e.id.split("").reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7) &
-            7) * 8;
         return {
           ...e,
-          type: "smoothstep" as const,
-          pathOptions: {
-            borderRadius: exec ? 14 : 8,
-            offset: (exec ? 24 : 14) + lane,
-          },
-          markerEnd: {
-            type: MarkerType.ArrowClosed,
-            width: 14,
-            height: 14,
-            color,
-          },
-          style: {
-            strokeWidth: exec ? 2 : 1.5,
-            stroke: color,
-            opacity: near ? 1 : 0.12,
-          },
+          type: "wire" as const,
+          data: { color, exec, faded: !near },
+          // Only the thread of execution carries an arrowhead; a value's
+          // direction is already told by which side of a card it leaves.
+          markerEnd: exec
+            ? { type: MarkerType.ArrowClosed, width: 13, height: 13, color }
+            : undefined,
         };
       }),
     [edges, kindOf, selected],
   );
 
   const addNode = useCallback(
-    (type: string, at?: { x: number; y: number }) => {
+    (
+      type: string,
+      at?: { x: number; y: number },
+      preset?: NodeData,
+    ) => {
       const spec = SPEC_BY_TYPE[type];
       if (spec.unique && nodes.some((n) => n.type === type)) return;
       const id = `${type}_${counter.current++}`;
@@ -260,7 +253,14 @@ export default function App() {
         });
       setNodes((current) => [
         ...current,
-        { id, type, position, data: structuredClone(spec.data) },
+        {
+          id,
+          type,
+          position,
+          // The palette offers one operator of a family at a time, so what it
+          // asks for arrives here already set.
+          data: { ...structuredClone(spec.data), ...preset },
+        },
       ]);
       setSelected(id);
       setTab("node");
@@ -402,7 +402,7 @@ export default function App() {
       setMenu({
         x: event.clientX,
         y: event.clientY,
-        title: spec ? (spec.titleOf?.(node.data) ?? spec.title) : node.id,
+        title: spec ? describe(node.type!, node.data).title : node.id,
         items,
       });
     },
@@ -469,11 +469,18 @@ export default function App() {
               }}
               onDrop={(e) => {
                 e.preventDefault();
-                const type = e.dataTransfer.getData("application/ferret-node");
-                if (!type) return;
+                const dropped = e.dataTransfer.getData(
+                  "application/ferret-node",
+                );
+                if (!dropped) return;
+                const { type, data } = JSON.parse(dropped) as {
+                  type: string;
+                  data?: NodeData;
+                };
                 addNode(
                   type,
                   screenToFlowPosition({ x: e.clientX, y: e.clientY }),
+                  data,
                 );
               }}
             >
@@ -481,6 +488,7 @@ export default function App() {
                 nodes={nodes}
                 edges={styledEdges}
                 nodeTypes={nodeTypes}
+                edgeTypes={edgeTypes}
                 onNodesChange={onNodesChange}
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}

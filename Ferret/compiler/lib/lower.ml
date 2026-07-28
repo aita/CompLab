@@ -4,12 +4,11 @@
    Exec ports are pushed: the walk starts at the start node and follows the
    exec edges forward, turning each node it meets into a statement.
 
-   There is no assignment in the graph language. A value either comes from an
-   edge or from a loop's own state, and the only node that owns state is the
-   loop: it declares named slots, takes an initial value and a next value for
-   each, and offers the current value as an output. So the loop node is the
-   phi, written down. Everything the lowering emits below -- the assignments,
-   the temporaries -- exists only in the IR.
+   A Counter is the only node that holds anything: it starts at one value and
+   moves by another every time execution passes through it.  A Condition only
+   branches.  So a loop is drawn rather than declared -- a wire runs from the
+   end of the body back into the Condition -- and the exec edges form a real
+   graph.  Recovering wasm's block structure from it is [structure] below.
 
    A node whose output feeds several inputs is computed once, into a local,
    because with no way to name an intermediate value in the graph, feeding one
@@ -21,10 +20,10 @@
 
    Numbers are typed as they are lowered.  A literal that is whole is an i64,
    and so is anything built only out of those; everything else is an f64.  A
-   loop's slot cannot be typed by looking at it once -- its next value reads
-   the slot -- so the whole lowering is its own fixpoint: it starts by
-   assuming every slot is whole, and runs again whenever that turns out to be
-   too narrow.  Assumptions only ever loosen, so it settles. *)
+   counter cannot be typed by looking at it once -- its step reads the counter
+   -- so the whole lowering is its own fixpoint: it starts by assuming every
+   counter is whole, and runs again whenever that turns out to be too narrow.
+   Assumptions only ever loosen, so it settles. *)
 
 open Ir
 
@@ -90,14 +89,18 @@ let watch_point ctx ~node ~label =
   ctx.watches <- (node, label) :: ctx.watches;
   List.length ctx.watches - 1
 
-let slot_key (n : Graph.node) name = n.id ^ "\000" ^ name
+let slot_key (n : Graph.node) = n.id
 
 let assumed ctx key =
   Option.value (Hashtbl.find_opt ctx.slot_ty key) ~default:VInt
 
-let state_slot ctx (n : Graph.node) name =
-  let key = slot_key n name in
-  slot ctx ~key ~display:name ~ty:(assumed ctx key)
+(* Every counter owns one local, named after the node so two counters called
+   the same thing in the editor still come out apart. *)
+let state_slot ctx (n : Graph.node) =
+  let key = slot_key n in
+  slot ctx ~key
+    ~display:(Graph.string_field n "name" ~default:"i")
+    ~ty:(assumed ctx key)
 
 (* A group is one place in the emitted code where a set of expressions is
    evaluated together: a statement, a loop's condition, a loop's whole set of
@@ -261,8 +264,7 @@ and watched ctx (n : Graph.node) (expr, ty) =
   (* A loop reports its whole state once per iteration, from the top of the
      loop, rather than every time a slot is read; the start node has nothing
      to report that its caller does not already know. *)
-  if n.kind = "while" || n.kind = "for" || n.kind = "start"
-     || not (Graph.flag n "breakpoint")
+  if n.kind = "counter" || n.kind = "start" || not (Graph.flag n "breakpoint")
   then (expr, ty)
   else
     let i = watch_point ctx ~node:n.id ~label:"value" in
@@ -279,27 +281,11 @@ and value_of ctx (n : Graph.node) port : expr * vtype =
       else (
         bad "the start node has no input called %s" name;
         (Int 0, VInt))
-  | "while" ->
-      (* Reading a loop's state stops the backward walk: the value is a local,
-         so the cond and the next-value expressions may name it without that
-         being a cycle. *)
-      let name = after_colon port in
-      if List.mem name (declared_names n "states") then
-        (Local (state_slot ctx n name), assumed ctx (slot_key n name))
-      else (
-        bad "this loop has no state called %s" name;
-        (Int 0, VInt))
-  | "for" ->
-      (* The counter has a port of its own; the state slots are named. *)
-      let name =
-        if port = "i" then Graph.string_field n "name" ~default:"i"
-        else after_colon port
-      in
-      if port = "i" || List.mem name (declared_names n "states") then
-        (Local (state_slot ctx n name), assumed ctx (slot_key n name))
-      else (
-        bad "this loop has no state called %s" name;
-        (Int 0, VInt))
+  | "counter" ->
+      (* Reading what a counter holds stops the backward walk: the value is a
+         local, so the step may name the counter itself without that being a
+         cycle. *)
+      (Local (state_slot ctx n), assumed ctx (slot_key n))
   | "const" -> literal (Graph.number_field n "value" ~default:0.)
   | "binop" -> (
       let op = Graph.string_field n "op" ~default:"add" in
@@ -384,6 +370,8 @@ and number ctx (n : Graph.node) port : expr * vtype =
           port (type_name ty);
         (Int 0, VInt))
 
+(* The parsed text, node by node, using the same helpers the wired-up version
+   goes through -- so it types and shares exactly the same way. *)
 and condition ctx (n : Graph.node) port : expr =
   match Graph.into ctx.g ~node:n.id ~port with
   | None ->
@@ -398,167 +386,253 @@ and condition ctx (n : Graph.node) port : expr =
           (type_name ty);
         untrue)
 
+
 (* ---------------------------------------------------------------- exec *)
-
-let rec chain ctx (from : Graph.node) port : block =
-  match Graph.out_of ctx.g ~node:from.id ~port with
-  | None -> []
-  | Some e ->
-      let n = Graph.find ctx.g e.dst in
-      if Hashtbl.mem ctx.entered n.id then (
-        complain ctx ~node:n.id
-          "two chains run into this node; a node belongs to one chain";
-        [])
-      else (
-        Hashtbl.replace ctx.entered n.id ();
-        step ctx n)
-
-and step ctx (n : Graph.node) : block =
-  match n.kind with
-  | "log" ->
-      let pre, v = group ctx (fun () -> reported ctx n (number ctx n "value")) in
-      let rest = chain ctx n "next" in
-      (pre @ [ Log v ]) @ rest
-  | "end" ->
-      let pre, v = group ctx (fun () -> reported ctx n (number ctx n "value")) in
-      pre @ [ Ret v ]
-  | "while" -> loop ctx n
-  | "for" -> counted ctx n
-  | kind ->
-      complain ctx ~node:n.id "the %s node cannot be part of the flow" kind;
-      chain ctx n "next"
 
 (* The host takes f64s, so what log and end hand over is widened -- after the
    breakpoint, which reports the value in the type it was worked out in. *)
-and reported ctx (n : Graph.node) v = as_float (watched ctx n v)
+let reported ctx (n : Graph.node) v = as_float (watched ctx n v)
 
-and loop ctx (n : Graph.node) : block =
-  check_names ctx n "states" "loop states";
-  (* A plain loop's condition is whatever is plugged into it. *)
-  carry ctx n (declared_names n "states") (fun _ ->
-      condition ctx n "cond")
-
-(* A counted loop is the same machine with one slot the node owns: the
-   counter starts at [from], gains [by] every pass along with everything else,
-   and the condition is written for you.  Accumulators go in the state slots
-   beside it, because a count with nothing to add up is rarely the point. *)
-and counted ctx (n : Graph.node) : block =
-  check_names ctx n "states" "loop states";
-  let name = Graph.string_field n "name" ~default:"i" in
-  if name = "" then complain ctx ~node:n.id "the counter has no name";
-  if List.mem name (declared_names n "states") then
-    complain ctx ~node:n.id "%s is both the counter and a state slot" name;
-  carry ctx n (name :: declared_names n "states") (fun slots ->
-      match slots with
-      | (i, ty) :: _ -> counter_test ctx n (Local i, ty)
-      | [] -> untrue)
-
-(* Keep going while the counter has not passed [to].  Which way that is
-   depends on the sign of the step, and when the step is a literal -- which it
-   nearly always is -- the compiler knows it and the loop tests one thing.  A
-   computed step falls back to a form that reads the same either way:
-   (i - to) * by is at most zero exactly while the counter is on the near side
-   of the end. *)
-and counter_test ctx (n : Graph.node) cur =
-  let bound = number ctx n "to" in
-  let by = number ctx n "by" in
-  let compare op =
-    let a, b, _ = unify cur bound in
-    Cmp (op, a, b)
-  in
-  match by with
-  | Int k, _ -> compare (if k >= 0 then Le else Ge)
-  | Num x, _ -> compare (if x >= 0. then Le else Ge)
-  | _ ->
-      let a, b, t = unify cur bound in
-      let gap, step, t = unify (Bin (Sub, a, b), t) by in
-      Cmp (Le, Bin (Mul, gap, step), if t = VInt then Int 0 else Num 0.)
-
-(* The shared part: slots that all move together at the end of each pass. *)
-and carry ctx (n : Graph.node) names cond_of : block =
-  (* The slots come first so that the condition and the next-value
-     expressions, which read them, resolve to locals rather than recursing. *)
-  let slots = List.map (fun s -> state_slot ctx n s) names in
-  let types = List.map (fun s -> assumed ctx (slot_key n s)) names in
-  let counted = n.kind = "for" in
-  (* The counter's ends belong to the node rather than to a named port. *)
-  let init_of s = if counted && s == List.hd names then "from" else "init:" ^ s in
-  let next_of i s ty =
-    if counted && s == List.hd names then
-      let a, b, t = unify (Local i, ty) (number ctx n "by") in
-      (Bin (Add, a, b), t)
-    else number ctx n ("step:" ^ s)
-  in
-  (* One group per initial value: the group's own assignment writes a state
-     slot, which a later initial value is allowed to read. *)
-  let inits =
-    List.concat
-      (List.map2
-         (fun i (s, want) ->
-           let pre, v = group ctx (fun () -> number ctx n (init_of s)) in
-           note_type ctx n s (snd v);
-           pre @ [ Assign (i, coerce ctx v want) ])
-         slots
-         (List.combine names types))
-  in
-  let watching =
-    if Graph.flag n "breakpoint" then
-      List.map2
-        (fun name (i, ty) ->
-          Drop (Watch (watch_point ctx ~node:n.id ~label:name, ty, Local i)))
-        names
-        (List.combine slots types)
-    else []
-  in
-  let pre_cond, cond =
-    group ctx (fun () -> cond_of (List.combine slots types))
-  in
-  let body = chain ctx n "body" in
-  (* Every next-value expression reads the state as it was at the top of the
-     iteration, so they share one group, and with more than one slot they land
-     in temporaries before any of them is written back. *)
-  let pre_steps, steps =
-    group ctx (fun () ->
-        List.map2
-          (fun (i, s) want ->
-            let v = next_of i s want in
-            note_type ctx n s (snd v);
-            coerce ctx v want)
-          (List.combine slots names)
-          types)
-  in
-  let updates =
-    match (slots, steps) with
-    | [], _ | _, [] -> []
-    | [ i ], [ e ] -> [ Assign (i, e) ]
-    | _ ->
-        let temps =
-          List.map2
-            (fun s ty ->
-              slot ctx
-                ~key:(n.id ^ "\000next\000" ^ s)
-                ~display:(s ^ "_next") ~ty)
-            names types
-        in
-        List.map2 (fun t e -> Assign (t, e)) temps steps
-        @ List.map2 (fun i t -> Assign (i, Local t)) slots temps
-  in
-  let rest = chain ctx n "next" in
-  inits
-  @ [ While (watching @ pre_cond, cond, body @ pre_steps @ updates) ]
-  @ rest
-
-(* Loosen the assumption about a slot if what feeds it does not fit. *)
-and note_type ctx (n : Graph.node) name ty =
-  let key = slot_key n name in
+(* Loosen the assumption about a counter if what feeds it does not fit. *)
+let note_type ctx (n : Graph.node) (e, ty) =
+  let key = slot_key n in
   let want = join (assumed ctx key) ty in
   if want <> assumed ctx key then (
     Hashtbl.replace ctx.slot_ty key want;
-    ctx.too_narrow <- true)
+    ctx.too_narrow <- true);
+  (e, ty)
+
+let exec_kinds = [ "log"; "end"; "condition"; "counter" ]
+
+(* A way out that was left unwired is a vertex of its own rather than a
+   missing successor, so that a node with two exits keeps two of them however
+   little is drawn: which pin is dangling is the whole question, and a list
+   with a hole in it cannot say. *)
+let gap ~node ~port = node ^ "#gap:" ^ port
+let is_gap part = String.starts_with ~prefix:"gap:" part
+
+let node_of v =
+  match String.index_opt v '#' with Some i -> String.sub v 0 i | None -> v
+
+let part_of v =
+  match String.index_opt v '#' with
+  | Some i -> String.sub v (i + 1) (String.length v - i - 1)
+  | None -> ""
+
+(* A breakpoint on a node that carries no value of its own -- a counter, a
+   condition -- reports what it works out as it passes through. *)
+
+let watched_as ctx (n : Graph.node) label (expr, ty) =
+  if not (Graph.flag n "breakpoint") then (expr, ty)
+  else (Watch (watch_point ctx ~node:n.id ~label, ty, expr), ty)
+
+(* What each vertex does, before it hands control on. *)
+let rec statements ctx v : block =
+  let n = Graph.find ctx.g (node_of v) in
+  match (n.kind, part_of v) with
+  | _, part when is_gap part -> []
+  | _ -> statements_of ctx n
+
+and statements_of ctx (n : Graph.node) : block =
+  match n.kind with
+  | "log" ->
+      let pre, v = group ctx (fun () -> reported ctx n (number ctx n "value")) in
+      pre @ [ Log v ]
+  | "end" ->
+      let pre, v = group ctx (fun () -> reported ctx n (number ctx n "value")) in
+      pre @ [ Ret v ]
+  | "condition" -> []
+  | "counter" ->
+      (* Passing through moves it.  Usually that means adding the step to what
+         it holds; a counter set to "becomes" takes the value outright, which
+         is what a state that is not counting anything needs. *)
+      let i = state_slot ctx n in
+      let want = assumed ctx (slot_key n) in
+      let replace = Graph.string_field n "mode" ~default:"by" = "becomes" in
+      let pre, v =
+        group ctx (fun () ->
+            let step = number ctx n "by" in
+            note_type ctx n
+              (if replace then step
+               else
+                 let a, b, ty = unify (Local i, want) step in
+                 (Bin (Add, a, b), ty)))
+      in
+      let e, ty = watched_as ctx n "value" v in
+      pre @ [ Assign (i, coerce ctx (e, ty) want) ]
+  | kind ->
+      complain ctx ~node:n.id "the %s node cannot be part of the flow" kind;
+      []
+
+(* The successors of a vertex, in the order its ports are drawn. *)
+let exec_succs ctx v =
+  let n = Graph.find ctx.g (node_of v) in
+  let out port =
+    match Graph.out_of ctx.g ~node:n.id ~port with
+    | Some e -> [ e.dst ]
+    | None -> []
+  in
+  let way port =
+    match Graph.out_of ctx.g ~node:n.id ~port with
+    | Some e -> e.dst
+    | None -> gap ~node:n.id ~port
+  in
+  match (n.kind, part_of v) with
+  | _, part when is_gap part -> []
+  | "condition", _ -> [ way "true"; way "false" ]
+  | "end", _ -> []
+  | _ -> out "next"
+
+(* ------------------------------------------------- structure recovery *)
+
+(* Turn the control-flow graph back into blocks and loops.  Every node is
+   written out exactly once: at the dominator that owns it if only one path
+   reaches it, and otherwise inside a block that both paths can branch to.
+   This is the standard reducible-CFG shape -- a loop header becomes a [loop],
+   a node two branches join at becomes a [block] wrapped round everything that
+   branches to it, and everything else is written where it is reached. *)
+type frame = { at : string; label : Ir.label }
+
+let structure ctx (g : Cfg.t) =
+  let next_label = ref 0 in
+  let fresh () =
+    incr next_label;
+    !next_label
+  in
+  let node id = Graph.find ctx.g (node_of id) in
+  let dom_children =
+    let t = Hashtbl.create 32 in
+    Array.iter
+      (fun n ->
+        match Hashtbl.find_opt g.idom n with
+        | Some d when d <> n ->
+            Hashtbl.replace t d (n :: Option.value (Hashtbl.find_opt t d) ~default:[])
+        | _ -> ())
+      g.order;
+    t
+  in
+  let rec do_tree frames n : block =
+    if Cfg.is_header g n then
+      let l = fresh () in
+      [ Loop (l, within ({ at = n; label = l } :: frames) n) ]
+    else within frames n
+  and within frames n : block =
+    (* The joins this node owns, outermost last, so that a branch to one lands
+       just before its code. *)
+    let joins =
+      Option.value (Hashtbl.find_opt dom_children n) ~default:[]
+      |> List.filter (Cfg.is_join g)
+      |> List.sort (fun a b -> compare (Cfg.rank g b) (Cfg.rank g a))
+    in
+    let rec wrap frames = function
+      | [] -> code frames n
+      | m :: rest ->
+          let l = fresh () in
+          Block (l, wrap ({ at = m; label = l } :: frames) rest)
+          :: do_tree frames m
+    in
+    wrap frames joins
+  and code frames n : block =
+    let stmts = statements ctx n in
+    let go target =
+      match List.find_opt (fun f -> f.at = target) frames with
+      | Some f -> [ Br f.label ]
+      | None -> do_tree frames target
+    in
+    match ((node n).kind, part_of n, Cfg.successors g n) with
+    | "condition", _, [ t; f ] ->
+        let pre, c =
+          group ctx (fun () ->
+              fst
+                (watched_as ctx (node n) "test"
+                   (condition ctx (node n) "cond", VBool)))
+        in
+        stmts @ pre @ [ If (c, go t, go f) ]
+    (* Reaching a pin that was never wired.  Inside a loop body this would
+       have been closed back to the step; anywhere else there is nothing it
+       could sensibly mean. *)
+    | _, part, [] when is_gap part ->
+        complain ctx ~node:(node_of n)
+          "both ways out of this node have to go somewhere";
+        stmts
+    | _, _, [ s ] -> stmts @ go s
+    | _, _, _ -> stmts
+  in
+  do_tree [] g.entry
+
+(* A branch to the end of the block you are already at the end of does
+   nothing, and both arms of an if that joins immediately after it end that
+   way.  Dropping those is what makes a plain if/else read like one. *)
+let rec settle l = function
+  | [ Br m ] when m = l -> []
+  | [ If (c, t, e) ] -> [ If (c, settle l t, settle l e) ]
+  | s :: rest -> s :: settle l rest
+  | [] -> []
+
+let rec tidy_block b = List.map tidy b
+
+and tidy = function
+  | Block (l, body) -> Block (l, settle l (tidy_block body))
+  | Loop (l, body) -> Loop (l, tidy_block body)
+  | If (c, t, e) -> If (c, tidy_block t, tidy_block e)
+  | s -> s
+
+(* Which counters a counter's starting value reads.  The walk stops at a
+   counter, because that is where the backward walk stops when the value is
+   built for real. *)
+let start_reads ctx (n : Graph.node) =
+  let seen = Hashtbl.create 8 in
+  let found = ref [] in
+  let rec walk node port =
+    match Graph.into ctx.g ~node ~port with
+    | None -> ()
+    | Some e ->
+        let src = Graph.find ctx.g e.src in
+        if src.kind = "counter" then found := src.id :: !found
+        else if not (Hashtbl.mem seen src.id) then (
+          Hashtbl.replace seen src.id ();
+          List.iter
+            (fun (edge : Graph.edge) ->
+              if edge.dst = src.id then walk src.id edge.dst_port)
+            ctx.g.edges)
+  in
+  walk n.id "from";
+  !found
+
+let ordered_counters ctx counters =
+  let done_ = Hashtbl.create 16 and busy = Hashtbl.create 16 in
+  let out = ref [] in
+  let by_id = List.map (fun (n : Graph.node) -> (n.id, n)) counters in
+  let rec visit (n : Graph.node) =
+    if not (Hashtbl.mem done_ n.id) then
+      if Hashtbl.mem busy n.id then
+        complain ctx ~node:n.id
+          "these counters' starting values depend on each other"
+      else (
+        Hashtbl.replace busy n.id ();
+        List.iter
+          (fun id ->
+            match List.assoc_opt id by_id with
+            | Some m when m.Graph.id <> n.id -> visit m
+            | _ -> ())
+          (start_reads ctx n);
+        Hashtbl.remove busy n.id;
+        Hashtbl.replace done_ n.id ();
+        out := n :: !out)
+  in
+  List.iter visit counters;
+  List.rev !out
 
 (* --------------------------------------------------------------- entry *)
 
-let once (g : Graph.t) fanout slot_ty =
+let once (g : Graph.t) slot_ty =
+  let fanout = Hashtbl.create 32 in
+  List.iter
+    (fun (e : Graph.edge) ->
+      let k = e.src ^ "\000" ^ e.src_port in
+      Hashtbl.replace fanout k
+        (1 + Option.value (Hashtbl.find_opt fanout k) ~default:0))
+    g.edges;
   let ctx =
     {
       g;
@@ -603,30 +677,58 @@ let once (g : Graph.t) fanout slot_ty =
           (fun p -> ignore (slot ctx ~key:("\001" ^ p) ~display:p ~ty:VFloat))
           ctx.params;
         ctx.vars <- [];
-        Hashtbl.replace ctx.entered start.id ();
-        chain ctx start "next"
+        (* Every counter is set up before anything runs, whichever loop it
+           later turns out to sit inside.  One counter's starting value may
+           read another's, so they go in an order that respects that rather
+           than in whatever order the file happens to list them: moving a node
+           in the editor must not change what a program means. *)
+        let counters = ordered_counters ctx (Graph.nodes_of_kind g "counter") in
+        let starts =
+          List.concat_map
+            (fun n ->
+              let i = state_slot ctx n in
+              let want = assumed ctx (slot_key n) in
+              let pre, v = group ctx (fun () -> number ctx n "from") in
+              ignore (note_type ctx n v);
+              pre @ [ Assign (i, coerce ctx v want) ])
+            counters
+        in
+        (match Graph.out_of g ~node:start.id ~port:"next" with
+        | None -> starts
+        | Some e ->
+            let succs = Hashtbl.create 32 in
+            let rec walk v =
+              if not (Hashtbl.mem succs v) then (
+                let n = Graph.find g (node_of v) in
+                if not (List.mem n.kind exec_kinds) then
+                  complain ctx ~node:(node_of v)
+                    "the %s node cannot be part of the flow" n.kind;
+                let ss = exec_succs ctx v in
+                Hashtbl.replace succs v ss;
+                List.iter walk ss)
+            in
+            let entry = e.dst in
+            walk entry;
+            let cfg = Cfg.build ~entry ~succs in
+            (match Cfg.irreducible cfg with
+            | [] -> ()
+            | (u, h) :: _ ->
+                complain ctx ~node:h
+                  "this loop has two ways in, which cannot be written with \
+                   wasm's blocks; route both through one condition (the wire \
+                   from %s closes it)"
+                  u);
+            starts @ tidy_block (structure ctx cfg))
   in
   (ctx, { params = ctx.params; vars = ctx.vars; body })
 
 let func_of_graph (g : Graph.t) : func * (string * string) list =
-  let fanout = Hashtbl.create 32 in
-  List.iter
-    (fun (e : Graph.edge) ->
-      let k = e.src ^ "\000" ^ e.src_port in
-      Hashtbl.replace fanout k
-        (1 + Option.value (Hashtbl.find_opt fanout k) ~default:0))
-    g.edges;
   let slot_ty = Hashtbl.create 16 in
-  (* Every pass that is thrown away has loosened at least one slot, and a slot
-     only loosens once, so this settles well inside the bound. *)
-  let budget =
-    List.fold_left
-      (fun n node -> n + 1 + List.length (declared_names node "states"))
-      2
-      (Graph.nodes_of_kind g "while" @ Graph.nodes_of_kind g "for")
-  in
+  (* Every pass that is thrown away has loosened at least one counter, and a
+     counter only loosens once, so this settles well inside the bound. *)
+  let budget = List.length (Graph.nodes_of_kind g "counter") + 2 in
   let rec attempt left =
-    let ctx, f = once g fanout slot_ty in
+    let ctx, f = once g slot_ty in
     if ctx.too_narrow && left > 0 then attempt (left - 1) else (ctx, f)
   in
   let ctx, f = attempt budget in

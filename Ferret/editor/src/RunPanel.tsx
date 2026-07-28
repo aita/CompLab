@@ -8,10 +8,10 @@ interface Props {
 }
 
 export default function RunPanel({ compiled, onFocusNode }: Props) {
-  const [args, setArgs] = useState<Record<string, string>>({});
   const [result, setResult] = useState<RunResult | null>(null);
   const [paused, setPaused] = useState<Paused | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [args, setArgs] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const run = useRef<Run | null>(null);
 
@@ -37,18 +37,20 @@ export default function RunPanel({ compiled, onFocusNode }: Props) {
     );
   }
 
+  const where = (watch: number) =>
+    compiled.watches[watch] ?? { node: "?", label: "?" };
   const watches = compiled.watches;
-  const where = (watch: number) => watches[watch] ?? { node: "?", label: "?" };
 
   const go = async () => {
+    const build = compiled;
     setBusy(true);
     setFailure(null);
     setResult(null);
     setPaused(null);
     const active = start(
-      compiled.wasm,
-      compiled.params.map((p) => Number(args[p] ?? 0)),
-      setPaused,
+      build.wasm,
+      build.params.map((p) => Number(args[p] ?? 0)),
+      (p) => setPaused(p),
     );
     run.current = active;
     try {
@@ -67,6 +69,7 @@ export default function RunPanel({ compiled, onFocusNode }: Props) {
     setPaused(null);
     run.current?.resume();
   };
+
 
   return (
     <div className="runpanel">
@@ -92,7 +95,7 @@ export default function RunPanel({ compiled, onFocusNode }: Props) {
         ))
       )}
 
-      <button className="primary" disabled={busy} onClick={go}>
+      <button className="primary" disabled={busy} onClick={() => go()}>
         {busy ? "Running…" : "▶ Run"}
       </button>
 

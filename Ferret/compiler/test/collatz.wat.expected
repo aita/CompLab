@@ -5,21 +5,17 @@
   (func $main (export "main") (param $n f64) (result f64)
     (local $cur f64)
     (local $steps i64)
-    (local $cur_next f64)
-    (local $steps_next i64)
     (local $t0 f64)
     (local $t1 f64)
     local.get $n
     local.set $cur
     i64.const 0
     local.set $steps
-    block
-      loop
-        local.get $cur
-        f64.const 1.0
-        f64.ne
-        i32.eqz
-        br_if 1
+    loop  ;; $1
+      local.get $cur
+      f64.const 1.0
+      f64.ne
+      if
         local.get $cur
         call $log
         local.get $cur
@@ -45,21 +41,18 @@
         f64.const 0.0
         f64.eq
         select
-        local.set $cur_next
+        local.set $cur
         local.get $steps
         i64.const 1
         i64.add
-        local.set $steps_next
-        local.get $cur_next
-        local.set $cur
-        local.get $steps_next
         local.set $steps
-        br 0
+        br 1  ;; $1
+      else
+        local.get $steps
+        f64.convert_i64_s
+        return
       end
     end
-    local.get $steps
-    f64.convert_i64_s
-    return
     f64.const 0.0
   )
 )

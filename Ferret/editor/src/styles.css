@@ -517,7 +517,9 @@ select:focus {
 
 .logs ol {
   margin: 0;
-  padding-left: 26px;
+  /* four digits of room: a run that logs a hundred lines still numbers them
+     in full rather than losing the leading digit off the edge */
+  padding-left: 42px;
   max-height: 240px;
   overflow-y: auto;
   font-family: ui-monospace, monospace;
@@ -739,4 +741,30 @@ select:focus {
 
 .fnode-flow + .fnode-body {
   border-top-style: dashed;
+}
+
+/* --------------------------------------------------------------- wires */
+
+.wire-casing {
+  fill: none;
+  stroke: var(--bg);
+  stroke-linecap: round;
+}
+
+.wire.is-faded {
+  /* Enough to push the rest back, not so much that it stops being context. */
+  opacity: 0.35;
+}
+
+.react-flow__edge.selected .wire-casing {
+  stroke: #d3e0ff;
+}
+
+.run-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.run-buttons .primary {
+  flex: 1;
 }

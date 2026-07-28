@@ -5,7 +5,6 @@
 export const RUNNING = 0;
 export const CONTINUE = 1;
 export const STOP = 2;
-
 export interface RunRequest {
   wasm: Uint8Array;
   args: number[];

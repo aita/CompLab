@@ -1,4 +1,4 @@
-import { SPEC_BY_TYPE, type NodeData } from "./spec";
+import { SPEC_BY_TYPE, describe, type NodeData } from "./spec";
 import type { FerretNode } from "./FlowNode";
 
 interface Props {
@@ -26,16 +26,17 @@ export default function Inspector({
   }
   const spec = SPEC_BY_TYPE[node.type!];
   const data = node.data;
+  const shown = describe(node.type!, data);
   const set = (patch: NodeData) => onChange(node.id, patch);
 
   return (
     <div className="inspector">
       <div className="inspector-head">
         <span className="fnode-glyph" style={{ background: spec.color }}>
-          {spec.glyphOf?.(data) ?? spec.glyph}
+          {shown.glyph}
         </span>
         <div>
-          <div className="inspector-title">{spec.titleOf?.(data) ?? spec.title}</div>
+          <div className="inspector-title">{shown.title}</div>
           <div className="inspector-id">{node.id}</div>
         </div>
       </div>

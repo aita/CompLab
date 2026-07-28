@@ -17,6 +17,7 @@ let type_name = function
   | VFloat -> "number"
   | VBool -> "true or false"
 
+
 type binop = Add | Sub | Mul | Div | Mod | Min | Max
 type unop = Neg | Abs | Sqrt | Floor | Ceil | Round
 type cmpop = Lt | Le | Gt | Ge | Eq | Ne
@@ -41,14 +42,19 @@ type expr =
      is into the function's list of watch points. *)
   | Watch of int * vtype * expr
 
+(* A place a branch can land.  Blocks and loops carry one so that the emitter
+   can work out how many levels a [Br] has to climb, which is the one number
+   that is easy to get wrong by hand -- an [if] is a level too. *)
+type label = int
+
 type stmt =
   | Assign of int * expr
   (* Evaluate and throw away, which only a watch is ever worth doing it to. *)
   | Drop of expr
   | If of expr * block * block
-  (* The preamble is re-evaluated with the condition, at the top of every
-     iteration, so anything the condition shares can live in it. *)
-  | While of block * expr * block
+  | Block of label * block  (* branching to it leaves the block *)
+  | Loop of label * block  (* branching to it goes round again *)
+  | Br of label
   | Log of expr
   | Ret of expr
 
@@ -136,16 +142,15 @@ let to_string f =
     | Drop e -> pr "%s%s\n" pad (expr e)
     | Log e -> pr "%slog %s\n" pad (expr e)
     | Ret e -> pr "%sreturn %s\n" pad (expr e)
-    | While ([], c, body) ->
-        pr "%swhile %s {\n" pad (expr c);
+    | Block (l, body) ->
+        pr "%sblock $%d {\n" pad l;
         block (ind + 1) body;
         pr "%s}\n" pad
-    | While (pre, c, body) ->
-        pr "%sloop {\n" pad;
-        block (ind + 1) pre;
-        pr "%s  exit unless %s\n" pad (expr c);
+    | Loop (l, body) ->
+        pr "%sloop $%d {\n" pad l;
         block (ind + 1) body;
         pr "%s}\n" pad
+    | Br l -> pr "%sbr $%d\n" pad l
     | If (c, t, []) ->
         pr "%sif %s {\n" pad (expr c);
         block (ind + 1) t;

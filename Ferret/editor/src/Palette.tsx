@@ -1,6 +1,10 @@
-import { CATEGORIES, SPECS } from "./spec";
+import { CATEGORIES, SPECS, type NodeData } from "./spec";
 
-export default function Palette({ onAdd }: { onAdd: (type: string) => void }) {
+export default function Palette({
+  onAdd,
+}: {
+  onAdd: (type: string, data?: NodeData) => void;
+}) {
   return (
     <aside className="palette">
       <div className="palette-title">Nodes</div>
@@ -14,7 +18,10 @@ export default function Palette({ onAdd }: { onAdd: (type: string) => void }) {
               title={spec.hint}
               draggable
               onDragStart={(e) => {
-                e.dataTransfer.setData("application/ferret-node", spec.type);
+                e.dataTransfer.setData(
+                  "application/ferret-node",
+                  JSON.stringify({ type: spec.type }),
+                );
                 e.dataTransfer.effectAllowed = "move";
               }}
               onClick={() => onAdd(spec.type)}

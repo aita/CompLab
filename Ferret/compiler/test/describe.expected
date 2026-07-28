@@ -1,0 +1,70 @@
+start     { "params": [ { "name": "n" }, { "name": "size" } ] }
+  Start [▶]
+  in   
+  out  var:n:n(num), var:size:size(num)
+
+start     { "params": [] }
+  Start [▶]
+  in   
+  out  
+
+counter   { "name": "total", "mode": "by" }
+  total [i]
+  in   from:starts at(num), by:moves by(num)
+  out  value:value(num)
+
+counter   { "name": "cur", "mode": "becomes" }
+  cur [i] badge becomes
+  in   from:starts at(num), by:becomes(num)
+  out  value:value(num)
+
+counter   {}
+  Counter [i]
+  in   from:starts at(num), by:moves by(num)
+  out  value:value(num)
+
+binop     { "op": "mul" }
+  Multiply [×]
+  in   a:A(num), b:B(num)
+  out  out:result(num)
+
+unop      { "op": "sqrt" }
+  Square root [ƒ]
+  in   a:A(num)
+  out  out:result(num)
+
+compare   { "op": "ge" }
+  At least [≥]
+  in   a:A(num), b:B(num)
+  out  out:result(bool)
+
+logic     { "op": "not" }
+  Not [&]
+  in   a:A(bool)
+  out  out:result(bool)
+
+logic     { "op": "or" }
+  Or [&]
+  in   a:A(bool), b:B(bool)
+  out  out:result(bool)
+
+binop     { "op": "wat" }
+  Arithmetic [+]
+  in   a:A(num), b:B(num)
+  out  out:result(num)
+
+const     { "value": 12 }
+  Constant [#] badge 12
+  in   
+  out  out:value(num)
+
+const     { "value": 0.25 }
+  Constant [#] badge 0.25
+  in   
+  out  out:value(num)
+
+nonesuch  {}
+  nonesuch [?]
+  in   
+  out  
+

@@ -55,8 +55,31 @@ let compile (source : Js.js_string Js.t) =
               (Js.array (Array.of_list (List.map error_object errs))) );
         |]
 
+(* The node catalogue, and what one node of a kind looks like once its own
+   settings are taken into account -- the title on the card, the sign in its
+   icon, and the ports to draw.  Both are JSON text: the editor parses one
+   shape rather than reaching into an OCaml value through js_of_ocaml. *)
+let specs () = Js.string (Yojson.Safe.to_string (Ferret.Spec.to_json ()))
+
+let describe (kind : Js.js_string Js.t) (data : Js.js_string Js.t) =
+  let parsed =
+    match Yojson.Safe.from_string (Js.to_string data) with
+    | json -> json
+    | exception _ -> `Null
+  in
+  Js.string
+    (Yojson.Safe.to_string
+       (Ferret.Spec.describe_json ~kind:(Js.to_string kind) ~data:parsed))
+
 let () =
-  let api = obj [| ("compile", inject (Js.wrap_callback compile)) |] in
+  let api =
+    obj
+      [|
+        ("compile", inject (Js.wrap_callback compile));
+        ("specs", inject (Js.wrap_callback specs));
+        ("describe", inject (Js.wrap_callback describe));
+      |]
+  in
   (* [Js.export] alone lands on module.exports under node; the editor loads
      the bundle with a plain script tag and wants it on the global. *)
   Js.export "ferret" api;

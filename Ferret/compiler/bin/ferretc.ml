@@ -2,9 +2,9 @@ let usage =
   "ferretc [options] graph.json\n\n\
   \  -o FILE       write the output to FILE (default: stdout for text, \
    graph.wasm for wasm)\n\
-  \  --emit KIND   wasm (default), wat or ir\n"
+  \  --emit KIND   wasm (default), wat, ir, or spec for the node catalogue\n"
 
-type emit = Wasm | Wat | Ir
+type emit = Wasm | Wat | Ir | Spec
 
 let () =
   let input = ref None and output = ref None and emit = ref Wasm in
@@ -18,6 +18,7 @@ let () =
         | "wasm" -> emit := Wasm
         | "wat" -> emit := Wat
         | "ir" -> emit := Ir
+        | "spec" -> emit := Spec
         | _ ->
             prerr_endline ("ferretc: unknown --emit " ^ kind);
             exit 2);
@@ -33,6 +34,16 @@ let () =
         args rest
   in
   args (List.tl (Array.to_list Sys.argv));
+  (* The catalogue is not about any one graph, so it takes no input file. *)
+  if !emit = Spec then (
+    let text = Yojson.Safe.pretty_to_string (Ferret.Spec.to_json ()) ^ "\n" in
+    (match !output with
+    | None -> print_string text
+    | Some file ->
+        let ch = open_out_bin file in
+        output_string ch text;
+        close_out ch);
+    exit 0);
   let path =
     match !input with
     | Some p -> p
@@ -65,6 +76,7 @@ let () =
             close_out ch
       in
       match !emit with
+      | Spec -> ()
       | Ir -> write out.ir
       | Wat -> write out.wat
       | Wasm ->

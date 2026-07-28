@@ -1,38 +1,309 @@
 {
   "name": "Collatz steps",
   "nodes": [
-    {"id":"start","type":"start","position":{"x":0,"y":40},"data":{"params":[{"name":"n"}]}},
-    {"id":"loop","type":"while","position":{"x":400,"y":0},"data":{"states":[{"name":"cur"},{"name":"steps"}],"values":{"init:steps":0}}},
-    {"id":"done","type":"end","position":{"x":1160,"y":0},"data":{}},
-    {"id":"trace","type":"log","position":{"x":1160,"y":160},"data":{}},
-    {"id":"not_one","type":"compare","position":{"x":760,"y":420},"data":{"op":"ne","values":{"b":1}}},
-    {"id":"count","type":"binop","position":{"x":760,"y":600},"data":{"op":"add","values":{"b":1}}},
-    {"id":"rem","type":"binop","position":{"x":760,"y":780},"data":{"op":"mod","values":{"b":2}}},
-    {"id":"is_even","type":"compare","position":{"x":1060,"y":780},"data":{"op":"eq","values":{"b":0}}},
-    {"id":"half","type":"binop","position":{"x":760,"y":960},"data":{"op":"div","values":{"b":2}}},
-    {"id":"mul3","type":"binop","position":{"x":760,"y":1140},"data":{"op":"mul","values":{"a":3}}},
-    {"id":"triple","type":"binop","position":{"x":1060,"y":1140},"data":{"op":"add","values":{"b":1}}},
-    {"id":"pick","type":"select","position":{"x":1360,"y":960},"data":{}}
+    {
+      "id": "start",
+      "type": "start",
+      "position": {
+        "x": 0,
+        "y": 40
+      },
+      "data": {
+        "params": [
+          {
+            "name": "n"
+          }
+        ]
+      }
+    },
+    {
+      "id": "cur",
+      "type": "counter",
+      "position": {
+        "x": 1180,
+        "y": 0
+      },
+      "data": {
+        "name": "cur",
+        "mode": "becomes"
+      }
+    },
+    {
+      "id": "loop",
+      "type": "condition",
+      "position": {
+        "x": 420,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "trace",
+      "type": "log",
+      "position": {
+        "x": 1500,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "steps",
+      "type": "counter",
+      "position": {
+        "x": 1820,
+        "y": 0
+      },
+      "data": {
+        "name": "steps",
+        "values": {
+          "from": 0,
+          "by": 1
+        }
+      }
+    },
+    {
+      "id": "done",
+      "type": "end",
+      "position": {
+        "x": 420,
+        "y": 520
+      },
+      "data": {}
+    },
+    {
+      "id": "not_one",
+      "type": "compare",
+      "position": {
+        "x": 420,
+        "y": 300
+      },
+      "data": {
+        "op": "ne",
+        "values": {
+          "b": 1
+        }
+      }
+    },
+    {
+      "id": "pick",
+      "type": "select",
+      "position": {
+        "x": 1180,
+        "y": 300
+      },
+      "data": {}
+    },
+    {
+      "id": "is_even",
+      "type": "compare",
+      "position": {
+        "x": 820,
+        "y": 640
+      },
+      "data": {
+        "op": "eq",
+        "values": {
+          "b": 0
+        }
+      }
+    },
+    {
+      "id": "rem",
+      "type": "binop",
+      "position": {
+        "x": 420,
+        "y": 640
+      },
+      "data": {
+        "op": "mod",
+        "values": {
+          "b": 2
+        }
+      }
+    },
+    {
+      "id": "half",
+      "type": "binop",
+      "position": {
+        "x": 820,
+        "y": 860
+      },
+      "data": {
+        "op": "div",
+        "values": {
+          "b": 2
+        }
+      }
+    },
+    {
+      "id": "mul3",
+      "type": "binop",
+      "position": {
+        "x": 420,
+        "y": 1080
+      },
+      "data": {
+        "op": "mul",
+        "values": {
+          "a": 3
+        }
+      }
+    },
+    {
+      "id": "triple",
+      "type": "binop",
+      "position": {
+        "x": 820,
+        "y": 1080
+      },
+      "data": {
+        "op": "add",
+        "values": {
+          "b": 1
+        }
+      }
+    }
   ],
   "edges": [
-    {"id":"a1","source":"start","sourceHandle":"next","target":"loop","targetHandle":"in"},
-    {"id":"a2","source":"loop","sourceHandle":"next","target":"done","targetHandle":"in"},
-    {"id":"a3","source":"loop","sourceHandle":"body","target":"trace","targetHandle":"in"},
-    {"id":"a4","source":"loop","sourceHandle":"var:cur","target":"trace","targetHandle":"value"},
-    {"id":"a5","source":"loop","sourceHandle":"var:steps","target":"done","targetHandle":"value"},
-    {"id":"a6","source":"start","sourceHandle":"var:n","target":"loop","targetHandle":"init:cur"},
-    {"id":"a7","source":"loop","sourceHandle":"var:cur","target":"not_one","targetHandle":"a"},
-    {"id":"a8","source":"not_one","sourceHandle":"out","target":"loop","targetHandle":"cond"},
-    {"id":"a9","source":"loop","sourceHandle":"var:steps","target":"count","targetHandle":"a"},
-    {"id":"a10","source":"count","sourceHandle":"out","target":"loop","targetHandle":"step:steps"},
-    {"id":"a11","source":"loop","sourceHandle":"var:cur","target":"rem","targetHandle":"a"},
-    {"id":"a12","source":"rem","sourceHandle":"out","target":"is_even","targetHandle":"a"},
-    {"id":"a13","source":"loop","sourceHandle":"var:cur","target":"half","targetHandle":"a"},
-    {"id":"a14","source":"loop","sourceHandle":"var:cur","target":"mul3","targetHandle":"b"},
-    {"id":"a15","source":"mul3","sourceHandle":"out","target":"triple","targetHandle":"a"},
-    {"id":"a16","source":"is_even","sourceHandle":"out","target":"pick","targetHandle":"cond"},
-    {"id":"a17","source":"half","sourceHandle":"out","target":"pick","targetHandle":"a"},
-    {"id":"a18","source":"triple","sourceHandle":"out","target":"pick","targetHandle":"b"},
-    {"id":"a19","source":"pick","sourceHandle":"out","target":"loop","targetHandle":"step:cur"}
+    {
+      "id": "x1",
+      "source": "start",
+      "sourceHandle": "next",
+      "target": "loop",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x2",
+      "source": "loop",
+      "sourceHandle": "true",
+      "target": "trace",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x3",
+      "source": "trace",
+      "sourceHandle": "next",
+      "target": "cur",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x4",
+      "source": "cur",
+      "sourceHandle": "next",
+      "target": "steps",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x5",
+      "source": "steps",
+      "sourceHandle": "next",
+      "target": "loop",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x6",
+      "source": "loop",
+      "sourceHandle": "false",
+      "target": "done",
+      "targetHandle": "in"
+    },
+    {
+      "id": "e2",
+      "source": "pick",
+      "sourceHandle": "out",
+      "target": "cur",
+      "targetHandle": "by"
+    },
+    {
+      "id": "e3",
+      "source": "cur",
+      "sourceHandle": "value",
+      "target": "not_one",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e4",
+      "source": "not_one",
+      "sourceHandle": "out",
+      "target": "loop",
+      "targetHandle": "cond"
+    },
+    {
+      "id": "e5",
+      "source": "cur",
+      "sourceHandle": "value",
+      "target": "trace",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e6",
+      "source": "steps",
+      "sourceHandle": "value",
+      "target": "done",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e7",
+      "source": "cur",
+      "sourceHandle": "value",
+      "target": "rem",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e8",
+      "source": "rem",
+      "sourceHandle": "out",
+      "target": "is_even",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e9",
+      "source": "is_even",
+      "sourceHandle": "out",
+      "target": "pick",
+      "targetHandle": "cond"
+    },
+    {
+      "id": "e10",
+      "source": "cur",
+      "sourceHandle": "value",
+      "target": "half",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e11",
+      "source": "half",
+      "sourceHandle": "out",
+      "target": "pick",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e12",
+      "source": "cur",
+      "sourceHandle": "value",
+      "target": "mul3",
+      "targetHandle": "b"
+    },
+    {
+      "id": "e13",
+      "source": "mul3",
+      "sourceHandle": "out",
+      "target": "triple",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e14",
+      "source": "triple",
+      "sourceHandle": "out",
+      "target": "pick",
+      "targetHandle": "b"
+    },
+    {
+      "id": "p",
+      "source": "start",
+      "sourceHandle": "var:n",
+      "target": "cur",
+      "targetHandle": "from"
+    }
   ]
 }

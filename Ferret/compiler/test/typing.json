@@ -1,25 +1,176 @@
 {
   "nodes": [
-    {"id":"start","type":"start","position":{"x":0,"y":0},"data":{"params":[]}},
-    {"id":"loop","type":"while","position":{"x":300,"y":0},"data":{"states":[{"name":"i"}],"values":{"init:i":0}}},
-    {"id":"more","type":"compare","position":{"x":700,"y":300},"data":{"op":"lt","values":{"b":10}}},
-    {"id":"inc","type":"binop","position":{"x":700,"y":500},"data":{"op":"add","values":{"b":1}}},
-    {"id":"show","type":"log","position":{"x":700,"y":150},"data":{}},
-    {"id":"rem","type":"binop","position":{"x":1000,"y":150},"data":{"op":"mod","values":{"b":3}}},
-    {"id":"half","type":"binop","position":{"x":1000,"y":700},"data":{"op":"div","values":{"b":2}}},
-    {"id":"done","type":"end","position":{"x":700,"y":0},"data":{}}
+    {
+      "id": "start",
+      "type": "start",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "loop",
+      "type": "condition",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "show",
+      "type": "log",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "i",
+      "type": "counter",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "name": "i",
+        "values": {
+          "from": 0,
+          "by": 1
+        }
+      }
+    },
+    {
+      "id": "done",
+      "type": "end",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "more",
+      "type": "compare",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "op": "lt",
+        "values": {
+          "b": 10
+        }
+      }
+    },
+    {
+      "id": "rem",
+      "type": "binop",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "op": "mod",
+        "values": {
+          "b": 3
+        }
+      }
+    },
+    {
+      "id": "half",
+      "type": "binop",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "op": "div",
+        "values": {
+          "b": 2
+        }
+      }
+    }
   ],
   "edges": [
-    {"id":"x1","source":"start","sourceHandle":"next","target":"loop","targetHandle":"in"},
-    {"id":"x2","source":"loop","sourceHandle":"next","target":"done","targetHandle":"in"},
-    {"id":"x3","source":"loop","sourceHandle":"body","target":"show","targetHandle":"in"},
-    {"id":"e1","source":"loop","sourceHandle":"var:i","target":"more","targetHandle":"a"},
-    {"id":"e2","source":"more","sourceHandle":"out","target":"loop","targetHandle":"cond"},
-    {"id":"e3","source":"loop","sourceHandle":"var:i","target":"inc","targetHandle":"a"},
-    {"id":"e4","source":"inc","sourceHandle":"out","target":"loop","targetHandle":"step:i"},
-    {"id":"e5","source":"loop","sourceHandle":"var:i","target":"rem","targetHandle":"a"},
-    {"id":"e6","source":"rem","sourceHandle":"out","target":"show","targetHandle":"value"},
-    {"id":"e7","source":"loop","sourceHandle":"var:i","target":"half","targetHandle":"a"},
-    {"id":"e8","source":"half","sourceHandle":"out","target":"done","targetHandle":"value"}
+    {
+      "id": "x1",
+      "source": "start",
+      "sourceHandle": "next",
+      "target": "loop",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x2",
+      "source": "loop",
+      "sourceHandle": "true",
+      "target": "show",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x3",
+      "source": "show",
+      "sourceHandle": "next",
+      "target": "i",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x4",
+      "source": "i",
+      "sourceHandle": "next",
+      "target": "loop",
+      "targetHandle": "in"
+    },
+    {
+      "id": "x5",
+      "source": "loop",
+      "sourceHandle": "false",
+      "target": "done",
+      "targetHandle": "in"
+    },
+    {
+      "id": "e1",
+      "source": "i",
+      "sourceHandle": "value",
+      "target": "more",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e2",
+      "source": "more",
+      "sourceHandle": "out",
+      "target": "loop",
+      "targetHandle": "cond"
+    },
+    {
+      "id": "e3",
+      "source": "i",
+      "sourceHandle": "value",
+      "target": "rem",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e4",
+      "source": "rem",
+      "sourceHandle": "out",
+      "target": "show",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e5",
+      "source": "i",
+      "sourceHandle": "value",
+      "target": "half",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e6",
+      "source": "half",
+      "sourceHandle": "out",
+      "target": "done",
+      "targetHandle": "value"
+    }
   ]
 }

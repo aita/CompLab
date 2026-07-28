@@ -1,7 +1,7 @@
-(executable
- (name errors)
- (modules errors)
- (libraries ferret))
+(executables
+ (names errors describe)
+ (modules errors describe)
+ (libraries ferret yojson))
 
 (rule
  (target sum.wasm)
@@ -110,24 +110,31 @@
  (action
   (diff typing.wat.expected typing.wat)))
 
-; The counted loop: a step whose sign is known picks the test, and one that is
-; not falls back to a form that reads the same either way.
+; The node catalogue the editor draws from: what the palette offers, what
+; ports each kind has, and what the inspector puts in its form.
 (rule
- (target counting.ir)
+ (target spec.json)
  (action
   (with-stdout-to
-   counting.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:counting.json}))))
-
-(rule
- (target counting.wasm)
- (action
-  (run ../bin/ferretc.exe %{dep:counting.json} -o counting.wasm)))
+   spec.json
+   (run ../bin/ferretc.exe --emit spec))))
 
 (rule
  (alias runtest)
  (action
-  (diff counting.ir.expected counting.ir)))
+  (diff spec.json.expected spec.json)))
+
+(rule
+ (target describe.out)
+ (action
+  (with-stdout-to
+   describe.out
+   (run ./describe.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff describe.expected describe.out)))
 
 (rule
  (target errors.out)
@@ -162,7 +169,6 @@
   collatz.wasm
   random.wasm
   breakpoints.wasm
-  typing.wasm
-  counting.wasm)
+  typing.wasm)
  (action
   (run node run_wasm.mjs)))

@@ -6,13 +6,11 @@
     (local $i i64)
     i64.const 0
     local.set $i
-    block
-      loop
-        local.get $i
-        i64.const 10
-        i64.lt_s
-        i32.eqz
-        br_if 1
+    loop  ;; $1
+      local.get $i
+      i64.const 10
+      i64.lt_s
+      if
         local.get $i
         i64.const 3
         i64.rem_s
@@ -22,14 +20,15 @@
         i64.const 1
         i64.add
         local.set $i
-        br 0
+        br 1  ;; $1
+      else
+        local.get $i
+        f64.convert_i64_s
+        f64.const 2.0
+        f64.div
+        return
       end
     end
-    local.get $i
-    f64.convert_i64_s
-    f64.const 2.0
-    f64.div
-    return
     f64.const 0.0
   )
 )

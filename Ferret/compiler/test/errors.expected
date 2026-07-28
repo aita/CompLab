@@ -16,23 +16,14 @@
 # a data cycle
   add: this node's value depends on itself
 
-# two chains running into one node
-  e: two chains run into this node; a node belongs to one chain
+# a condition with only one way out
+  w: both ways out of this node have to go somewhere
+
+# a loop entered two ways
+  a: this loop has two ways in, which cannot be written with wasm's blocks; route both through one condition (the wire from c2 closes it)
 
 # an unknown start input
   s: the start node has no input called m
-
-# an unknown loop state
-  w: the init:i input is not connected
-  w: the cond input is not connected
-  w: the step:i input is not connected
-  w: this loop has no state called j
-
-# a loop state declared twice
-  w: i is declared twice
-  w: the init:i input is not connected
-  w: the cond input is not connected
-  w: the step:i input is not connected
 
 # not JSON at all
   the graph is not valid JSON: Line 1, bytes 12-13:
