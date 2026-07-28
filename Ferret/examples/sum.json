@@ -2,23 +2,17 @@
   "name": "Sum of 1 to n",
   "nodes": [
     {"id":"start","type":"start","position":{"x":0,"y":40},"data":{"params":[{"name":"n"}]}},
-    {"id":"loop","type":"while","position":{"x":400,"y":0},"data":{"states":[{"name":"total"},{"name":"i"}],"values":{"init:total":0,"init:i":1}}},
-    {"id":"done","type":"end","position":{"x":1160,"y":0},"data":{}},
-    {"id":"test","type":"compare","position":{"x":760,"y":420},"data":{"op":"le"}},
-    {"id":"add_total","type":"binop","position":{"x":760,"y":620},"data":{"op":"add"}},
-    {"id":"next_i","type":"binop","position":{"x":760,"y":820},"data":{"op":"add","values":{"b":1}}}
+    {"id":"count","type":"for","position":{"x":400,"y":0},"data":{"name":"i","states":[{"name":"total"}],"values":{"from":1,"by":1,"init:total":0}}},
+    {"id":"done","type":"end","position":{"x":1120,"y":0},"data":{}},
+    {"id":"add","type":"binop","position":{"x":760,"y":420},"data":{"op":"add"}}
   ],
   "edges": [
-    {"id":"e1","source":"start","sourceHandle":"next","target":"loop","targetHandle":"in"},
-    {"id":"e2","source":"loop","sourceHandle":"next","target":"done","targetHandle":"in"},
-    {"id":"e3","source":"loop","sourceHandle":"var:i","target":"test","targetHandle":"a"},
-    {"id":"e4","source":"start","sourceHandle":"var:n","target":"test","targetHandle":"b"},
-    {"id":"e5","source":"test","sourceHandle":"out","target":"loop","targetHandle":"cond"},
-    {"id":"e6","source":"loop","sourceHandle":"var:total","target":"add_total","targetHandle":"a"},
-    {"id":"e7","source":"loop","sourceHandle":"var:i","target":"add_total","targetHandle":"b"},
-    {"id":"e8","source":"add_total","sourceHandle":"out","target":"loop","targetHandle":"step:total"},
-    {"id":"e9","source":"loop","sourceHandle":"var:i","target":"next_i","targetHandle":"a"},
-    {"id":"e10","source":"next_i","sourceHandle":"out","target":"loop","targetHandle":"step:i"},
-    {"id":"e11","source":"loop","sourceHandle":"var:total","target":"done","targetHandle":"value"}
+    {"id":"e1","source":"start","sourceHandle":"next","target":"count","targetHandle":"in"},
+    {"id":"e2","source":"count","sourceHandle":"next","target":"done","targetHandle":"in"},
+    {"id":"e3","source":"start","sourceHandle":"var:n","target":"count","targetHandle":"to"},
+    {"id":"e4","source":"count","sourceHandle":"var:total","target":"add","targetHandle":"a"},
+    {"id":"e5","source":"count","sourceHandle":"i","target":"add","targetHandle":"b"},
+    {"id":"e6","source":"add","sourceHandle":"out","target":"count","targetHandle":"step:total"},
+    {"id":"e7","source":"count","sourceHandle":"var:total","target":"done","targetHandle":"value"}
   ]
 }

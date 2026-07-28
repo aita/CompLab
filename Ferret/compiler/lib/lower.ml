@@ -261,7 +261,8 @@ and watched ctx (n : Graph.node) (expr, ty) =
   (* A loop reports its whole state once per iteration, from the top of the
      loop, rather than every time a slot is read; the start node has nothing
      to report that its caller does not already know. *)
-  if n.kind = "while" || n.kind = "start" || not (Graph.flag n "breakpoint")
+  if n.kind = "while" || n.kind = "for" || n.kind = "start"
+     || not (Graph.flag n "breakpoint")
   then (expr, ty)
   else
     let i = watch_point ctx ~node:n.id ~label:"value" in
@@ -284,6 +285,17 @@ and value_of ctx (n : Graph.node) port : expr * vtype =
          being a cycle. *)
       let name = after_colon port in
       if List.mem name (declared_names n "states") then
+        (Local (state_slot ctx n name), assumed ctx (slot_key n name))
+      else (
+        bad "this loop has no state called %s" name;
+        (Int 0, VInt))
+  | "for" ->
+      (* The counter has a port of its own; the state slots are named. *)
+      let name =
+        if port = "i" then Graph.string_field n "name" ~default:"i"
+        else after_colon port
+      in
+      if port = "i" || List.mem name (declared_names n "states") then
         (Local (state_slot ctx n name), assumed ctx (slot_key n name))
       else (
         bad "this loop has no state called %s" name;
@@ -411,6 +423,7 @@ and step ctx (n : Graph.node) : block =
       let pre, v = group ctx (fun () -> reported ctx n (number ctx n "value")) in
       pre @ [ Ret v ]
   | "while" -> loop ctx n
+  | "for" -> counted ctx n
   | kind ->
       complain ctx ~node:n.id "the %s node cannot be part of the flow" kind;
       chain ctx n "next"
@@ -421,33 +434,85 @@ and reported ctx (n : Graph.node) v = as_float (watched ctx n v)
 
 and loop ctx (n : Graph.node) : block =
   check_names ctx n "states" "loop states";
-  let states = declared_names n "states" in
+  (* A plain loop's condition is whatever is plugged into it. *)
+  carry ctx n (declared_names n "states") (fun _ ->
+      condition ctx n "cond")
+
+(* A counted loop is the same machine with one slot the node owns: the
+   counter starts at [from], gains [by] every pass along with everything else,
+   and the condition is written for you.  Accumulators go in the state slots
+   beside it, because a count with nothing to add up is rarely the point. *)
+and counted ctx (n : Graph.node) : block =
+  check_names ctx n "states" "loop states";
+  let name = Graph.string_field n "name" ~default:"i" in
+  if name = "" then complain ctx ~node:n.id "the counter has no name";
+  if List.mem name (declared_names n "states") then
+    complain ctx ~node:n.id "%s is both the counter and a state slot" name;
+  carry ctx n (name :: declared_names n "states") (fun slots ->
+      match slots with
+      | (i, ty) :: _ -> counter_test ctx n (Local i, ty)
+      | [] -> untrue)
+
+(* Keep going while the counter has not passed [to].  Which way that is
+   depends on the sign of the step, and when the step is a literal -- which it
+   nearly always is -- the compiler knows it and the loop tests one thing.  A
+   computed step falls back to a form that reads the same either way:
+   (i - to) * by is at most zero exactly while the counter is on the near side
+   of the end. *)
+and counter_test ctx (n : Graph.node) cur =
+  let bound = number ctx n "to" in
+  let by = number ctx n "by" in
+  let compare op =
+    let a, b, _ = unify cur bound in
+    Cmp (op, a, b)
+  in
+  match by with
+  | Int k, _ -> compare (if k >= 0 then Le else Ge)
+  | Num x, _ -> compare (if x >= 0. then Le else Ge)
+  | _ ->
+      let a, b, t = unify cur bound in
+      let gap, step, t = unify (Bin (Sub, a, b), t) by in
+      Cmp (Le, Bin (Mul, gap, step), if t = VInt then Int 0 else Num 0.)
+
+(* The shared part: slots that all move together at the end of each pass. *)
+and carry ctx (n : Graph.node) names cond_of : block =
   (* The slots come first so that the condition and the next-value
      expressions, which read them, resolve to locals rather than recursing. *)
-  let slots = List.map (fun s -> state_slot ctx n s) states in
-  let types = List.map (fun s -> assumed ctx (slot_key n s)) states in
+  let slots = List.map (fun s -> state_slot ctx n s) names in
+  let types = List.map (fun s -> assumed ctx (slot_key n s)) names in
+  let counted = n.kind = "for" in
+  (* The counter's ends belong to the node rather than to a named port. *)
+  let init_of s = if counted && s == List.hd names then "from" else "init:" ^ s in
+  let next_of i s ty =
+    if counted && s == List.hd names then
+      let a, b, t = unify (Local i, ty) (number ctx n "by") in
+      (Bin (Add, a, b), t)
+    else number ctx n ("step:" ^ s)
+  in
   (* One group per initial value: the group's own assignment writes a state
      slot, which a later initial value is allowed to read. *)
   let inits =
     List.concat
       (List.map2
          (fun i (s, want) ->
-           let pre, v = group ctx (fun () -> number ctx n ("init:" ^ s)) in
+           let pre, v = group ctx (fun () -> number ctx n (init_of s)) in
            note_type ctx n s (snd v);
            pre @ [ Assign (i, coerce ctx v want) ])
          slots
-         (List.combine states types))
+         (List.combine names types))
   in
   let watching =
     if Graph.flag n "breakpoint" then
       List.map2
         (fun name (i, ty) ->
           Drop (Watch (watch_point ctx ~node:n.id ~label:name, ty, Local i)))
-        states
+        names
         (List.combine slots types)
     else []
   in
-  let pre_cond, cond = group ctx (fun () -> condition ctx n "cond") in
+  let pre_cond, cond =
+    group ctx (fun () -> cond_of (List.combine slots types))
+  in
   let body = chain ctx n "body" in
   (* Every next-value expression reads the state as it was at the top of the
      iteration, so they share one group, and with more than one slot they land
@@ -455,11 +520,12 @@ and loop ctx (n : Graph.node) : block =
   let pre_steps, steps =
     group ctx (fun () ->
         List.map2
-          (fun s want ->
-            let v = number ctx n ("step:" ^ s) in
+          (fun (i, s) want ->
+            let v = next_of i s want in
             note_type ctx n s (snd v);
             coerce ctx v want)
-          states types)
+          (List.combine slots names)
+          types)
   in
   let updates =
     match (slots, steps) with
@@ -472,7 +538,7 @@ and loop ctx (n : Graph.node) : block =
               slot ctx
                 ~key:(n.id ^ "\000next\000" ^ s)
                 ~display:(s ^ "_next") ~ty)
-            states types
+            names types
         in
         List.map2 (fun t e -> Assign (t, e)) temps steps
         @ List.map2 (fun i t -> Assign (i, Local t)) slots temps
@@ -555,9 +621,9 @@ let func_of_graph (g : Graph.t) : func * (string * string) list =
      only loosens once, so this settles well inside the bound. *)
   let budget =
     List.fold_left
-      (fun n node -> n + List.length (declared_names node "states"))
+      (fun n node -> n + 1 + List.length (declared_names node "states"))
       2
-      (Graph.nodes_of_kind g "while")
+      (Graph.nodes_of_kind g "while" @ Graph.nodes_of_kind g "for")
   in
   let rec attempt left =
     let ctx, f = once g fanout slot_ty in
