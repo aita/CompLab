@@ -2,11 +2,12 @@
    as a control-flow graph, together with the register file and the calling
    convention they obey.
 
-   This is the only module that knows what the target is -- register names, the
-   ABI, which operations take a 12-bit immediate -- which is why it is not
-   called `Ir`.  The passes built on top of it (Liveness, Regalloc) use only the
-   instruction-independent part of the interface: uses, definitions,
-   successors, and register substitution.
+   This is the second of the compiler's two control-flow graphs, and the only
+   module that knows what the target is -- register names, the ABI, which
+   operations take a 12-bit immediate.  Linear holds the first, which knows
+   none of that; Selection maps one to the other.  The passes built on top of
+   this one (Liveness, Regalloc) use only the instruction-independent part of
+   the interface: uses, definitions, successors, and register substitution.
 
    Registers are plain integers.  0..31 are the physical RV64 registers and
    everything from 32 up is a virtual register, which is what makes the

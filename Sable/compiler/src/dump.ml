@@ -105,62 +105,62 @@ let closure_program out (program : Closure.program) =
   fprintf out "sable_main () =\n";
   closure out 1 program.main
 
-(* ---------------------------------------------------------------------- Ir *)
+(* -------------------------------------------------------------------- Linear *)
 
-let ir_op out = function
-  | Ir.Int n -> fprintf out "%d" n
-  | Ir.Move x -> fprintf out "%s" x
-  | Ir.Neg x -> fprintf out "- %s" x
-  | Ir.Bin (op, x, y) -> fprintf out "%s %s %s" x (Knormal.string_of_binop op) y
-  | Ir.Cmp (c, x, y, negated) ->
+let linear_op out = function
+  | Linear.Int n -> fprintf out "%d" n
+  | Linear.Move x -> fprintf out "%s" x
+  | Linear.Neg x -> fprintf out "- %s" x
+  | Linear.Bin (op, x, y) -> fprintf out "%s %s %s" x (Knormal.string_of_binop op) y
+  | Linear.Cmp (c, x, y, negated) ->
     let op = match (c, negated) with
-      | Ir.Eq, false -> "=" | Ir.Eq, true -> "<>"
-      | Ir.Le, false -> "<=" | Ir.Le, true -> ">"
+      | Linear.Eq, false -> "=" | Linear.Eq, true -> "<>"
+      | Linear.Le, false -> "<=" | Linear.Le, true -> ">"
     in
     fprintf out "%s %s %s" x op y
-  | Ir.Static l -> fprintf out "&%s" l
-  | Ir.Field (x, i) -> fprintf out "%s[%d]" x i
-  | Ir.Byte (x, i) -> fprintf out "%s.[%s]" x i
-  | Ir.Block (tag, xs) -> fprintf out "block %d (%s)" tag (String.concat " " xs)
-  | Ir.Tuple xs -> fprintf out "(%s)" (String.concat ", " xs)
-  | Ir.Array (n, v) -> fprintf out "Array.make %s %s" n v
-  | Ir.Get (a, i) -> fprintf out "%s.(%s)" a i
-  | Ir.Put (a, i, v) -> fprintf out "%s.(%s) <- %s" a i v
-  | Ir.Call (Ir.Direct l, xs) -> fprintf out "call %s (%s)" l (String.concat " " xs)
-  | Ir.Call (Ir.Closure f, xs) -> fprintf out "call closure %s (%s)" f (String.concat " " xs)
+  | Linear.Static l -> fprintf out "&%s" l
+  | Linear.Field (x, i) -> fprintf out "%s[%d]" x i
+  | Linear.Byte (x, i) -> fprintf out "%s.[%s]" x i
+  | Linear.Block (tag, xs) -> fprintf out "block %d (%s)" tag (String.concat " " xs)
+  | Linear.Tuple xs -> fprintf out "(%s)" (String.concat ", " xs)
+  | Linear.Array (n, v) -> fprintf out "Array.make %s %s" n v
+  | Linear.Get (a, i) -> fprintf out "%s.(%s)" a i
+  | Linear.Put (a, i, v) -> fprintf out "%s.(%s) <- %s" a i v
+  | Linear.Call (Linear.Direct l, xs) -> fprintf out "call %s (%s)" l (String.concat " " xs)
+  | Linear.Call (Linear.Closure f, xs) -> fprintf out "call closure %s (%s)" f (String.concat " " xs)
 
-let ir_instr out = function
-  | Ir.Let (x, op) ->
+let linear_instr out = function
+  | Linear.Let (x, op) ->
     fprintf out "    %s <- " x;
-    ir_op out op;
+    linear_op out op;
     fprintf out "\n"
-  | Ir.Closures definitions ->
+  | Linear.Closures definitions ->
     List.iter
       (fun (x, entry, captured) ->
         fprintf out "    %s <- closure %s capturing (%s)\n" x entry
           (String.concat " " captured))
       definitions
 
-let ir_terminator out = function
-  | Ir.Jump l -> fprintf out "    jump %s\n" l
-  | Ir.Branch (c, x, y, t, f) ->
-    let op = match c with Ir.Eq -> "=" | Ir.Le -> "<=" in
+let linear_terminator out = function
+  | Linear.Jump l -> fprintf out "    jump %s\n" l
+  | Linear.Branch (c, x, y, t, f) ->
+    let op = match c with Linear.Eq -> "=" | Linear.Le -> "<=" in
     fprintf out "    if %s %s %s then %s else %s\n" x op y t f
-  | Ir.Return x -> fprintf out "    return %s\n" x
-  | Ir.Tail (Ir.Direct l, xs) -> fprintf out "    tail %s (%s)\n" l (String.concat " " xs)
-  | Ir.Tail (Ir.Closure f, xs) ->
+  | Linear.Return x -> fprintf out "    return %s\n" x
+  | Linear.Tail (Linear.Direct l, xs) -> fprintf out "    tail %s (%s)\n" l (String.concat " " xs)
+  | Linear.Tail (Linear.Closure f, xs) ->
     fprintf out "    tail closure %s (%s)\n" f (String.concat " " xs)
 
-let ir out functions =
+let linear out functions =
   List.iter
-    (fun (f : Ir.func) ->
+    (fun (f : Linear.func) ->
       fprintf out "function %s (%s)%s\n" f.label (String.concat " " f.args)
         (if f.captures = [] then ""
          else " capturing (" ^ String.concat " " f.captures ^ ")");
       List.iter
-        (fun (b : Ir.block) ->
+        (fun (b : Linear.block) ->
           fprintf out "  %s:\n" b.label;
-          List.iter (ir_instr out) b.body;
-          ir_terminator out b.terminator)
+          List.iter (linear_instr out) b.body;
+          linear_terminator out b.terminator)
         f.blocks)
     functions

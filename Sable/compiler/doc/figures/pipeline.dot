@@ -16,7 +16,7 @@ digraph pipeline {
   syntax  [label = "Syntax\n2つの形式が1つの抽象構文に合流する"];
   knf     [label = "Knormal\n中間結果すべてに名前が付く"];
   closure [label = "Closure\n関数がトップレベルへ持ち上がる"];
-  graph_ir [label = "Ir\n制御フローグラフ。機械を知らない"];
+  graph_ir [label = "Linear\n制御フローグラフ。機械を知らない"];
   virtual [label = "RISC-V 制御フローグラフ\n無制限の仮想レジスタ"];
   machine [label = "RISC-V 制御フローグラフ\n物理レジスタ"];
   asm     [label = "a.s", fillcolor = "#ffffff"];
@@ -34,7 +34,7 @@ knormal.ml        K正規化\l"];
 optim.ml    伝播・除去\l  \
 closure.ml  クロージャ変換\l"];
 
-  closure -> graph_ir [label = "  ir.ml  木をブロックに"];
+  closure -> graph_ir [label = "  linear.ml  木をブロックに"];
 
   graph_ir -> virtual [label = "  selection.ml  命令選択"];
 

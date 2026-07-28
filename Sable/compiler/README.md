@@ -20,11 +20,11 @@ sablec [options] <file.sbl>
   -O <n>             run the optimizer n times (default 3)
   --dump-knf         print the K-normalized program
   --dump-closure     print the closure-converted program
-  --dump-ir          print the control-flow graph before instruction selection
+  --dump-linear      print the linear IR: the control-flow graph before the machine
   --dump-riscv       print the RISC-V code before register allocation
   --dump-regalloc    report rounds, coalesced moves and spills per function
   --check-knf        fail if the normalized program is not in K-normal form
-  --check-ir         fail if the control-flow graph is not well formed
+  --check-linear     fail if the linear IR is not well formed
   --check-cfg        fail if any control-flow graph has a cycle
 ```
 
@@ -45,7 +45,7 @@ output that was actually produced.
 | [doc/matching.md](doc/matching.md) | パターンマッチ。網羅性・到達不能の判定、決定木、合流点 |
 | [doc/knormal.md](doc/knormal.md) | K正規化、α変換、最適化 |
 | [doc/closure.md](doc/closure.md) | クロージャ変換 |
-| [doc/selection.md](doc/selection.md) | 命令選択、制御フローグラフ、生存解析 |
+| [doc/selection.md](doc/selection.md) | 線形IR、命令選択、生存解析 |
 | [doc/regalloc.md](doc/regalloc.md) | レジスタ割り付け。干渉グラフの実例、融合・スピル・callee-saved |
 | [doc/emit.md](doc/emit.md) | のぞき穴最適化、アセンブリ出力、呼び出し規約、実行時表現 |
 
@@ -202,7 +202,7 @@ around a condition, commas where it has spaces.
 | α-conversion | `alpha.ml` | make every binder unique |
 | optimization | `optim.ml` | copy and constant propagation, dead-let elimination |
 | closure conversion | `closure.ml` | lift functions to the top level |
-| control-flow graph | `ir.ml` | the tree into basic blocks, still target-independent |
+| linear IR | `linear.ml` | the tree into basic blocks, still target-independent |
 | instruction selection | `selection.ml` | RISC-V CFG over unlimited virtual registers |
 | control flow | `cfg.ml` | postorder, reachability, an acyclicity check and block layout |
 | liveness | `liveness.ml` | backwards dataflow; also dead-code elimination |
@@ -215,7 +215,7 @@ interference itself, a bit per pair. It is the one data-structure choice that
 shows up in the wall clock: see [the write-up](doc/regalloc.md), section 11.
 
 There are two control-flow graphs, and the line between them is the line
-between the language and the machine. `ir.ml` holds the first: blocks, values
+between the language and the machine. `linear.ml` holds the first: blocks, values
 and calls, knowing nothing about registers, the calling convention or which
 operations the target has. `riscv.ml` holds the second, down to which
 operations take a 12-bit immediate. `liveness.ml` and `regalloc.ml` sit on the

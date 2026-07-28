@@ -1,8 +1,8 @@
-// The control-flow graph of `sum` at the Ir level, straight out of --dump-ir.
+// The control-flow graph of `sum` at the Linear level, out of --dump-linear.
 // The same graph as cfg-sum.dot, before anything about the machine is decided.
 // See doc/selection.md.
 // Render with ./render.sh (needs graphviz).
-digraph ir {
+digraph linear {
   rankdir = TB;
   bgcolor = "transparent";
   ranksep = 0.34;

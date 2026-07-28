@@ -73,11 +73,11 @@ $ sablec --dump-closure -o /dev/null doc/sum.sbl
       call sable_sum_18 (fld.7.24)   ← 直接呼び出し
 ```
 
-**制御フローグラフ**（[詳説](selection.md)）。木がブロックになります。ここまでは対象機械を
+**線形IR**（[詳説](selection.md)）。木がブロックになります。ここまでは対象機械を
 何も知りません。
 
 ```
-$ sablec --dump-ir -o /dev/null doc/sum.sbl
+$ sablec --dump-linear -o /dev/null doc/sum.sbl
   sable_sum_18:
     t.8.21 <- l.19[0]
     t.9.22 <- 0

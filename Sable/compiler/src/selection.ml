@@ -1,6 +1,6 @@
 (* Instruction selection: the control-flow graph into the RISC-V one.
 
-   Ir has already decided what the blocks are and what each of them computes.
+   Linear has already decided what the blocks are and what each computes.
    What is left is everything that depends on the target: which instruction
    does the job, what fits in an immediate, and the calling convention.
 
@@ -39,7 +39,7 @@ let reg_of ctx x =
 
 (* Give a value a register, or hand back the one it already has.  The two arms
    of an `if` assign the same value, and both have to write the same place --
-   the day Ir grows phi nodes, this is what a phi would say instead. *)
+   the day Linear grows phi nodes, this is what a phi would say instead. *)
 let define ctx x =
   match Ident.Map.find_opt x ctx.env with
   | Some r -> r
@@ -174,33 +174,33 @@ let element_address ctx arr idx =
 (* The register the call reads as its callee, and the closure to hand over in
    t6 if there is one.  A closure's first word is its code pointer. *)
 let resolve_callee ctx = function
-  | Ir.Direct label -> (Riscv.Direct label, None)
-  | Ir.Closure f ->
+  | Linear.Direct label -> (Riscv.Direct label, None)
+  | Linear.Closure f ->
     let closure = reg_of ctx f in
     let code = Riscv.fresh_reg () in
     emit ctx.builder (Riscv.Load (code, closure, 0));
     (Riscv.Indirect code, Some closure)
 
 let generate_op ctx target = function
-  | Ir.Int n -> emit ctx.builder (Riscv.Li (target, n))
-  | Ir.Static label -> emit ctx.builder (Riscv.La (target, label))
-  | Ir.Move x -> emit ctx.builder (Riscv.Move (target, operand ctx x))
-  | Ir.Neg x -> emit ctx.builder (Riscv.Arith (Riscv.Sub, target, Riscv.zero, operand ctx x))
-  | Ir.Field (x, i) -> emit ctx.builder (Riscv.Load (target, reg_of ctx x, i * word))
-  | Ir.Byte (s, i) ->
+  | Linear.Int n -> emit ctx.builder (Riscv.Li (target, n))
+  | Linear.Static label -> emit ctx.builder (Riscv.La (target, label))
+  | Linear.Move x -> emit ctx.builder (Riscv.Move (target, operand ctx x))
+  | Linear.Neg x -> emit ctx.builder (Riscv.Arith (Riscv.Sub, target, Riscv.zero, operand ctx x))
+  | Linear.Field (x, i) -> emit ctx.builder (Riscv.Load (target, reg_of ctx x, i * word))
+  | Linear.Byte (s, i) ->
     (* The bytes start one word into the block, so the length word is the
        offset and the index is added to the base. *)
     let address = Riscv.fresh_reg () in
     emit ctx.builder (Riscv.Arith (Riscv.Add, address, reg_of ctx s, operand ctx i));
     emit ctx.builder (Riscv.Load_byte (target, address, word))
-  | Ir.Bin (op, x, y) -> generate_arith ctx target op x y
-  | Ir.Cmp (Ir.Eq, x, y, negated) -> generate_equality ctx target x y ~negated
-  | Ir.Cmp (Ir.Le, x, y, negated) -> generate_ordering ctx target x y ~negated
-  | Ir.Tuple xs ->
+  | Linear.Bin (op, x, y) -> generate_arith ctx target op x y
+  | Linear.Cmp (Linear.Eq, x, y, negated) -> generate_equality ctx target x y ~negated
+  | Linear.Cmp (Linear.Le, x, y, negated) -> generate_ordering ctx target x y ~negated
+  | Linear.Tuple xs ->
     let block = allocate_block ctx (List.length xs * word) in
     List.iteri (fun i x -> emit ctx.builder (Riscv.Store (operand ctx x, block, i * word))) xs;
     emit ctx.builder (Riscv.Move (target, block))
-  | Ir.Block (tag, xs) ->
+  | Linear.Block (tag, xs) ->
     let block = allocate_block ctx ((1 + List.length xs) * word) in
     let tag_reg = Riscv.fresh_reg () in
     emit ctx.builder (Riscv.Li (tag_reg, tag));
@@ -209,20 +209,20 @@ let generate_op ctx target = function
       (fun i x -> emit ctx.builder (Riscv.Store (operand ctx x, block, (i + 1) * word)))
       xs;
     emit ctx.builder (Riscv.Move (target, block))
-  | Ir.Array (size, init) ->
+  | Linear.Array (size, init) ->
     emit ctx.builder (Riscv.Move (Riscv.arg_regs.(0), operand ctx size));
     emit ctx.builder (Riscv.Move (Riscv.arg_regs.(1), operand ctx init));
     emit ctx.builder
       (Riscv.Call (Riscv.Direct "sable_make_array", [ Riscv.arg_regs.(0); Riscv.arg_regs.(1) ]));
     emit ctx.builder (Riscv.Move (target, Riscv.a0))
-  | Ir.Get (arr, idx) ->
+  | Linear.Get (arr, idx) ->
     let address, offset = element_address ctx arr idx in
     emit ctx.builder (Riscv.Load (target, address, offset))
-  | Ir.Put (arr, idx, v) ->
+  | Linear.Put (arr, idx, v) ->
     let address, offset = element_address ctx arr idx in
     emit ctx.builder (Riscv.Store (operand ctx v, address, offset));
     emit ctx.builder (Riscv.Li (target, 0))
-  | Ir.Call (callee, args) ->
+  | Linear.Call (callee, args) ->
     let callee, closure = resolve_callee ctx callee in
     let arg_regs = pass_arguments ctx args in
     (match closure with
@@ -232,16 +232,16 @@ let generate_op ctx target = function
     emit ctx.builder (Riscv.Move (target, Riscv.a0))
 
 let generate_instr ctx = function
-  | Ir.Let (x, Ir.Int n) ->
+  | Linear.Let (x, Linear.Int n) ->
     (* Remember the value as well as the register: the uses that can take an
        immediate will not read the register, and it disappears. *)
     let r = define ctx x in
     emit ctx.builder (Riscv.Li (r, n));
     remember_const ctx x n
-  | Ir.Let (x, op) ->
+  | Linear.Let (x, op) ->
     let r = define ctx x in
     generate_op ctx r op
-  | Ir.Closures definitions ->
+  | Linear.Closures definitions ->
     (* Allocate every block and bind every name first, then fill them in: a
        closure may capture itself or a sibling, and neither pointer exists
        until its block does. *)
@@ -264,14 +264,14 @@ let generate_instr ctx = function
       blocks
 
 let generate_terminator ctx = function
-  | Ir.Jump l -> Riscv.Jump l
-  | Ir.Branch (Ir.Eq, x, y, t, f) -> Riscv.Branch (Riscv.Eq, operand ctx x, operand ctx y, t, f)
+  | Linear.Jump l -> Riscv.Jump l
+  | Linear.Branch (Linear.Eq, x, y, t, f) -> Riscv.Branch (Riscv.Eq, operand ctx x, operand ctx y, t, f)
   (* x <= y is y >= x. *)
-  | Ir.Branch (Ir.Le, x, y, t, f) -> Riscv.Branch (Riscv.Ge, operand ctx y, operand ctx x, t, f)
-  | Ir.Return x ->
+  | Linear.Branch (Linear.Le, x, y, t, f) -> Riscv.Branch (Riscv.Ge, operand ctx y, operand ctx x, t, f)
+  | Linear.Return x ->
     emit ctx.builder (Riscv.Move (Riscv.a0, reg_of ctx x));
     Riscv.Return [ Riscv.a0 ]
-  | Ir.Tail (callee, args) ->
+  | Linear.Tail (callee, args) ->
     let callee, closure = resolve_callee ctx callee in
     let arg_regs = pass_arguments ctx args in
     (match closure with
@@ -281,15 +281,15 @@ let generate_terminator ctx = function
 
 (* --------------------------------------------------------------- functions *)
 
-let single_definitions (f : Ir.func) =
+let single_definitions (f : Linear.func) =
   let counts = Hashtbl.create 64 in
   let seen x = Hashtbl.replace counts x (1 + Option.value ~default:0 (Hashtbl.find_opt counts x)) in
-  List.iter (fun (b : Ir.block) -> List.iter (fun i -> List.iter seen (Ir.defines i)) b.body) f.blocks;
+  List.iter (fun (b : Linear.block) -> List.iter (fun i -> List.iter seen (Linear.defines i)) b.body) f.blocks;
   let once = Hashtbl.create 64 in
   Hashtbl.iter (fun x n -> if n = 1 then Hashtbl.replace once x ()) counts;
   once
 
-let translate_function (f : Ir.func) =
+let translate_function (f : Linear.func) =
   check_arity ("the function `" ^ f.label ^ "`") (List.length f.args);
   Riscv.reset_virtuals ();
   let builder = { pending = [] } in
@@ -306,10 +306,10 @@ let translate_function (f : Ir.func) =
   List.iteri
     (fun i x -> emit builder (Riscv.Load (define ctx x, Riscv.closure_reg, (i + 1) * word)))
     f.captures;
-  (* The prologue belongs to the entry block, which Ir puts first. *)
+  (* The prologue belongs to the entry block, which Linear puts first. *)
   let blocks =
     List.map
-      (fun (b : Ir.block) ->
+      (fun (b : Linear.block) ->
         List.iter (generate_instr ctx) b.body;
         let terminator = generate_terminator ctx b.terminator in
         let body = List.rev builder.pending in

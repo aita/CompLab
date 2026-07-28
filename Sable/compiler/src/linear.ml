@@ -1,4 +1,5 @@
-(* The control-flow graph, before the machine.
+(* The linear intermediate representation: a control-flow graph whose blocks
+   hold a flat sequence of instructions.
 
    Closure-converted code is still a tree: an `if` carries its two arms inside
    it, and the value of a function is whatever its body evaluates to.  Machine
@@ -9,12 +10,17 @@
    exist until the code was already RISC-V.  Splitting it out draws the line
    this compiler wants:
 
-     Ir      blocks, values, calls.  Knows nothing about registers, the calling
+     Linear  blocks, values, calls.  Knows nothing about registers, the calling
              convention, or which instructions the target has.
      Riscv   instructions, physical registers, `a0`, callee-saved, `t6`.
 
    Everything above the line is where an SSA form belongs; everything below is
-   where the ABI belongs.  See doc/ir.md.
+   where the ABI belongs.  See doc/selection.md.
+
+   "Linear" is the shape of a block's contents: instructions in a row, each
+   naming its operands, rather than the tree Closure hands over.  The blocks
+   themselves are a graph -- Cooper and Torczon would call the combination a
+   hybrid, and it is the arrangement nearly every compiler settles on.
 
    Values are `Ident.t`, and after Alpha every one of them is bound once in the
    source program -- so a name still identifies its definition, which is most

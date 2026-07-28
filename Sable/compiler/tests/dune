@@ -280,28 +280,28 @@
  (action
   (diff knf.expected knf.out)))
 
-; The control-flow graph Ir builds, before it is anything a machine could run:
+; The control-flow graph Linear builds, before it is anything a machine could run:
 ; one entry, no block without a way in, no use of a value nothing defines.
 
 (rule
  (with-stdout-to
-  ir.out
+  linear.out
   (progn
-   (run %{exe:../src/sablec.exe} --check-ir -o /dev/null %{dep:../examples/tour.sbl})
-   (run %{exe:../src/sablec.exe} --check-ir -o /dev/null %{dep:../examples/queens.sbl})
-   (run %{exe:../src/sablec.exe} --check-ir -o /dev/null %{dep:../examples/sort.sbl})
-   (run %{exe:../src/sablec.exe} --check-ir -o /dev/null %{dep:../examples/tree.sbl})
-   (run %{exe:../src/sablec.exe} --check-ir -o /dev/null %{dep:../examples/pressure.sbl})
-   (run %{exe:../src/sablec.exe} --check-ir -o /dev/null %{dep:../examples/lists.sbl})
-   (run %{exe:../src/sablec.exe} --check-ir -o /dev/null %{dep:../examples/strings.sbl})
-   (run %{exe:../src/sablec.exe} --check-ir -o /dev/null %{dep:../examples/modules.sbl})
-   (run %{exe:../src/sablec.exe} --check-ir -o /dev/null %{dep:../examples/functors.sbl})
+   (run %{exe:../src/sablec.exe} --check-linear -o /dev/null %{dep:../examples/tour.sbl})
+   (run %{exe:../src/sablec.exe} --check-linear -o /dev/null %{dep:../examples/queens.sbl})
+   (run %{exe:../src/sablec.exe} --check-linear -o /dev/null %{dep:../examples/sort.sbl})
+   (run %{exe:../src/sablec.exe} --check-linear -o /dev/null %{dep:../examples/tree.sbl})
+   (run %{exe:../src/sablec.exe} --check-linear -o /dev/null %{dep:../examples/pressure.sbl})
+   (run %{exe:../src/sablec.exe} --check-linear -o /dev/null %{dep:../examples/lists.sbl})
+   (run %{exe:../src/sablec.exe} --check-linear -o /dev/null %{dep:../examples/strings.sbl})
+   (run %{exe:../src/sablec.exe} --check-linear -o /dev/null %{dep:../examples/modules.sbl})
+   (run %{exe:../src/sablec.exe} --check-linear -o /dev/null %{dep:../examples/functors.sbl})
    (echo "every control-flow graph is well formed\n"))))
 
 (rule
  (alias runtest)
  (action
-  (diff ir.expected ir.out)))
+  (diff linear.expected linear.out)))
 
 ; The back end reads the control-flow graph as acyclic in two places; this says
 ; so for every example rather than leaving it to a comment.

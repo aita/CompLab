@@ -1,4 +1,4 @@
-# 制御フローグラフと命令選択 — `ir.ml`, `selection.ml`, `cfg.ml`, `liveness.ml`
+# 線形IRと命令選択 — `linear.ml`, `selection.ml`, `cfg.ml`, `liveness.ml`
 
 まず木をグラフに変え、それから機械に落とし、その上を歩く2つの解析を用意します。出てくる
 コードは正しいけれど実行できません。レジスタが無制限だからです。実行できるものに変えるのは
@@ -7,14 +7,18 @@
 **この章に線が1本入っています。** §1 は対象機械を何も知りません。§2 から下だけが RISC-V を
 知っています。
 
-## 1. 木をグラフにする — `ir.ml`
+## 1. 線形IR — `linear.ml`
 
 クロージャ変換済みのコードはまだ**木**です。`if` は2つの枝を中に抱えていて、関数の値は
 本体を評価した結果です。機械語は**グラフ**です。ブロックが並び、終端命令が後続を名指しします。
 誰かが木をグラフに変えなければならず、それがこのパスです。
 
+**線形**というのはブロックの中身の形です。被演算子を名指しした命令が一列に並んでいて、
+`Closure` が渡してくる木ではありません。ブロックどうしはグラフなので、Cooper と Torczon の
+分類でいえば線形とグラフの合いの子で、たいていの処理系が落ち着く形でもあります。
+
 ```
-$ sablec --dump-ir -o /dev/null doc/sum.sbl
+$ sablec --dump-linear -o /dev/null doc/sum.sbl
 function sable_sum_18 (l.19)
   sable_sum_18:
     t.8.21 <- l.19[0]
@@ -31,7 +35,7 @@ function sable_sum_18 (l.19)
     return v.39
 ```
 
-![sum の Ir](./figures/ir-sum.png)
+![sum の線形IR](./figures/linear-sum.png)
 
 ### なぜ機械の手前で作るのか
 
@@ -40,7 +44,7 @@ function sable_sum_18 (l.19)
 
 | | |
 |---|---|
-| `Ir` | ブロック、値、呼び出し。レジスタも呼び出し規約も、対象機械の命令も知らない |
+| `Linear` | ブロック、値、呼び出し。レジスタも呼び出し規約も、対象機械の命令も知らない |
 | `Riscv` | 命令、物理レジスタ、`a0`、callee-saved、`t6` |
 
 **線の上が SSA の居場所で、線の下が ABI の居場所です。** 入口で callee-saved を12本写す
@@ -91,7 +95,7 @@ let x = if c then a else b in ...
 ### 検査するもの
 
 ```
-$ sablec --check-ir -o /dev/null examples/queens.sbl
+$ sablec --check-linear -o /dev/null examples/queens.sbl
 ```
 
 - 入口ブロックが先頭で、そのラベルが関数のラベル
@@ -259,12 +263,12 @@ Appel の *Modern Compiler Implementation* が10章で扱っています。生�
 
 | | |
 |---|---|
-| `ir.ml` 26–108行 | 型。`op`・`instr`・`terminator`・`block`・`func` |
-| `ir.ml` 110–132行 | ブロックを組み立てる builder |
-| `ir.ml` 134–274行 | `translate` — クロージャ変換済みの木 → ブロック。分岐は `generate_branch`（225行） |
-| `ir.ml` 276–347行 | `check` — 整った形かどうか。`--check-ir` |
+| `linear.ml` 32–114行 | 型。`op`・`instr`・`terminator`・`block`・`func` |
+| `linear.ml` 118–140行 | ブロックを組み立てる builder |
+| `linear.ml` 142–280行 | `translate` — クロージャ変換済みの木 → ブロック。分岐は `generate_branch`（231行） |
+| `linear.ml` 282–353行 | `check` — 整った形かどうか。`--check-linear` |
 | `riscv.ml` | 命令と制御フローの型、レジスタファイル、呼び出し規約。対象機械を1つだけ知っている側です |
-| `selection.ml` | `Ir.func` → `Riscv.func` |
+| `selection.ml` | `Linear.func` → `Riscv.func` |
 | `cfg.ml` 27–67行 | `build` — 深さ優先1回で後行順・到達可能性・閉路の有無 |
 | `cfg.ml` 91–128行 | `layout`・`relayout` — フォールスルーを増やすブロック順 |
 | `liveness.ml` | 後ろ向きデータフローと、そのついでのデッドコード除去 |
