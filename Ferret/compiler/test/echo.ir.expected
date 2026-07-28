@@ -1,0 +1,15 @@
+fun main() -> f64 {
+  var seen : int = 0
+  var e : float = 0
+  seen = 0
+  loop $1 {
+    e = wait()
+    if (e != 0) {
+      log e
+      seen = (seen + 1)
+      br $1
+    } else {
+      return float(seen)
+    }
+  }
+}

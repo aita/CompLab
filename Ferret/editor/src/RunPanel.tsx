@@ -21,6 +21,8 @@ export default function RunPanel({
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [stepping, setStepping] = useState(false);
+  const [waiting, setWaiting] = useState(false);
+  const [event, setEvent] = useState("1");
   const run = useRef<Run | null>(null);
 
   if (!compiled.ok) {
@@ -58,11 +60,16 @@ export default function RunPanel({
     setFailure(null);
     setResult(null);
     setPaused(null);
-    const active = start(build.wasm, (p) => {
-      setPaused(p);
-      const w = build.ok ? build.watches[p.watch] : undefined;
-      if (w) onReveal(w.node);
-    });
+    setWaiting(false);
+    const active = start(
+      build.wasm,
+      (p) => {
+        setPaused(p);
+        const w = build.ok ? build.watches[p.watch] : undefined;
+        if (w) onReveal(w.node);
+      },
+      () => setWaiting(true),
+    );
     run.current = active;
     try {
       const finished = await active.done;
@@ -71,6 +78,7 @@ export default function RunPanel({
       setFailure(e instanceof Error ? e.message : String(e));
     } finally {
       setPaused(null);
+      setWaiting(false);
       setBusy(false);
       run.current = null;
       setStepping(false);
@@ -82,6 +90,10 @@ export default function RunPanel({
     run.current?.resume();
   };
 
+  const send = () => {
+    setWaiting(false);
+    run.current?.send(Number(event) || 0);
+  };
 
   return (
     <div className="runpanel">
@@ -134,6 +146,31 @@ export default function RunPanel({
           <div className="paused-buttons">
             <button className="primary" onClick={resume}>
               {stepping ? "Next" : "Continue"}
+            </button>
+            <button onClick={() => run.current?.stop()}>Stop</button>
+          </div>
+        </div>
+      )}
+
+      {waiting && (
+        <div className="paused">
+          <div className="paused-head">Waiting for an event</div>
+          <div className="field">
+            <label>Send</label>
+            <input
+              type="number"
+              step="any"
+              value={event}
+              autoFocus
+              onChange={(e) => setEvent(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") send();
+              }}
+            />
+          </div>
+          <div className="paused-buttons">
+            <button className="primary" onClick={send}>
+              Send
             </button>
             <button onClick={() => run.current?.stop()}>Stop</button>
           </div>

@@ -2,7 +2,7 @@
 // js_of_ocaml, loaded by a script tag in index.html, so this file only has to
 // unwrap what it returns -- and to drive the worker the module runs in.
 
-import { CONTINUE, STOP } from "./protocol";
+import { AT_BREAKPOINT, AT_EVENT, CONTINUE, SENT, STOP } from "./protocol";
 
 export interface CompileError {
   node: string | null;
@@ -102,6 +102,8 @@ export interface RunResult {
 export interface Run {
   done: Promise<RunResult>;
   resume: () => void;
+  /** Hand an event to a program stopped in a Wait node. */
+  send: (value: number) => void;
   stop: () => void;
   /** False when the page is not cross-origin isolated: breakpoints still
    *  report, but the run cannot be held at one. */
@@ -117,8 +119,16 @@ export function canPause(): boolean {
   );
 }
 
-function sharedFlag(): Int32Array | undefined {
-  return canPause() ? new Int32Array(new SharedArrayBuffer(4)) : undefined;
+// One buffer, two flags and a payload: [0] is the breakpoint's, [1] is the
+// event's, and the number an event carries sits after them, aligned for an
+// f64.
+function sharedState() {
+  if (!canPause()) return {};
+  const buffer = new SharedArrayBuffer(16);
+  return {
+    flags: new Int32Array(buffer, 0, 2),
+    payload: new Float64Array(buffer, 8, 1),
+  };
 }
 
 // The graph can describe a loop that never ends, so the module runs in a
@@ -128,12 +138,13 @@ function sharedFlag(): Int32Array | undefined {
 export function start(
   wasm: Uint8Array,
   onPause: (p: Paused) => void,
+  onWait: () => void,
   timeoutMs = 3000,
 ): Run {
   const worker = new Worker(new URL("./runner.ts", import.meta.url), {
     type: "module",
   });
-  const resume = sharedFlag();
+  const { flags, payload } = sharedState();
   let timer: ReturnType<typeof setTimeout> | undefined;
   let settle: (r: RunResult) => void = () => {};
   let fail: (e: Error) => void = () => {};
@@ -152,10 +163,10 @@ export function start(
     }, timeoutMs);
   };
 
-  const wake = (how: number) => {
-    if (!resume) return;
-    Atomics.store(resume, 0, how);
-    Atomics.notify(resume, 0);
+  const wake = (which: number, how: number) => {
+    if (!flags) return;
+    Atomics.store(flags, which, how);
+    Atomics.notify(flags, which);
     arm();
   };
 
@@ -164,6 +175,12 @@ export function start(
     if (m.type === "paused") {
       disarm();
       onPause(m as Paused);
+      return;
+    }
+    // Waiting for an event is not hanging, so the clock stops here too.
+    if (m.type === "waiting") {
+      disarm();
+      onWait();
       return;
     }
     disarm();
@@ -188,14 +205,21 @@ export function start(
   arm();
   // The bytes are copied rather than transferred: the caller keeps them for
   // the hex dump.
-  worker.postMessage({ wasm, resume });
+  worker.postMessage({ wasm, flags, payload });
 
   return {
     done,
-    resume: () => wake(CONTINUE),
+    resume: () => wake(AT_BREAKPOINT, CONTINUE),
+    send: (value: number) => {
+      if (!flags || !payload) return;
+      payload[0] = value;
+      wake(AT_EVENT, SENT);
+    },
     stop: () => {
-      if (resume) wake(STOP);
-      else {
+      if (flags) {
+        wake(AT_BREAKPOINT, STOP);
+        wake(AT_EVENT, STOP);
+      } else {
         disarm();
         worker.terminate();
         settle({
@@ -208,6 +232,6 @@ export function start(
         });
       }
     },
-    canPause: resume !== undefined,
+    canPause: flags !== undefined,
   };
 }

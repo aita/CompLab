@@ -3,6 +3,7 @@
   (import "env" "random" (func $random (result f64)))
   (import "env" "watch" (func $watch (param i32) (param f64) (result f64)))
   (import "env" "now" (func $now (result f64)))
+  (import "env" "wait" (func $wait (result f64)))
   (func $main (export "main") (result f64)
     (local $i i64)
     i64.const 0

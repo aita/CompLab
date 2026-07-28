@@ -21,7 +21,7 @@ let is_atom = function Num _ | Int _ | Local _ -> true | _ -> false
    parks its argument, and a breakpoint on a whole number parks it while the
    host is handed a float copy. *)
 let rec scratch_of_expr ty = function
-  | Int _ | Num _ | Local _ | Now -> []
+  | Int _ | Num _ | Local _ | Now | Wait -> []
   | Bin (Mod, l, r) ->
       (if ty l = VFloat then [ VFloat; VFloat ] else [])
       @ scratch_of_expr ty l @ scratch_of_expr ty r
@@ -51,9 +51,10 @@ let log_index = 0
 let random_index = 1
 let watch_index = 2
 let now_index = 3
+let wait_index = 4
 
 (* The only function the module defines, so it comes after the imports. *)
-let main_index = 4
+let main_index = 5
 
 type env = {
   ty : expr -> vtype;
@@ -178,6 +179,7 @@ let rec expr env b e =
       expr env b c;
       Wasm.op b Wasm.op_select
   | Now -> Wasm.call b now_index
+  | Wait -> Wasm.call b wait_index
   | Rand (lo, hi) ->
       (* lo + random() * (hi - lo).  Only lo is read twice, so only lo has to
          be parked, and not even that when it is already a local or a
@@ -299,6 +301,7 @@ let module_of_func (f : func) : string =
         { Wasm.imp_module = "env"; imp_field = "random"; imp_type = 1 };
         { Wasm.imp_module = "env"; imp_field = "watch"; imp_type = 2 };
         { Wasm.imp_module = "env"; imp_field = "now"; imp_type = 1 };
+        { Wasm.imp_module = "env"; imp_field = "wait"; imp_type = 1 };
       ]
     ~funcs:[ 3 ]
     ~exports:[ ("main", main_index) ]

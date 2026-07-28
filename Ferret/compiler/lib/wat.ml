@@ -141,6 +141,7 @@ let rec expr env e =
       expr env c;
       line env "select"
   | Now -> line env "call $now"
+  | Wait -> line env "call $wait"
   | Rand (lo, hi) ->
       let parked =
         if Emit.is_atom lo then None else Some (take_scratch env 1)
@@ -252,6 +253,7 @@ let of_func (f : func) : string =
       line env
         "(import \"env\" \"watch\" (func $watch (param i32) (param f64) (result f64)))";
       line env "(import \"env\" \"now\" (func $now (result f64)))";
+      line env "(import \"env\" \"wait\" (func $wait (result f64)))";
       line env "(func $main (export \"main\") (result f64)";
       nested env (fun () ->
           List.iter (fun (v, t) -> line env "(local $%s %s)" v (kind t)) f.vars;

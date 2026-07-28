@@ -123,6 +123,23 @@
       "unique": false
     },
     {
+      "type": "wait",
+      "title": "Wait for Event",
+      "glyph": "wait",
+      "color": "#f63d68",
+      "category": "Flow",
+      "hint": "Stops until the host has an event, and hands over the number it sent. The only node that takes time: a loop with one of these in it is an event loop, and the loop is drawn rather than hidden in the runtime.",
+      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
+      "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
+      "inputs": [],
+      "outputs": [ { "id": "value", "label": "event", "kind": "num" } ],
+      "data": { "name": "e" },
+      "fields": [ { "key": "name", "label": "Name", "kind": "text" } ],
+      "entry": null,
+      "variants": null,
+      "unique": false
+    },
+    {
       "type": "forloop",
       "title": "For Loop",
       "glyph": "1..n",

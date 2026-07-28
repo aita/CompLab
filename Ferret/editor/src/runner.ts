@@ -5,7 +5,13 @@
 
 // The project's lib is the DOM one, so reach for the worker globals through a
 // narrow view of them rather than pulling in a second, conflicting lib.
-import { RUNNING, STOP, type RunRequest } from "./protocol";
+import {
+  AT_BREAKPOINT,
+  AT_EVENT,
+  RUNNING,
+  STOP,
+  type RunRequest,
+} from "./protocol";
 
 const ctx = self as unknown as {
   onmessage: ((e: MessageEvent) => void) | null;
@@ -18,7 +24,7 @@ const HIT_LIMIT = 5000;
 class Stopped extends Error {}
 
 ctx.onmessage = async (e: MessageEvent<RunRequest>) => {
-  const { wasm, resume } = e.data;
+  const { wasm, flags, payload } = e.data;
   const logs: number[] = [];
   const hits: { watch: number; value: number }[] = [];
   let truncated = false;
@@ -34,16 +40,27 @@ ctx.onmessage = async (e: MessageEvent<RunRequest>) => {
         // What the start node hands out.  A wall-clock millisecond count,
         // which is what a graph would want it for.
         now: () => Date.now(),
+        // The event loop.  The worker stops here until the page leaves an
+        // event in the shared buffer, the same way it stops at a breakpoint:
+        // there is no other way to wait inside a synchronous wasm call.
+        wait: () => {
+          if (!flags || !payload) return 0;
+          ctx.postMessage({ type: "waiting" });
+          Atomics.store(flags, AT_EVENT, RUNNING);
+          Atomics.wait(flags, AT_EVENT, RUNNING);
+          if (Atomics.load(flags, AT_EVENT) === STOP) throw new Stopped();
+          return payload[0];
+        },
         watch: (watch: number, value: number) => {
           if (hits.length < HIT_LIMIT) hits.push({ watch, value });
           // Without a shared buffer to wait on -- the page is not
           // cross-origin isolated -- the hit is still recorded, the run just
           // does not stop for it.
-          if (resume) {
+          if (flags) {
             ctx.postMessage({ type: "paused", watch, value, hit: hits.length });
-            Atomics.store(resume, 0, RUNNING);
-            Atomics.wait(resume, 0, RUNNING);
-            if (Atomics.load(resume, 0) === STOP) throw new Stopped();
+            Atomics.store(flags, AT_BREAKPOINT, RUNNING);
+            Atomics.wait(flags, AT_BREAKPOINT, RUNNING);
+            if (Atomics.load(flags, AT_BREAKPOINT) === STOP) throw new Stopped();
           }
           return value;
         },

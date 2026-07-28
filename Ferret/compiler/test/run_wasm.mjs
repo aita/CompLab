@@ -9,7 +9,7 @@ let failures = 0;
 // repeatable as any other.
 const CLOCK = 1_700_000_000_000;
 
-async function load(file, random = () => 0) {
+async function load(file, random = () => 0, events = []) {
   const logged = [];
   const hits = [];
   let draws = 0;
@@ -25,6 +25,9 @@ async function load(file, random = () => 0) {
         return v;
       },
       now: () => CLOCK,
+      // The host side of an event loop, with the queue written out in
+      // advance: node has nothing to wait for.
+      wait: () => (events.length > 0 ? events.shift() : 0),
     },
   });
   return { main: instance.exports.main, logged, hits, draws: () => draws };
@@ -96,6 +99,12 @@ check("row sums", state.logged, [1, 3, 6, 10, 15]);
 const clock = await load("time.wasm");
 check("the start node's time", clock.main(), CLOCK);
 check("one moment, read twice", clock.logged, [0]);
+
+// Three events and then a zero to leave on: the loop reads one at a time and
+// the count comes back at the end.
+const echo = await load("echo.wasm", () => 0, [7, 8, 9, 0]);
+check("events seen", echo.main(), 3);
+check("events echoed", echo.logged, [7, 8, 9]);
 
 if (failures > 0) process.exit(1);
 console.log("ok");

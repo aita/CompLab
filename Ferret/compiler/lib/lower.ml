@@ -243,7 +243,7 @@ and watched ctx (n : Graph.node) (expr, ty) =
      loop, rather than every time a slot is read; the start node has nothing
      to report that its caller does not already know. *)
   if
-    n.kind = "counter" || n.kind = "state" || n.kind = "start"
+    n.kind = "counter" || n.kind = "state" || n.kind = "wait" || n.kind = "start"
     || not (Graph.flag n "breakpoint")
   then (expr, ty)
   else
@@ -261,7 +261,7 @@ and value_of ctx (n : Graph.node) : expr * vtype =
          moment -- the same rule that makes one Random node one draw. *)
       ctx.wants_time <- true;
       (Local (slot ctx ~key:"\001time" ~display:"time" ~ty:VFloat), VFloat)
-  | "counter" | "forloop" | "state" ->
+  | "counter" | "forloop" | "state" | "wait" ->
       (* Reading what a counter holds stops the backward walk: the value is a
          local, so the step may name the counter itself without that being a
          cycle.  A for loop's index and a state's contents are the same
@@ -460,7 +460,8 @@ let note_type ctx (n : Graph.node) (e, ty) =
     ctx.too_narrow <- true);
   (e, ty)
 
-let exec_kinds = [ "log"; "end"; "condition"; "counter"; "forloop"; "state" ]
+let exec_kinds =
+  [ "log"; "end"; "condition"; "counter"; "forloop"; "state"; "wait" ]
 
 (* The nodes that own a local, and the port each one starts from. *)
 let holds_state (n : Graph.node) = List.mem n.kind [ "counter"; "state" ]
@@ -550,6 +551,15 @@ and statements_of ctx (n : Graph.node) : block =
       in
       let e, ty = watched_as ctx n "value" v in
       pre @ [ Assign (i, coerce ctx (e, ty) want) ]
+  | "wait" ->
+      (* Nothing else in the language takes time.  Passing through stops the
+         program until the host has an event for it, and what comes back is
+         kept the way a state's contents are, so the rest of the graph reads
+         it as an ordinary value. *)
+      let i = state_slot ctx n in
+      let want = assumed ctx (slot_key n) in
+      let e, ty = watched_as ctx n "event" (note_type ctx n (Wait, VFloat)) in
+      [ Assign (i, coerce ctx (e, ty) want) ]
   | "state" ->
       (* Passing through stores what it is fed, and nothing else does: this is
          the whole of assignment in the language. *)

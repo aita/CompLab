@@ -224,6 +224,23 @@ let catalogue : t list =
     };
     {
       blank with
+      kind = "wait";
+      title = "Wait for Event";
+      glyph = "wait";
+      color = "#f63d68";
+      category = "Flow";
+      hint =
+        "Stops until the host has an event, and hands over the number it sent. \
+         The only node that takes time: a loop with one of these in it is an \
+         event loop, and the loop is drawn rather than hidden in the runtime.";
+      exec_in = [ exec "in" "in" ];
+      exec_out = next;
+      outputs = [ num "value" "event" ];
+      data = [ ("name", `String "e") ];
+      fields = [ Text { key = "name"; label = "Name" } ];
+    };
+    {
+      blank with
       kind = "forloop";
       title = "For Loop";
       glyph = "1..n";
@@ -418,6 +435,7 @@ let describe ~kind ~(data : Yojson.Safe.t) : described =
   | "state" ->
       (* Like a counter, what tells two of them apart is the name. *)
       { plain with d_title = name_field "State" }
+  | "wait" -> { plain with d_title = "Wait for " ^ name_field "e" }
   | "const" ->
       {
         plain with

@@ -186,6 +186,25 @@
  (action
   (diff time.ir.expected time.ir)))
 
+; An event loop: the program stops in a Wait node until the host has
+; something for it, and the loop around it is drawn rather than hidden.
+(rule
+ (target echo.ir)
+ (action
+  (with-stdout-to
+   echo.ir
+   (run ../bin/ferretc.exe --emit ir %{dep:../../examples/echo.json}))))
+
+(rule
+ (target echo.wasm)
+ (action
+  (run ../bin/ferretc.exe %{dep:../../examples/echo.json} -o echo.wasm)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff echo.ir.expected echo.ir)))
+
 ; The node catalogue the editor draws from: what the palette offers, what
 ; ports each kind has, and what the inspector puts in its form.
 (rule
@@ -249,6 +268,7 @@
   formula.wasm
   nested.wasm
   state.wasm
-  time.wasm)
+  time.wasm
+  echo.wasm)
  (action
   (run node run_wasm.mjs)))

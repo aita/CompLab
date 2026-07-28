@@ -40,6 +40,9 @@ type expr =
   | Rand of expr * expr
   (* When the run started, from the host.  Asked for once, at the entry. *)
   | Now
+  (* The next event, from the host.  Waits for one: this is the only thing in
+     the language that takes time rather than just arithmetic. *)
+  | Wait
   (* Hand the value to the host and carry on with it: a breakpoint.  The index
      is into the function's list of watch points. *)
   | Watch of int * vtype * expr
@@ -73,7 +76,7 @@ type func = {
    a type can be read straight back off the tree. *)
 let rec type_of locals = function
   | Int _ -> VInt
-  | Num _ | Widen _ | Rand _ | Now -> VFloat
+  | Num _ | Widen _ | Rand _ | Now | Wait -> VFloat
   | Local i -> locals i
   | Bin ((Div | Min | Max), _, _) -> VFloat
   | Bin (_, a, _) -> type_of locals a
@@ -134,6 +137,7 @@ let to_string f =
         Printf.sprintf "(if %s then %s else %s)" (expr c) (expr a) (expr b)
     | Rand (lo, hi) -> Printf.sprintf "random(%s, %s)" (expr lo) (expr hi)
     | Now -> "now()"
+    | Wait -> "wait()"
     | Watch (i, _, e) -> Printf.sprintf "watch#%d(%s)" i (expr e)
   in
   let rec block ind stmts = List.iter (stmt ind) stmts
