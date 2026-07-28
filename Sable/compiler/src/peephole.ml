@@ -1,13 +1,23 @@
-(* Local rewrites on the machine code, after register allocation.
+(* Rewrites on the machine code, after register allocation.
 
-   Everything here follows from facts that hold within one basic block: which
-   registers are known to hold the same value, which constants are already
-   materialized, and what was last written to a memory slot.
+   Everything here follows from three kinds of fact: which registers are known
+   to hold the same value, which constants are already materialized, and what
+   was last written to a memory slot.
 
    Running after allocation is the point.  Spill code stores a value and, if the
    use is close by, loads it straight back; the moves the allocator could not
    coalesce sometimes copy a register onto itself under another name.  Neither
-   is visible before registers are assigned. *)
+   is visible before registers are assigned.
+
+   The facts carry across block boundaries.  A block starts from what all of
+   its predecessors agree on -- [meet] below -- which makes this a forward
+   dataflow rather than a per-block walk.  It costs one pass: the graph is
+   acyclic (Cfg.is_acyclic, checked by --check-cfg), so visiting in reverse
+   postorder sees every predecessor before the block itself and no fixed point
+   is needed.  What it buys is the reload a value did not need, which is
+   overwhelmingly a callee-saved register being restored on a path that never
+   wrote it.  Shrink wrapping would keep that instruction from being emitted in
+   the first place; this deletes it afterwards. *)
 
 type facts = {
   mutable equal : (Riscv.reg * Riscv.reg) list; (* pairs holding the same value *)
@@ -23,6 +33,25 @@ type facts = {
 
 let no_facts () =
   { equal = []; consts = []; labels = []; memory = []; computed = []; computed_imm = [] }
+
+(* What every predecessor agrees on.  A fact that only one path establishes is
+   not a fact at the block they meet in. *)
+let meet = function
+  | [] -> no_facts ()
+  | first :: rest ->
+    let keep get eq =
+      List.filter (fun x -> List.for_all (fun g -> List.exists (eq x) (get g)) rest) (get first)
+    in
+    let same_pair (a, b) (x, y) = (a = x && b = y) || (a = y && b = x) in
+    {
+      (* `equal` holds unordered pairs, so agreement ignores the order. *)
+      equal = keep (fun f -> f.equal) same_pair;
+      consts = keep (fun f -> f.consts) ( = );
+      labels = keep (fun f -> f.labels) ( = );
+      memory = keep (fun f -> f.memory) ( = );
+      computed = keep (fun f -> f.computed) ( = );
+      computed_imm = keep (fun f -> f.computed_imm) ( = );
+    }
 
 (* Byte accesses take part in none of this.  The memory facts assume every
    slot is a whole aligned word, which is what lets two different offsets from
@@ -56,8 +85,9 @@ let destinations = function
     [ d ]
   | Riscv.Store _ | Riscv.Call _ -> []
 
-let rewrite_block (block : Riscv.block) =
-  let facts = no_facts () in
+(* [facts] comes in holding what is true on entry and is left holding what is
+   true on exit. *)
+let rewrite_block facts (block : Riscv.block) =
   let changed = ref false in
   let step instr =
     (* Reading back a slot whose contents are still in a register is a move. *)
@@ -187,14 +217,34 @@ let thread_jumps (func : Riscv.func) =
   func.blocks <- kept;
   !changed
 
+(* One forward pass over the whole function, in reverse postorder so that a
+   block is rewritten after everything that can reach it.  A block whose
+   predecessors are not all done -- which only happens if the graph turns out
+   to have a cycle after all -- simply starts from nothing. *)
+let rewrite_function (func : Riscv.func) =
+  let cfg = Cfg.build func in
+  let exits = Array.make (Array.length cfg.Cfg.blocks) None in
+  let changed = ref false in
+  List.iter
+    (fun i ->
+      let known = List.filter_map (fun p -> exits.(p)) cfg.Cfg.predecessors.(i) in
+      let facts =
+        if known <> [] && List.length known = List.length cfg.Cfg.predecessors.(i) then meet known
+        else no_facts ()
+      in
+      if rewrite_block facts (Cfg.block cfg i) then changed := true;
+      exits.(i) <- Some facts)
+    (List.rev cfg.Cfg.postorder);
+  !changed
+
 (* Deleting one instruction can expose the next, so run to a fixed point.  The
    bound is a backstop; two passes is the most anything here has needed. *)
 let run (func : Riscv.func) =
   let rec loop rounds =
     if rounds > 0 then begin
-      let blocks = List.map rewrite_block func.Riscv.blocks in
+      let rewritten = rewrite_function func in
       let threaded = thread_jumps func in
-      if List.exists Fun.id blocks || threaded then loop (rounds - 1)
+      if rewritten || threaded then loop (rounds - 1)
     end
   in
   loop 8
