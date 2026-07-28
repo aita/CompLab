@@ -1,26 +1,23 @@
-fun main() -> f64 {
-  var run : int = 0
-  var r : int = 0
-  var c : int = 0
-  run = 0
-  r = 1
-  loop $1 {
-    if (r <= 5) {
-      run = 0
-      c = 1
-      loop $2 {
-        if (c <= r) {
-          run = (run + c)
-          c = (c + 1)
-          br $2
-        } else {
-          log float(run)
-          r = (r + 1)
-          br $1
-        }
-      }
-    } else {
-      return 0
-    }
-  }
-}
+(func main (result f64)
+  (local run int)
+  (local r int)
+  (local c int)
+  (set run 0)
+  (set r 1)
+  (loop $1
+    (if (<= r 5)
+      (then
+        (set run 0)
+        (set c 1)
+        (loop $2
+          (if (<= c r)
+            (then
+              (set run (+ run c))
+              (set c (+ c 1))
+              (br $2))
+            (else
+              (log (float run))
+              (set r (+ r 1))
+              (br $1)))))
+      (else
+        (return 0)))))

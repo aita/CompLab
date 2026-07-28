@@ -1,12 +1,10 @@
-fun main() -> f64 {
-  var i : int = 0
-  i = 0
-  loop $1 {
-    if watch#0((i < 3)) {
-      i = watch#1((i + 1))
-      br $1
-    } else {
-      return float(i)
-    }
-  }
-}
+(func main (result f64)
+  (local i int)
+  (set i 0)
+  (loop $1
+    (if (watch 0 (< i 3))
+      (then
+        (set i (watch 1 (+ i 1)))
+        (br $1))
+      (else
+        (return (float i))))))

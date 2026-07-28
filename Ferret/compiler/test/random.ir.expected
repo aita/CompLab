@@ -1,5 +1,4 @@
-fun main() -> f64 {
-  var rnd_value : float = 0
-  rnd_value = random(0, 1)
-  return ((rnd_value + rnd_value) + random(0, 10))
-}
+(func main (result f64)
+  (local rnd_value float)
+  (set rnd_value (random 0 1))
+  (return (+ (+ rnd_value rnd_value) (random 0 10))))

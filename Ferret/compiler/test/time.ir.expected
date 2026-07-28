@@ -1,6 +1,5 @@
-fun main() -> f64 {
-  var time : float = 0
-  time = now()
-  log (time - time)
-  return time
-}
+(func main (result f64)
+  (local time float)
+  (set time (now))
+  (log (- time time))
+  (return time))

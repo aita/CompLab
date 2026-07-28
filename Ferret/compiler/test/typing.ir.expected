@@ -1,13 +1,11 @@
-fun main() -> f64 {
-  var i : int = 0
-  i = 0
-  loop $1 {
-    if (i < 10) {
-      log float((i % 3))
-      i = (i + 1)
-      br $1
-    } else {
-      return (float(i) / 2)
-    }
-  }
-}
+(func main (result f64)
+  (local i int)
+  (set i 0)
+  (loop $1
+    (if (< i 10)
+      (then
+        (log (float (% i 3)))
+        (set i (+ i 1))
+        (br $1))
+      (else
+        (return (/ (float i) 2))))))

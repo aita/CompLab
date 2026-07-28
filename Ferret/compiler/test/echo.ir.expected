@@ -1,15 +1,13 @@
-fun main() -> f64 {
-  var seen : int = 0
-  var e : float = 0
-  seen = 0
-  loop $1 {
-    e = wait()
-    if (e != 0) {
-      log e
-      seen = (seen + 1)
-      br $1
-    } else {
-      return float(seen)
-    }
-  }
-}
+(func main (result f64)
+  (local seen int)
+  (local e float)
+  (set seen 0)
+  (loop $1
+    (set e (wait))
+    (if (!= e 0)
+      (then
+        (log e)
+        (set seen (+ seen 1))
+        (br $1))
+      (else
+        (return (float seen))))))

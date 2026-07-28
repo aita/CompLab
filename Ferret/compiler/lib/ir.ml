@@ -12,11 +12,14 @@ let is_num = function VBool -> false | _ -> true
 (* The numeric types meet at f64: an integer widens, a float never narrows. *)
 let join a b = if a = b then a else VFloat
 
+(* What an error message calls a type, for the person reading it. *)
 let type_name = function
   | VInt -> "whole number"
   | VFloat -> "number"
   | VBool -> "true or false"
 
+(* What the dump calls it, where one word has to do. *)
+let type_tag = function VInt -> "int" | VFloat -> "float" | VBool -> "bool"
 
 type binop = Add | Sub | Mul | Div | Mod | Min | Max
 type unop = Neg | Abs | Sqrt | Floor | Ceil | Round
@@ -114,67 +117,75 @@ let string_of_cmpop = function
   | Ne -> "!="
 
 (* A readable dump, so the editor can show what the graph actually meant
-   before it turns into bytes. *)
+   before it turns into bytes.
+
+   S-expressions, because the IR is a tree and the graph it came from is one
+   too: an expression's shape is the nesting rather than a precedence table
+   the reader has to know.  It is not wat -- that is [wat.ml], and it is a
+   stack machine.  Here a call still has its arguments inside it. *)
 let to_string f =
   let b = Buffer.create 256 in
   let pr fmt = Printf.ksprintf (Buffer.add_string b) fmt in
+  let call head parts = "(" ^ String.concat " " (head :: parts) ^ ")" in
   let rec expr = function
     | Int n -> string_of_int n
     | Num x -> Printf.sprintf "%g" x
-    | Widen e -> Printf.sprintf "float(%s)" (expr e)
     | Local i -> local_name f i
-    | Bin ((Min | Max) as op, l, r) ->
-        Printf.sprintf "%s(%s, %s)" (string_of_binop op) (expr l) (expr r)
-    | Bin (op, l, r) ->
-        Printf.sprintf "(%s %s %s)" (expr l) (string_of_binop op) (expr r)
-    | Un (op, e) -> Printf.sprintf "%s(%s)" (string_of_unop op) (expr e)
-    | Cmp (op, l, r) ->
-        Printf.sprintf "(%s %s %s)" (expr l) (string_of_cmpop op) (expr r)
-    | And (l, r) -> Printf.sprintf "(%s and %s)" (expr l) (expr r)
-    | Or (l, r) -> Printf.sprintf "(%s or %s)" (expr l) (expr r)
-    | Not e -> Printf.sprintf "not %s" (expr e)
-    | Select (c, a, b) ->
-        Printf.sprintf "(if %s then %s else %s)" (expr c) (expr a) (expr b)
-    | Rand (lo, hi) -> Printf.sprintf "random(%s, %s)" (expr lo) (expr hi)
-    | Now -> "now()"
-    | Wait -> "wait()"
-    | Watch (i, _, e) -> Printf.sprintf "watch#%d(%s)" i (expr e)
+    | Widen e -> call "float" [ expr e ]
+    | Bin (op, l, r) -> call (string_of_binop op) [ expr l; expr r ]
+    | Un (op, e) -> call (string_of_unop op) [ expr e ]
+    | Cmp (op, l, r) -> call (string_of_cmpop op) [ expr l; expr r ]
+    | And (l, r) -> call "and" [ expr l; expr r ]
+    | Or (l, r) -> call "or" [ expr l; expr r ]
+    | Not e -> call "not" [ expr e ]
+    | Select (c, a, b) -> call "select" [ expr c; expr a; expr b ]
+    | Rand (lo, hi) -> call "random" [ expr lo; expr hi ]
+    | Now -> "(now)"
+    | Wait -> "(wait)"
+    | Watch (i, _, e) -> call "watch" [ string_of_int i; expr e ]
   in
+  (* Every form closes on the line its last child ends on, the way a Lisp is
+     written: the shape is the indentation, not a column of brackets. *)
   let rec block ind stmts = List.iter (stmt ind) stmts
+  and nested ind head parts =
+    let pad = String.make (ind * 2) ' ' in
+    pr "%s(%s\n" pad head;
+    List.iter (fun part -> part (ind + 1)) parts;
+    (* undo the newline the last child wrote, so the bracket lands on its line *)
+    let n = Buffer.length b in
+    if n > 0 && Buffer.nth b (n - 1) = '\n' then Buffer.truncate b (n - 1);
+    pr ")\n"
   and stmt ind s =
     let pad = String.make (ind * 2) ' ' in
     match s with
-    | Assign (i, e) -> pr "%s%s = %s\n" pad (local_name f i) (expr e)
-    | Drop e -> pr "%s%s\n" pad (expr e)
-    | Log e -> pr "%slog %s\n" pad (expr e)
-    | Ret e -> pr "%sreturn %s\n" pad (expr e)
+    | Assign (i, e) -> pr "%s(set %s %s)\n" pad (local_name f i) (expr e)
+    | Drop e -> pr "%s(drop %s)\n" pad (expr e)
+    | Log e -> pr "%s(log %s)\n" pad (expr e)
+    | Ret e -> pr "%s(return %s)\n" pad (expr e)
+    | Br l -> pr "%s(br $%d)\n" pad l
     | Block (l, body) ->
-        pr "%sblock $%d {\n" pad l;
-        block (ind + 1) body;
-        pr "%s}\n" pad
+        nested ind (Printf.sprintf "block $%d" l) [ (fun i -> block i body) ]
     | Loop (l, body) ->
-        pr "%sloop $%d {\n" pad l;
-        block (ind + 1) body;
-        pr "%s}\n" pad
-    | Br l -> pr "%sbr $%d\n" pad l
+        nested ind (Printf.sprintf "loop $%d" l) [ (fun i -> block i body) ]
     | If (c, t, []) ->
-        pr "%sif %s {\n" pad (expr c);
-        block (ind + 1) t;
-        pr "%s}\n" pad
+        nested ind (Printf.sprintf "if %s" (expr c)) [ (fun i -> block i t) ]
     | If (c, t, e) ->
-        pr "%sif %s {\n" pad (expr c);
-        block (ind + 1) t;
-        pr "%s} else {\n" pad;
-        block (ind + 1) e;
-        pr "%s}\n" pad
+        nested ind
+          (Printf.sprintf "if %s" (expr c))
+          [
+            (fun i -> nested i "then" [ (fun j -> block j t) ]);
+            (fun i -> nested i "else" [ (fun j -> block j e) ]);
+          ]
   in
-  pr "fun main() -> f64 {\n";
-  List.iter
-    (fun (v, t) ->
-      pr "  var %s : %s = %s\n" v
-        (match t with VInt -> "int" | VFloat -> "float" | VBool -> "bool")
-        (match t with VBool -> "false" | _ -> "0"))
-    f.vars;
-  block 1 f.body;
-  pr "}\n";
+  nested 0 "func main (result f64)"
+    [
+      (fun ind ->
+        List.iter
+          (fun (v, t) ->
+            pr "%s(local %s %s)\n"
+              (String.make (ind * 2) ' ')
+              v (type_tag t))
+          f.vars);
+      (fun ind -> block ind f.body);
+    ];
   Buffer.contents b
