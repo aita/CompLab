@@ -32,7 +32,10 @@ export default function Inspector({
   return (
     <div className="inspector">
       <div className="inspector-head">
-        <span className="fnode-glyph" style={{ background: spec.color }}>
+        <span
+          className={"fnode-glyph" + (shown.glyph.length > 1 ? " is-word" : "")}
+          style={{ background: spec.color }}
+        >
           {shown.glyph}
         </span>
         <div>

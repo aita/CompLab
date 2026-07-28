@@ -175,7 +175,7 @@ select:focus {
 /* ------------------------------------------------------------ palette */
 
 .palette {
-  width: 194px;
+  width: 240px;
   flex: none;
   padding: 12px;
   overflow-y: auto;
@@ -203,6 +203,63 @@ select:focus {
   margin-bottom: 4px;
   padding: 6px 8px;
   text-align: left;
+}
+
+/* A family of operators: the name of the family, and its operators under it
+   two at a time, so what you click is Multiply rather than Arithmetic. */
+.palette-family {
+  margin-bottom: 10px;
+}
+
+.palette-family-title {
+  margin: 10px 0 5px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #667085;
+}
+
+.palette-variants {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+}
+
+.palette-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 4px 5px;
+  font-size: 11px;
+  text-align: left;
+}
+
+.palette-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-chip .fnode-glyph {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 11px;
+}
+
+.fnode-glyph.is-word {
+  /* min, sqrt, floor: a sign that is a word needs the room a letter does not */
+  width: auto;
+  min-width: 22px;
+  padding: 0 3px;
+  font-size: 9px;
+  letter-spacing: -0.02em;
+}
+
+.palette-chip .fnode-glyph.is-word {
+  min-width: 18px;
+  padding: 0 2px;
+  font-size: 7px;
 }
 
 .palette-note {

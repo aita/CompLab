@@ -22,6 +22,7 @@
         }
       ],
       "entry": null,
+      "variants": null,
       "unique": true
     },
     {
@@ -38,6 +39,7 @@
       "data": {},
       "fields": [],
       "entry": null,
+      "variants": null,
       "unique": false
     },
     {
@@ -58,6 +60,7 @@
       "data": {},
       "fields": [],
       "entry": null,
+      "variants": null,
       "unique": false
     },
     {
@@ -77,6 +80,7 @@
       "data": {},
       "fields": [],
       "entry": null,
+      "variants": null,
       "unique": false
     },
     {
@@ -106,6 +110,7 @@
         }
       ],
       "entry": null,
+      "variants": null,
       "unique": false
     },
     {
@@ -128,6 +133,7 @@
       "data": { "name": "i", "values": { "first": 1, "last": 10 } },
       "fields": [ { "key": "name", "label": "Name", "kind": "text" } ],
       "entry": null,
+      "variants": null,
       "unique": false
     },
     {
@@ -144,6 +150,7 @@
       "data": {},
       "fields": [],
       "entry": null,
+      "variants": null,
       "unique": false
     },
     {
@@ -178,6 +185,18 @@
         }
       ],
       "entry": null,
+      "variants": {
+        "key": "op",
+        "of": [
+          { "id": "add", "name": "Add", "sign": "+" },
+          { "id": "sub", "name": "Subtract", "sign": "−" },
+          { "id": "mul", "name": "Multiply", "sign": "×" },
+          { "id": "div", "name": "Divide", "sign": "÷" },
+          { "id": "mod", "name": "Remainder", "sign": "%" },
+          { "id": "min", "name": "Minimum", "sign": "min" },
+          { "id": "max", "name": "Maximum", "sign": "max" }
+        ]
+      },
       "unique": false
     },
     {
@@ -203,11 +222,27 @@
             [ "sqrt", "Square root  sqrt" ],
             [ "floor", "Round down  floor" ],
             [ "ceil", "Round up  ceil" ],
-            [ "round", "Round  round" ]
+            [ "round", "Round" ]
           ]
         }
       ],
       "entry": null,
+      "variants": {
+        "key": "op",
+        "of": [
+          { "id": "neg", "name": "Negate", "sign": "neg" },
+          {
+            "id": "abs",
+            "name": "Absolute value",
+            "short": "Absolute",
+            "sign": "abs"
+          },
+          { "id": "sqrt", "name": "Square root", "sign": "sqrt" },
+          { "id": "floor", "name": "Round down", "sign": "floor" },
+          { "id": "ceil", "name": "Round up", "sign": "ceil" },
+          { "id": "round", "name": "Round", "sign": "round" }
+        ]
+      },
       "unique": false
     },
     {
@@ -241,6 +276,22 @@
         }
       ],
       "entry": null,
+      "variants": {
+        "key": "op",
+        "of": [
+          { "id": "lt", "name": "Less than", "sign": "<" },
+          { "id": "le", "name": "At most", "sign": "≤" },
+          {
+            "id": "gt",
+            "name": "Greater than",
+            "short": "Greater",
+            "sign": ">"
+          },
+          { "id": "ge", "name": "At least", "sign": "≥" },
+          { "id": "eq", "name": "Equal", "sign": "=" },
+          { "id": "ne", "name": "Not equal", "sign": "≠" }
+        ]
+      },
       "unique": false
     },
     {
@@ -263,12 +314,18 @@
           "key": "op",
           "label": "Operator",
           "kind": "select",
-          "options": [
-            [ "and", "And  and" ], [ "or", "Or  or" ], [ "not", "Not  not" ]
-          ]
+          "options": [ [ "and", "And" ], [ "or", "Or" ], [ "not", "Not" ] ]
         }
       ],
       "entry": null,
+      "variants": {
+        "key": "op",
+        "of": [
+          { "id": "and", "name": "And", "sign": "and" },
+          { "id": "or", "name": "Or", "sign": "or" },
+          { "id": "not", "name": "Not", "sign": "not" }
+        ]
+      },
       "unique": false
     },
     {
@@ -285,6 +342,7 @@
       "data": { "text": "x * x + y * y" },
       "fields": [ { "key": "text", "label": "Expression", "kind": "text" } ],
       "entry": { "key": "text", "placeholder": "x * x + y * y" },
+      "variants": null,
       "unique": false
     },
     {
@@ -301,6 +359,7 @@
       "data": { "value": 0 },
       "fields": [ { "key": "value", "label": "Value", "kind": "number" } ],
       "entry": null,
+      "variants": null,
       "unique": false
     },
     {
@@ -320,6 +379,7 @@
       "data": { "values": { "min": 0, "max": 1 } },
       "fields": [],
       "entry": null,
+      "variants": null,
       "unique": false
     }
   ]

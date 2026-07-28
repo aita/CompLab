@@ -25,6 +25,14 @@ export type Field =
   | { key: string; label: string; kind: "select"; options: [string, string][] }
   | { key: string; label: string; kind: "names"; itemLabel: string };
 
+/** One operator of a family, as the palette offers it. */
+export interface Op {
+  id: string;
+  name: string;
+  short?: string;
+  sign?: string;
+}
+
 export interface NodeData {
   [key: string]: unknown;
 }
@@ -46,6 +54,8 @@ export interface Spec {
   fields: Field[];
   /** A line of text edited on the card, for a node that mostly *is* its text. */
   entry: { key: string; placeholder: string } | null;
+  /** The operators this one kind stands for, offered one at a time. */
+  variants: { key: string; of: Op[] } | null;
   unique: boolean;
 }
 

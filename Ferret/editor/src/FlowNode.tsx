@@ -68,7 +68,10 @@ function FlowNode({ id, type, data, selected }: NodeProps<FerretNode>) {
       )}
 
       <div className="fnode-head">
-        <span className="fnode-glyph" style={{ background: spec.color }}>
+        <span
+          className={"fnode-glyph" + (glyph.length > 1 ? " is-word" : "")}
+          style={{ background: spec.color }}
+        >
           {glyph}
         </span>
         <span className="fnode-title">{title}</span>

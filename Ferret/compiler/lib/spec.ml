@@ -21,9 +21,9 @@ type field =
   | Select of { key : string; label : string; options : (string * string) list }
   | Names of { key : string; label : string; item : string }
 
-(* One operator of a family: the name a card takes when it is on that
-   operator, and the sign that goes in the icon. *)
-type op = { op : string; name : string; sign : string option }
+(* One operator of a family.  [short] is what the palette calls it where the
+   full name does not fit; [sign] is what goes in the icon. *)
+type op = { op : string; name : string; short : string option; sign : string option }
 
 type t = {
   kind : string;
@@ -40,13 +40,15 @@ type t = {
   fields : field list;
   (* A line of text edited on the card, for a node that mostly *is* its text *)
   entry : (string * string) option;  (* key, placeholder *)
+  (* The operators this one kind stands for, offered one at a time *)
+  variants : (string * op list) option;  (* key, operators *)
   unique : bool;
 }
 
 let exec id label = { id; label; kind = Exec }
 let num id label = { id; label; kind = Num }
 let cond id label = { id; label; kind = Bool }
-let op ?sign op name = { op; name; sign }
+let op ?short ?sign op name = { op; name; short; sign }
 
 let next = [ exec "next" "next" ]
 
@@ -65,6 +67,7 @@ let blank =
     data = [];
     fields = [];
     entry = None;
+    variants = None;
     unique = false;
   }
 
@@ -84,7 +87,7 @@ let arith =
 let funcs =
   [
     op "neg" "Negate" ~sign:"neg";
-    op "abs" "Absolute value" ~sign:"abs";
+    op "abs" "Absolute value" ~short:"Absolute" ~sign:"abs";
     op "sqrt" "Square root" ~sign:"sqrt";
     op "floor" "Round down" ~sign:"floor";
     op "ceil" "Round up" ~sign:"ceil";
@@ -95,7 +98,7 @@ let cmps =
   [
     op "lt" "Less than" ~sign:"<";
     op "le" "At most" ~sign:"≤";
-    op "gt" "Greater than" ~sign:">";
+    op "gt" "Greater than" ~short:"Greater" ~sign:">";
     op "ge" "At least" ~sign:"≥";
     op "eq" "Equal" ~sign:"=";
     op "ne" "Not equal" ~sign:"≠";
@@ -104,12 +107,14 @@ let cmps =
 let logic =
   [ op "and" "And" ~sign:"and"; op "or" "Or" ~sign:"or"; op "not" "Not" ~sign:"not" ]
 
+(* The sign goes next to the name in the dropdown unless it only repeats it:
+   "Minimum  min" is worth saying, "And  and" is not. *)
 let options ops =
   List.map
     (fun o ->
       match o.sign with
-      | Some s -> (o.op, o.name ^ "  " ^ s)
-      | None -> (o.op, o.name))
+      | Some s when s <> String.lowercase_ascii o.name -> (o.op, o.name ^ "  " ^ s)
+      | _ -> (o.op, o.name))
     ops
 
 (* ------------------------------------------------------- the catalogue *)
@@ -250,6 +255,7 @@ let catalogue : t list =
       data = [ ("op", `String "add") ];
       fields =
         [ Select { key = "op"; label = "Operator"; options = options arith } ];
+      variants = Some ("op", arith);
     };
     {
       blank with
@@ -264,6 +270,7 @@ let catalogue : t list =
       data = [ ("op", `String "abs") ];
       fields =
         [ Select { key = "op"; label = "Function"; options = options funcs } ];
+      variants = Some ("op", funcs);
     };
     {
       blank with
@@ -277,6 +284,7 @@ let catalogue : t list =
       outputs = [ cond "out" "result" ];
       data = [ ("op", `String "lt") ];
       fields = [ Select { key = "op"; label = "Test"; options = options cmps } ];
+      variants = Some ("op", cmps);
     };
     {
       blank with
@@ -291,6 +299,7 @@ let catalogue : t list =
       data = [ ("op", `String "and") ];
       fields =
         [ Select { key = "op"; label = "Operator"; options = options logic } ];
+      variants = Some ("op", logic);
     };
     {
       blank with
@@ -438,18 +447,21 @@ let describe ~kind ~(data : Yojson.Safe.t) : described =
         d_outputs = [ out ];
       }
   | "logic" ->
+      let title, glyph = of_op logic s n in
       {
         plain with
-        d_title = fst (of_op logic s n);
+        d_title = title;
+        d_glyph = glyph;
         d_inputs =
           (if Graph.string_field n "op" ~default:"and" = "not" then [ cond "a" "A" ]
            else [ cond "a" "A"; cond "b" "B" ]);
       }
-  | "binop" | "compare" ->
-      let ops = if kind = "binop" then arith else cmps in
+  | "binop" | "unop" | "compare" ->
+      let ops =
+        match kind with "binop" -> arith | "unop" -> funcs | _ -> cmps
+      in
       let title, glyph = of_op ops s n in
       { plain with d_title = title; d_glyph = glyph }
-  | "unop" -> { plain with d_title = fst (of_op funcs s n) }
   | _ -> plain
 
 (* ---------------------------------------------------------------- JSON *)
@@ -489,6 +501,12 @@ let json_of_field : field -> Yojson.Safe.t = function
           ("itemLabel", `String item);
         ]
 
+let json_of_op o : Yojson.Safe.t =
+  `Assoc
+    ([ ("id", `String o.op); ("name", `String o.name) ]
+    @ (match o.short with Some s -> [ ("short", `String s) ] | None -> [])
+    @ match o.sign with Some s -> [ ("sign", `String s) ] | None -> [])
+
 let json_of_spec s : Yojson.Safe.t =
   `Assoc
     [
@@ -508,6 +526,11 @@ let json_of_spec s : Yojson.Safe.t =
         match s.entry with
         | Some (key, placeholder) ->
             `Assoc [ ("key", `String key); ("placeholder", `String placeholder) ]
+        | None -> `Null );
+      ( "variants",
+        match s.variants with
+        | Some (key, ops) ->
+            `Assoc [ ("key", `String key); ("of", `List (List.map json_of_op ops)) ]
         | None -> `Null );
       ("unique", `Bool s.unique);
     ]

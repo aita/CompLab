@@ -458,7 +458,9 @@ export default function App() {
           </header>
 
           <div className="workspace">
-            <Palette onAdd={(type) => addNode(type)} />
+            <Palette
+              onAdd={(type, preset) => addNode(type, undefined, preset)}
+            />
 
             <div
               className="canvas"

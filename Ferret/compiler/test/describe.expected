@@ -34,7 +34,7 @@ binop     { "op": "mul" }
   out  out:result(num)
 
 unop      { "op": "sqrt" }
-  Square root [ƒ]
+  Square root [sqrt]
   in   a:A(num)
   out  out:result(num)
 
@@ -44,12 +44,12 @@ compare   { "op": "ge" }
   out  out:result(bool)
 
 logic     { "op": "not" }
-  Not [&]
+  Not [not]
   in   a:A(bool)
   out  out:result(bool)
 
 logic     { "op": "or" }
-  Or [&]
+  Or [or]
   in   a:A(bool), b:B(bool)
   out  out:result(bool)
 
