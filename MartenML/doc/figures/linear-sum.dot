@@ -1,0 +1,29 @@
+// The control-flow graph of `sum` at the Linear level, out of --dump-linear.
+// The same graph as cfg-sum.dot, before anything about the machine is decided.
+// See doc/selection.md.
+// Render with ./render.sh (needs graphviz).
+digraph linear {
+  rankdir = TB;
+  bgcolor = "transparent";
+  ranksep = 0.34;
+  node [shape = box, style = "rounded,filled", fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 10, margin = "0.16,0.09"];
+  edge [color = "#57606a", fontcolor = "#57606a", fontname = "Helvetica",
+        fontsize = 9];
+
+  entry [label = <<FONT FACE="Courier" POINT-SIZE="10">martenml_sum_18:</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  t.8 &lt;- l.19[0]</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  t.9 &lt;- 0</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  if t.8 = t.9</FONT><BR ALIGN="LEFT"/>>];
+  thn [label = <<FONT FACE="Courier" POINT-SIZE="10">.Lthen36:</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  v.38 &lt;- 0</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  return v.38</FONT><BR ALIGN="LEFT"/>>];
+  els [label = <<FONT FACE="Courier" POINT-SIZE="10">.Lelse37:</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  fld.6 &lt;- l.19[1]</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  fld.7 &lt;- l.19[2]</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  t.10 &lt;- call martenml_sum_18 (fld.7)</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  v.39 &lt;- fld.6 + t.10</FONT><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="10">  return v.39</FONT><BR ALIGN="LEFT"/>>];
+
+  entry -> thn [label = "  タグ 0（Nil）"];
+  entry -> els [label = "  それ以外"];
+
+  note [shape = plaintext, style = "", fillcolor = "transparent",
+        fontsize = 9, fontcolor = "#57606a",
+        label = "レジスタも呼び出し規約も、まだどこにもない。\l\
+形は最終的な機械語のグラフと同じで、\l\
+違うのは中身が値か命令かだけ。\l"];
+  els -> note [style = dotted, arrowhead = none, color = "#8c959f"];
+  { rank = same; thn; els; }
+}

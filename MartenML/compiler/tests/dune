@@ -1,0 +1,326 @@
+; Golden tests.  Each program is compiled, linked against the runtime, and run
+; under qemu twice -- with the full register file and with `-nregs 10` -- and
+; the two runs must agree before the output is compared with the .expected
+; file.  Update them all with `dune promote` after `dune test`.
+
+(rule
+ (with-stdout-to
+  tour.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/tour.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.out)))
+
+(rule
+ (with-stdout-to
+  tree.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/tree.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tree.expected tree.out)))
+
+(rule
+ (with-stdout-to
+  list.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/list.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff list.expected list.out)))
+
+(rule
+ (with-stdout-to
+  queens.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/queens.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff queens.expected queens.out)))
+
+(rule
+ (with-stdout-to
+  sort.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/sort.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff sort.expected sort.out)))
+
+(rule
+ (with-stdout-to
+  pressure.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/pressure.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff pressure.expected pressure.out)))
+
+(rule
+ (with-stdout-to
+  patterns.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:cases/patterns.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff patterns.expected patterns.out)))
+
+(rule
+ (with-stdout-to
+  closures.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:cases/closures.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff closures.expected closures.out)))
+
+(rule
+ (with-stdout-to
+  codegen.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:cases/codegen.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff codegen.expected codegen.out)))
+
+(rule
+ (with-stdout-to
+  lists.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/lists.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff lists.expected lists.out)))
+
+(rule
+ (with-stdout-to
+  strings.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/strings.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff strings.expected strings.out)))
+
+(rule
+ (with-stdout-to
+  polymorphism.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:cases/polymorphism.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff polymorphism.expected polymorphism.out)))
+
+(rule
+ (with-stdout-to
+  modules.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/modules.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff modules.expected modules.out)))
+
+(rule
+ (with-stdout-to
+  functors.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/functors.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff functors.expected functors.out)))
+
+; The program the pipeline walkthrough is written around; the dumps quoted in
+; doc/pipeline.md come from it, so it has to keep compiling.
+
+(rule
+ (with-stdout-to
+  sum.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/sum.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff sum.expected sum.out)))
+
+; The same language written in the brace form.
+
+(rule
+ (with-stdout-to
+  brace.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:../examples/tour.mmb})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff brace.expected brace.out)))
+
+(rule
+ (with-stdout-to
+  mutual_closures.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:cases/mutual_closures.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff mutual_closures.expected mutual_closures.out)))
+
+; A program the checker warns about, which then fails at run time exactly where
+; the warning said it would.
+
+(rule
+ (with-stdout-to
+  match_failure.out
+  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.c} %{dep:cases/match_failure.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff match_failure.expected match_failure.out)))
+
+; Every program under errors/ must be rejected; their messages go into one
+; golden file.
+
+(rule
+ (with-stdout-to
+  errors.out
+  (run sh %{dep:errors.sh} %{exe:../src/martenmlc.exe}
+    %{dep:errors/branches.mml} %{dep:errors/compare_string.mml}
+    %{dep:errors/compare_tuple.mml} %{dep:errors/list_element_types.mml}
+    %{dep:errors/constructor_arity.mml} %{dep:errors/duplicate_pattern_var.mml}
+    %{dep:errors/abstract_in_functor.mml} %{dep:errors/abstract_type.mml}
+    %{dep:errors/distinct_abstract.mml} %{dep:errors/functor_hidden.mml}
+    %{dep:errors/functor_missing.mml}
+    %{dep:errors/functor_too_specific.mml} %{dep:errors/functor_unapplied.mml}
+    %{dep:errors/missing_sig_type.mml} %{dep:errors/module_as_value.mml}
+    %{dep:errors/module_member.mml} %{dep:errors/not_unit.mml}
+    %{dep:errors/sealed.mml} %{dep:errors/syntax.mml}
+    %{dep:errors/too_many_args.mml}
+    %{dep:errors/string_index.mml} %{dep:errors/type_mismatch.mml}
+    %{dep:errors/unbound.mml} %{dep:errors/unbound_module.mml}
+    %{dep:errors/weak_comparison.mml}
+    %{dep:errors/unknown_constructor.mml} %{dep:errors/unknown_type.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff errors.expected errors.out)))
+
+; The worked example in doc/regalloc.md.  Not part of `dune test`: it exists so
+; the document can be regenerated, and it drives the allocator directly rather
+; than through the compiler, with a machine too small for the command line.
+(executable
+ (name walkthrough)
+ (modules walkthrough)
+ (libraries martenml)
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
+
+; The normal form is an invariant, not a hope: every binding associated, every
+; name bound, and after Alpha bound once.  Checked after each pass that touches
+; the form, at -O 0 and at the default rounds.
+
+(rule
+ (with-stdout-to
+  knf.out
+  (progn
+   (run %{exe:../src/martenmlc.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/tour.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -o /dev/null %{dep:../examples/tour.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/queens.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -o /dev/null %{dep:../examples/queens.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/sort.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -o /dev/null %{dep:../examples/sort.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/tree.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -o /dev/null %{dep:../examples/tree.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/pressure.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -o /dev/null %{dep:../examples/pressure.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/lists.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -o /dev/null %{dep:../examples/lists.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/strings.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -o /dev/null %{dep:../examples/strings.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/modules.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -o /dev/null %{dep:../examples/modules.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -O 0 -o /dev/null %{dep:../examples/functors.mml})
+   (run %{exe:../src/martenmlc.exe} --check-knf -o /dev/null %{dep:../examples/functors.mml})
+   (echo "every program stays in K-normal form\n"))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff knf.expected knf.out)))
+
+; The control-flow graph Linear builds, before it is anything a machine could run:
+; one entry, no block without a way in, no use of a value nothing defines.
+
+(rule
+ (with-stdout-to
+  linear.out
+  (progn
+   (run %{exe:../src/martenmlc.exe} --check-linear -o /dev/null %{dep:../examples/tour.mml})
+   (run %{exe:../src/martenmlc.exe} --check-linear -o /dev/null %{dep:../examples/queens.mml})
+   (run %{exe:../src/martenmlc.exe} --check-linear -o /dev/null %{dep:../examples/sort.mml})
+   (run %{exe:../src/martenmlc.exe} --check-linear -o /dev/null %{dep:../examples/tree.mml})
+   (run %{exe:../src/martenmlc.exe} --check-linear -o /dev/null %{dep:../examples/pressure.mml})
+   (run %{exe:../src/martenmlc.exe} --check-linear -o /dev/null %{dep:../examples/lists.mml})
+   (run %{exe:../src/martenmlc.exe} --check-linear -o /dev/null %{dep:../examples/strings.mml})
+   (run %{exe:../src/martenmlc.exe} --check-linear -o /dev/null %{dep:../examples/modules.mml})
+   (run %{exe:../src/martenmlc.exe} --check-linear -o /dev/null %{dep:../examples/functors.mml})
+   (echo "every control-flow graph is well formed\n"))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff linear.expected linear.out)))
+
+; The back end reads the control-flow graph as acyclic in two places; this says
+; so for every example rather than leaving it to a comment.
+(rule
+ (with-stdout-to
+  cfg.out
+  (progn
+   (run %{exe:../src/martenmlc.exe} --check-cfg -o /dev/null %{dep:../examples/tour.mml})
+   (run %{exe:../src/martenmlc.exe} --check-cfg -o /dev/null %{dep:../examples/queens.mml})
+   (run %{exe:../src/martenmlc.exe} --check-cfg -o /dev/null %{dep:../examples/sort.mml})
+   (run %{exe:../src/martenmlc.exe} --check-cfg -o /dev/null %{dep:../examples/tree.mml})
+   (run %{exe:../src/martenmlc.exe} --check-cfg -o /dev/null %{dep:../examples/pressure.mml})
+   (run %{exe:../src/martenmlc.exe} --check-cfg -o /dev/null %{dep:../examples/lists.mml})
+   (run %{exe:../src/martenmlc.exe} --check-cfg -o /dev/null %{dep:../examples/strings.mml})
+   (run %{exe:../src/martenmlc.exe} --check-cfg -o /dev/null %{dep:../examples/modules.mml})
+   (run %{exe:../src/martenmlc.exe} --check-cfg -o /dev/null %{dep:../examples/functors.mml})
+   (echo "every control-flow graph is acyclic\n"))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff cfg.expected cfg.out)))
