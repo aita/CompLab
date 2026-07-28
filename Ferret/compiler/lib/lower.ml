@@ -38,6 +38,9 @@ type ctx = {
   mutable shared : (string, int * vtype) Hashtbl.t;
   mutable prelude : stmt list;  (* reversed *)
   mutable temps : int;
+  (* Every breakpoint the lowering has planted, in the order the module's
+     watch indices run; the editor turns these back into node highlights. *)
+  mutable watches : (string * string) list;  (* reversed: node id, label *)
 }
 
 let complain ctx ?node fmt =
@@ -74,6 +77,11 @@ let slot ctx ~key ~display =
       Hashtbl.replace ctx.slots key i;
       ctx.vars <- ctx.vars @ [ (fresh_display ctx display, VNum) ];
       i
+
+(* Plant a breakpoint and hand back the index the module will report it by. *)
+let watch_point ctx ~node ~label =
+  ctx.watches <- (node, label) :: ctx.watches;
+  List.length ctx.watches - 1
 
 let state_slot ctx (n : Graph.node) name =
   slot ctx ~key:(n.id ^ "\000" ^ name) ~display:name
@@ -180,7 +188,20 @@ let rec value ctx (e : Graph.edge) : expr * vtype =
         Hashtbl.replace ctx.active n.id ();
         let built = value_of ctx n e.src_port in
         Hashtbl.remove ctx.active n.id;
-        share ctx ~key ~from:n built)
+        share ctx ~key ~from:n (watched ctx n built))
+
+(* A breakpoint wraps the value where it is computed, which -- because a node
+   feeding several inputs is computed once -- means one hit per evaluation
+   rather than one per reader. *)
+and watched ctx (n : Graph.node) (expr, ty) =
+  (* A loop reports its whole state once per iteration, from the top of the
+     loop, rather than every time a slot is read; the start node has nothing
+     to report that its caller does not already know. *)
+  if n.kind = "while" || n.kind = "start" || not (Graph.flag n "breakpoint")
+  then (expr, ty)
+  else
+    let i = watch_point ctx ~node:n.id ~label:"value" in
+    (Watch (i, ty, expr), ty)
 
 and share ctx ~key ~from (expr, ty) =
   let uses = Option.value (Hashtbl.find_opt ctx.fanout key) ~default:1 in
@@ -322,16 +343,19 @@ let rec chain ctx (from : Graph.node) port : block =
 and step ctx (n : Graph.node) : block =
   match n.kind with
   | "log" ->
-      let pre, v = group ctx (fun () -> number ctx n "value") in
+      let pre, v = group ctx (fun () -> reported ctx n (number ctx n "value")) in
       let rest = chain ctx n "next" in
       (pre @ [ Log v ]) @ rest
   | "end" ->
-      let pre, v = group ctx (fun () -> number ctx n "value") in
+      let pre, v = group ctx (fun () -> reported ctx n (number ctx n "value")) in
       pre @ [ Ret v ]
   | "while" -> loop ctx n
   | kind ->
       complain ctx ~node:n.id "the %s node cannot be part of the flow" kind;
       chain ctx n "next"
+
+(* A breakpoint on log or end reports the value it is about to hand over. *)
+and reported ctx (n : Graph.node) v = fst (watched ctx n (v, VNum))
 
 and loop ctx (n : Graph.node) : block =
   check_names ctx n "states" "loop states";
@@ -348,6 +372,14 @@ and loop ctx (n : Graph.node) : block =
            let pre, v = group ctx (fun () -> number ctx n ("init:" ^ s)) in
            pre @ [ Assign (i, v) ])
          slots states)
+  in
+  let watching =
+    if Graph.flag n "breakpoint" then
+      List.map2
+        (fun name i ->
+          Drop (Watch (watch_point ctx ~node:n.id ~label:name, VNum, Local i)))
+        states slots
+    else []
   in
   let pre_cond, cond = group ctx (fun () -> condition ctx n "cond") in
   let body = chain ctx n "body" in
@@ -373,12 +405,12 @@ and loop ctx (n : Graph.node) : block =
   in
   let rest = chain ctx n "next" in
   inits
-  @ [ While (pre_cond, cond, body @ pre_steps @ updates) ]
+  @ [ While (watching @ pre_cond, cond, body @ pre_steps @ updates) ]
   @ rest
 
 (* --------------------------------------------------------------- entry *)
 
-let func_of_graph (g : Graph.t) : func =
+let func_of_graph (g : Graph.t) : func * (string * string) list =
   let fanout = Hashtbl.create 32 in
   List.iter
     (fun (e : Graph.edge) ->
@@ -400,6 +432,7 @@ let func_of_graph (g : Graph.t) : func =
       shared = Hashtbl.create 8;
       prelude = [];
       temps = 0;
+      watches = [];
     }
   in
   let start =
@@ -431,4 +464,4 @@ let func_of_graph (g : Graph.t) : func =
         chain ctx start "next"
   in
   (match ctx.errs with [] -> () | errs -> raise (Graph.Errors (List.rev errs)));
-  { params = ctx.params; vars = ctx.vars; body }
+  ({ params = ctx.params; vars = ctx.vars; body }, List.rev ctx.watches)

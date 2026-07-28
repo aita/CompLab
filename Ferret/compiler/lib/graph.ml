@@ -44,6 +44,8 @@ let port_value n port =
   | `String s -> float_of_string_opt s
   | _ -> None
 
+let flag n key = match node_data n key with `Bool b -> b | _ -> false
+
 let number_field n key ~default =
   match node_data n key with
   | `Int i -> float_of_int i

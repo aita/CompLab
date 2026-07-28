@@ -5,6 +5,8 @@ type output = {
   wat : string;
   ir : string;
   params : string list;
+  (* One entry per breakpoint the module can report, in index order. *)
+  watches : (string * string) list;
 }
 
 type result = (output, Graph.error list) Result.t
@@ -12,13 +14,14 @@ type result = (output, Graph.error list) Result.t
 let of_json (json : Yojson.Safe.t) : result =
   try
     let g = Graph.of_json json in
-    let f = Lower.func_of_graph g in
+    let f, watches = Lower.func_of_graph g in
     Ok
       {
         wasm = Emit.module_of_func f;
         wat = Wat.of_func f;
         ir = Ir.to_string f;
         params = f.params;
+        watches;
       }
   with Graph.Errors errs -> Error errs
 

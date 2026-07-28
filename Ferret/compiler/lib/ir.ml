@@ -25,9 +25,14 @@ type expr =
   | Select of expr * expr * expr
   (* A number in [min, max), from the host. *)
   | Rand of expr * expr
+  (* Hand the value to the host and carry on with it: a breakpoint.  The index
+     is into the function's list of watch points. *)
+  | Watch of int * vtype * expr
 
 type stmt =
   | Assign of int * expr
+  (* Evaluate and throw away, which only a watch is ever worth doing it to. *)
+  | Drop of expr
   | If of expr * block * block
   (* The preamble is re-evaluated with the condition, at the top of every
      iteration, so anything the condition shares can live in it. *)
@@ -93,6 +98,7 @@ let to_string f =
     | Select (c, a, b) ->
         Printf.sprintf "(if %s then %s else %s)" (expr c) (expr a) (expr b)
     | Rand (lo, hi) -> Printf.sprintf "random(%s, %s)" (expr lo) (expr hi)
+    | Watch (i, _, e) -> Printf.sprintf "watch#%d(%s)" i (expr e)
 
   in
   let rec block ind stmts = List.iter (stmt ind) stmts
@@ -100,6 +106,7 @@ let to_string f =
     let pad = String.make (ind * 2) ' ' in
     match s with
     | Assign (i, e) -> pr "%s%s = %s\n" pad (local_name f i) (expr e)
+    | Drop e -> pr "%s%s\n" pad (expr e)
     | Log e -> pr "%slog %s\n" pad (expr e)
     | Ret e -> pr "%sreturn %s\n" pad (expr e)
     | While ([], c, body) ->

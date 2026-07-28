@@ -1,8 +1,8 @@
 (* IR -> a wasm module.
 
    The module imports [env.log], so a flow can report intermediate values,
-   and [env.random]; it exports [main] taking the start node's inputs as f64
-   and returning an f64.  Locals are laid out as parameters, then variables,
+   [env.random], and [env.watch], which is what a breakpoint compiles to; it
+   exports [main] taking the start node's inputs as f64 and returning an f64.  Locals are laid out as parameters, then variables,
    then whatever scratch the expressions need. *)
 
 open Ir
@@ -22,13 +22,13 @@ let rec scratch_of_expr = function
       scratch_of_expr l + scratch_of_expr r
   | Select (c, a, b) ->
       scratch_of_expr c + scratch_of_expr a + scratch_of_expr b
-  | Un (_, e) | Not e -> scratch_of_expr e
+  | Un (_, e) | Not e | Watch (_, _, e) -> scratch_of_expr e
 
 let rec scratch_of_block b =
   List.fold_left (fun n s -> n + scratch_of_stmt s) 0 b
 
 and scratch_of_stmt = function
-  | Assign (_, e) | Log e | Ret e -> scratch_of_expr e
+  | Assign (_, e) | Log e | Ret e | Drop e -> scratch_of_expr e
   | If (c, t, e) -> scratch_of_expr c + scratch_of_block t + scratch_of_block e
   | While (pre, c, body) ->
       scratch_of_block pre + scratch_of_expr c + scratch_of_block body
@@ -36,7 +36,8 @@ and scratch_of_stmt = function
 (* The imports come first, in the order they are declared. *)
 let log_index = 0
 let random_index = 1
-let main_index = 2
+let watch_index = 2
+let main_index = 3
 
 type env = { mutable scratch_next : int }
 
@@ -139,6 +140,14 @@ let rec expr env b = function
       Wasm.call b random_index;
       Wasm.op b Wasm.f64_mul;
       Wasm.op b Wasm.f64_add
+  | Watch (i, ty, e) ->
+      (* The host takes and returns an f64, so a condition goes out and comes
+         back through one; 0 and 1 survive the trip exactly. *)
+      Wasm.i32_const b i;
+      expr env b e;
+      if ty = VBool then Wasm.op b Wasm.f64_convert_i32_u;
+      Wasm.call b watch_index;
+      if ty = VBool then Wasm.op b Wasm.i32_trunc_f64_u
 
 let rec block env b stmts = List.iter (stmt env b) stmts
 
@@ -146,6 +155,9 @@ and stmt env b = function
   | Assign (i, e) ->
       expr env b e;
       Wasm.local_set b i
+  | Drop e ->
+      expr env b e;
+      Wasm.op b Wasm.op_drop
   | Log e ->
       expr env b e;
       Wasm.call b log_index
@@ -196,13 +208,17 @@ let module_of_func (f : func) : string =
   in
   let log_type = { Wasm.args = [ Wasm.F64 ]; result = None } in
   let random_type = { Wasm.args = []; result = Some Wasm.F64 } in
+  let watch_type =
+    { Wasm.args = [ Wasm.I32; Wasm.F64 ]; result = Some Wasm.F64 }
+  in
   Wasm.encode
-    ~types:[ log_type; random_type; main_type ]
+    ~types:[ log_type; random_type; watch_type; main_type ]
     ~imports:
       [
         { Wasm.imp_module = "env"; imp_field = "log"; imp_type = 0 };
         { Wasm.imp_module = "env"; imp_field = "random"; imp_type = 1 };
+        { Wasm.imp_module = "env"; imp_field = "watch"; imp_type = 2 };
       ]
-    ~funcs:[ 2 ]
+    ~funcs:[ 3 ]
     ~exports:[ ("main", main_index) ]
     ~bodies:[ { Wasm.body_locals = locals; body_code = code } ]

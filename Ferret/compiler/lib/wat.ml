@@ -124,6 +124,12 @@ let rec expr env = function
       line env "call $random";
       line env "f64.mul";
       line env "f64.add"
+  | Watch (i, ty, e) ->
+      line env "i32.const %d" i;
+      expr env e;
+      if ty = VBool then line env "f64.convert_i32_u";
+      line env "call $watch";
+      if ty = VBool then line env "i32.trunc_f64_u"
 
 let nested env f =
   env.indent <- env.indent + 1;
@@ -136,6 +142,9 @@ and stmt env = function
   | Assign (i, e) ->
       expr env e;
       line env "local.set %s" (local env i)
+  | Drop e ->
+      expr env e;
+      line env "drop"
   | Log e ->
       expr env e;
       line env "call $log"
@@ -184,6 +193,8 @@ let of_func (f : func) : string =
   nested env (fun () ->
       line env "(import \"env\" \"log\" (func $log (param f64)))";
       line env "(import \"env\" \"random\" (func $random (result f64)))";
+      line env
+        "(import \"env\" \"watch\" (func $watch (param i32) (param f64) (result f64)))";
       let params =
         String.concat " "
           (List.map (fun p -> Printf.sprintf "(param $%s f64)" p) f.params)

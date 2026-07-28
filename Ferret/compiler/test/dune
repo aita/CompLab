@@ -60,6 +60,25 @@
  (action
   (diff random.ir.expected random.ir)))
 
+; A breakpoint on a loop reports its state once an iteration; one on a value
+; node reports that value once each time it is worked out.
+(rule
+ (target breakpoints.ir)
+ (action
+  (with-stdout-to
+   breakpoints.ir
+   (run ../bin/ferretc.exe --emit ir %{dep:breakpoints.json}))))
+
+(rule
+ (target breakpoints.wasm)
+ (action
+  (run ../bin/ferretc.exe %{dep:breakpoints.json} -o breakpoints.wasm)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff breakpoints.ir.expected breakpoints.ir)))
+
 (rule
  (target errors.out)
  (action
@@ -87,6 +106,6 @@
 ; has.
 (rule
  (alias runtest)
- (deps run_wasm.mjs sum.wasm collatz.wasm random.wasm)
+ (deps run_wasm.mjs sum.wasm collatz.wasm random.wasm breakpoints.wasm)
  (action
   (run node run_wasm.mjs)))

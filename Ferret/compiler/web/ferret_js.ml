@@ -32,6 +32,18 @@ let compile (source : Js.js_string Js.t) =
           ( "params",
             inject
               (Js.array (Array.of_list (List.map Js.string out.params))) );
+          ( "watches",
+            inject
+              (Js.array
+                 (Array.of_list
+                    (List.map
+                       (fun (node, label) ->
+                         obj
+                           [|
+                             ("node", inject (Js.string node));
+                             ("label", inject (Js.string label));
+                           |])
+                       out.watches))) );
           ("errors", inject (Js.array [||]));
         |]
   | Error errs ->

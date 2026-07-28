@@ -1,0 +1,10 @@
+fun main(n) -> f64 {
+  var i = 0
+  i = 0
+  loop {
+    watch#0(i)
+    exit unless (i < n)
+    i = watch#1((i + 1))
+  }
+  return i
+}

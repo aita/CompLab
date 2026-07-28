@@ -7,6 +7,7 @@ let failures = 0;
 
 async function load(file, random = () => 0) {
   const logged = [];
+  const hits = [];
   let draws = 0;
   const { instance } = await WebAssembly.instantiate(readFileSync(file), {
     env: {
@@ -15,9 +16,13 @@ async function load(file, random = () => 0) {
         draws++;
         return random();
       },
+      watch: (id, v) => {
+        hits.push([id, v]);
+        return v;
+      },
     },
   });
-  return { main: instance.exports.main, logged, draws: () => draws };
+  return { main: instance.exports.main, logged, hits, draws: () => draws };
 }
 
 function check(what, got, want) {
@@ -56,6 +61,15 @@ check("collatz(7) trace", traced.logged, [
 const dice = await load("random.wasm", () => 0.25);
 check("random(0,1) doubled plus random(0,10)", dice.main(), 3);
 check("one draw per node, not per reader", dice.draws(), 2);
+
+// Watch 0 is the loop's slot at the top of each iteration, watch 1 is the
+// value the increment works out; the last iteration checks the condition and
+// leaves, so the loop reports once more than the increment does.
+const stepped = await load("breakpoints.wasm");
+check("loop with breakpoints returns", stepped.main(3), 3);
+check("breakpoints report in order", stepped.hits, [
+  [0, 0], [1, 1], [0, 1], [1, 2], [0, 2], [1, 3], [0, 3],
+]);
 
 if (failures > 0) process.exit(1);
 console.log("ok");
