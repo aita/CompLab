@@ -46,7 +46,7 @@ output that was actually produced.
 | [../doc/matching.md](../doc/matching.md) | パターンマッチ。網羅性・到達不能の判定、決定木、合流点 |
 | [../doc/knormal.md](../doc/knormal.md) | K正規化、α変換、インライン展開、最適化 |
 | [../doc/closure.md](../doc/closure.md) | クロージャ変換 |
-| [../doc/selection.md](../doc/selection.md) | 線形IR、命令選択、生存解析 |
+| [../doc/selection.md](../doc/selection.md) | 線形IR、制御フローグラフ、命令選択、生存解析 |
 | [../doc/regalloc.md](../doc/regalloc.md) | レジスタ割り付け。干渉グラフの実例、融合・スピル・callee-saved |
 | [../doc/emit.md](../doc/emit.md) | のぞき穴最適化、アセンブリ出力、呼び出し規約、実行時表現 |
 | [../doc/language.md](../doc/language.md) | 付録A. 言語リファレンス — 書ける形の一覧 |

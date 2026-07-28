@@ -27,7 +27,7 @@ ML ふうの言語を RISC-V（RV64I/M）へコンパイルする処理系の解
 
 | | | |
 |---|---|---|
-| 7 | [線形IRと命令選択](selection.md) | `linear.ml`・`selection.ml`・`cfg.ml`・`liveness.ml`。木をグラフにしてから機械に落とす |
+| 7 | [線形IRと命令選択](selection.md) | `linear.ml`・`cfg.ml`・`selection.ml`・`liveness.ml`。木をグラフにしてから機械に落とす |
 | 8 | [レジスタ割り付け](regalloc.md) | `regalloc.ml`・`bitset.ml`。グラフ彩色と反復融合。この処理系の中心 |
 | 9 | [のぞき穴最適化と出力](emit.md) | `peephole.ml`・`emit.ml`。呼び出し規約と実行時表現も |
 
