@@ -178,20 +178,11 @@ let thread_jumps (func : Riscv.func) =
       if updated <> b.terminator then changed := true;
       b.terminator <- updated)
     func.blocks;
-  (* Whatever is no longer reachable from the entry can go. *)
-  let reachable = Hashtbl.create 8 in
-  let rec visit label =
-    if not (Hashtbl.mem reachable label) then begin
-      Hashtbl.replace reachable label ();
-      match List.find_opt (fun (b : Riscv.block) -> b.Riscv.label = label) func.blocks with
-      | Some b -> List.iter visit (Riscv.successors b.terminator)
-      | None -> ()
-    end
-  in
-  visit entry;
-  let kept =
-    List.filter (fun (b : Riscv.block) -> Hashtbl.mem reachable b.Riscv.label) func.blocks
-  in
+  (* Threading a jump is what strands a block: the only way in was the branch
+     that now goes past it.  Whatever the entry can no longer reach can go --
+     the same walk Cfg does for everyone else. *)
+  let reachable = (Riscv.cfg func).Cfg.reachable in
+  let kept = List.filteri (fun i _ -> reachable.(i)) func.blocks in
   if List.length kept <> List.length func.blocks then changed := true;
   func.blocks <- kept;
   !changed
