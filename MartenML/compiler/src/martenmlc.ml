@@ -97,7 +97,7 @@ let compile path =
     (fun func ->
       (* The back end reads a cycle-free graph in two places: liveness is done
          in one pass, and the spill cost counts uses without weighting them by
-         loop depth (doc/regalloc.md §10).  Nothing in the language can produce
+         loop depth (doc/regalloc.md §11).  Nothing in the language can produce
          a loop inside a function -- a loop in the source is a recursive call,
          which leaves it -- and this is what says so out loud. *)
       if !check_cfg && not (Cfg.is_acyclic (Riscv.cfg func)) then

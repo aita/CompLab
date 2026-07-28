@@ -333,7 +333,7 @@ let check (f : func) =
       if not reached then broken "%s: block `%s' cannot be reached" where (Cfg.block g i).label)
     g.Cfg.reachable;
   (* Loops are recursive calls, which leave the function, so this graph has no
-     cycles -- and the back end reads it that way (doc/regalloc.md §10).  The
+     cycles -- and the back end reads it that way (doc/regalloc.md §11).  The
      property starts here, so it is checked here as well as where it is used. *)
   if not (Cfg.is_acyclic g) then broken "%s: the control-flow graph has a cycle" where;
   (* Defined anywhere in the function, or coming in as a parameter. *)

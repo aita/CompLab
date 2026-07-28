@@ -159,7 +159,7 @@ simplify も融合も freeze もできなくなることがあります。残っ
 **スピルした値の置き場所は、その時点からメモリです。** 途中までレジスタに載せておいて混んで
 きたら明け渡す、という動き方はしません。定義された命令の直後に書き出し、使う命令の直前に
 読み戻します。レジスタに載っているのは触る命令1つのあいだだけで、それ以外の区間はスタックに
-あります。丸ごとレジスタか丸ごとメモリかの二択で、その中間がないという話は §12 にも書いて
+あります。丸ごとレジスタか丸ごとメモリかの二択で、その中間がないという話は §13 にも書いて
 あります。
 
 読み書きに使うのは、**あらかじめ確保したスクラッチではありません**。触る命令1つにつき仮想
@@ -434,11 +434,66 @@ martenml_main:
 	sd s2, 16(sp)     ┘
 	li s1, 1
 	li s2, 2
-	la s0, martenml_const_list_Nil
+	la s0, martenml_const_Nil_3
 	...
 ```
 
-## 9. レジスタを減らす — `-nregs`
+## 9. caller-saved は退避しない — 干渉として出す
+
+呼び出し規約の残り半分です。`a0`–`a7` と `t0`–`t6`、それに `ra` は**呼ばれた側が壊してよい**
+レジスタで、必要なら呼ぶ側が退避します。名前のとおり "caller saves" です。
+
+**このコンパイラは、そのための退避を1命令も出しません。**代わりに §2 の1行だけがあります。
+
+```ocaml
+(* A call destroys every caller-saved register: a value that has to survive
+   it therefore interferes with all of them ... *)
+| Call _ -> Array.to_list !caller_saved
+```
+
+`call` は caller-saved レジスタ全部を**定義する**、と言っているだけです。あとは生存解析と
+干渉グラフが仕事をします。呼び出しをまたいで生きる値は、その時点で生きているので、
+定義される13本すべてと辺を張ります。**そうなった値は caller-saved レジスタに置けません。**
+残る行き先は callee-saved レジスタ（§8）か、スタックです。
+
+### 素朴な実装との違い
+
+素直に "caller saves" を実装すると、呼び出しの前に生きている値を全部書き出し、後で読み直す
+コードが**呼び出し地点ごとに**出ます。ここではそれが出ません。
+
+- 呼び出しを**またがない**値は、何も払いません。素朴な実装は呼び出し地点で一律に払います
+- またぐ値も、callee-saved レジスタに入れば**呼び出し地点では無料**です。代金は関数の入口と
+  出口で1度だけ、§8 の仕組みで払います
+- 本当にレジスタが足りないときだけスタックに落ちます
+
+どれを退避するかを**呼び出し地点ごとの局所的な判断ではなく、関数全体を見た彩色**が決めて
+いる、と言い換えてもいいです。アロケータの中に「呼び出し規約」という名前の特別扱いは
+1行もありません。
+
+### 帳尻
+
+例題群のスピル枠254個の内訳が、そのまま答えになっています。
+
+| | |
+|---|---|
+| callee-saved の退避 | 167 |
+| 本物のレジスタ不足 | 87 |
+
+上の167は「呼び出しをまたぐ値のために callee-saved レジスタを使った回数」です。§8 のとおり
+その退避はスピルとして出るので、**アセンブリの `sd sN, N(sp)` を数えると同じ167**になります。
+下の87が、callee-saved 12本でも足りず**スタックまで落ちた値**です。
+
+### 割り付けから外してある2本
+
+`t5` と `t6` も caller-saved ですが、アロケータには渡していません（§1）。`t6` はクロージャを
+呼び先へ運び、`t5` は大きなオフセットの合成に使います。**割り付けの対象でないので、
+呼び出しで壊れても誰も困りません。**
+
+`ra` も caller-saved で、これだけはアロケータの管理外で明示的に退避されます。何かを呼ぶ関数
+なら、`emit.ml` がプロローグで `sd ra` を出します（`Riscv.is_leaf` が偽のとき）。戻り番地は
+彩色の対象になる値ではないからです。
+
+## 10. レジスタを減らす — `-nregs`
 
 `-nregs n` は割り当て可能なレジスタを n 本に絞ります。引数レジスタ `a0`–`a7` は呼び出し規約が
 成り立たなくなるので常に残し、削るのはそれ以外です（下限10本）。
@@ -455,30 +510,44 @@ martenml_main:
 	sd s1, 8(sp)                    	sd t0, 0(sp)
 	sd s2, 16(sp)                   	li t0, 2
 	li s1, 1                        	sd t0, 8(sp)
-	li s2, 2                        	la t0, martenml_const_list_Nil
-	la s0, martenml_const_list_Nil     	sd t0, 16(sp)
+	li s2, 2                        	la t0, martenml_const_Nil_3
+	la s0, martenml_const_Nil_3     	sd t0, 16(sp)
 	...                             	...
 	sd s2, 8(a0)                    	ld t0, 8(sp)
 	sd s0, 16(a0)                   	sd t0, 8(a0)
 ```
 
-callee-saved が2本しか残らないので、値がレジスタに居座れず全部スタックを経由しています。
-遅くはなりますが、答えは同じです。
+**10本のときは callee-saved が1本も残りません。** 常に残す `a0`–`a7` に足せるのが2本だけで、
+足される順に `t0`・`t1` — どちらも caller-saved だからです。呼び出しをまたぐ値の行き先が
+§9 の2つのうち片方しかなくなるので、そういう値は**必ずスタックへ落ちます**。遅くはなりますが、
+答えは同じです。
+
+| `-nregs` | caller-saved | callee-saved |
+|---|---|---|
+| 10 | 10 | **0** |
+| 12 | 12 | **0** |
+| 15 | 13 | 2 |
+| 20 | 13 | 7 |
+| 25 | 13 | 12 |
+
+テストが `-nregs 10` を走らせる理由がこの表の1行目です。**呼び出しをまたぐ値を持つ関数は、
+そこでは必ずスピルを通ります。**（`sum` のように呼び出しをまたぐ値がなければ、10本でも
+1バイトも変わりません。）
 
 意図的に負荷をかけた例が `examples/pressure.mml` です。16個の値が、いずれも同じ16回の
 呼び出しをまたいで生き続けるように書いてあります。
 
 ```
 $ ./martenml --dump-regalloc examples/pressure.mml
-martenml_blend:      1 round(s), 27/27 moves coalesced, 0 spill slot(s)
-martenml_pressure:   2 round(s), 46/75 moves coalesced, 16 spill slot(s)
-martenml_accumulate: 2 round(s), 42/44 moves coalesced, 2 spill slot(s)
-martenml_main:       1 round(s), 26/26 moves coalesced, 0 spill slot(s)
+martenml_blend_49:       1 round(s), 27/27 moves coalesced, 0 spill slot(s)
+martenml_pressure_60:    2 round(s), 46/75 moves coalesced, 16 spill slot(s)
+martenml_accumulate_108: 2 round(s), 42/44 moves coalesced, 2 spill slot(s)
+martenml_main:           1 round(s), 26/26 moves coalesced, 0 spill slot(s)
 ```
 
 16スロット。callee-saved が12本しかないところに、呼び出しをまたぐ値が16個あるためです。
 
-## 10. この実装で効いている単純化
+## 11. この実装で効いている単純化
 
 **MartenML の関数の制御フローグラフには閉路がありません。** ソース上のループは
 再帰呼び出しであり、呼び出しは関数から出ていくからです。
@@ -493,7 +562,7 @@ martenml_main:       1 round(s), 26/26 moves coalesced, 0 spill slot(s)
 
 より大きな言語に移すなら最初に壊れるのがここです。
 
-## 11. 集合の持ち方 — ビット行列
+## 12. 集合の持ち方 — ビット行列
 
 ここまではアルゴリズムの話で、以下は表現の話です。このパスの速さはほぼここで決まります。
 
@@ -548,14 +617,14 @@ O(log n) で答えますが、更新のたびに木を作り直します。1要�
 速くなったあとも、時間の大半は割り付けです。値800個の例は全体144 ms のうち割り付けが120 ms
 で、その多くは `build` です。密なグラフの辺は本当に n² 本あるので、そこは表現では消えません。
 
-## 12. していないこと
+## 13. していないこと
 
 ### 弦グラフとして塗る
 
 いちばん大きな取りこぼしがここだと思っています。**このコンパイラの干渉グラフは、すでに
 弦グラフです。**
 
-§10 のとおり関数の制御フローグラフに閉路がありません。合流点も少なく、例題群を数えると
+§11 のとおり関数の制御フローグラフに閉路がありません。合流点も少なく、例題群を数えると
 527ブロック中**15箇所**だけです。つまりグラフはほぼ木で、木の上の生存区間は**部分木**に
 なります。そして部分木の交差グラフは弦グラフだ、というのが Gavril の定理です。
 
@@ -602,9 +671,9 @@ MaxLive > K で本当に避けられないのかが分かっていません。�
 ## 参考文献
 
 - R. E. Tarjan, M. Yannakakis, [*Simple linear-time algorithms to test chordality of
-  graphs*][mcs], SIAM J. Comput. 13(3), 1984。§12 の MCS。
+  graphs*][mcs], SIAM J. Comput. 13(3), 1984。§13 の MCS。
 - F. Gavril, *The intersection graphs of subtrees in trees are exactly the chordal
-  graphs*, JCTB 16(1), 1974。§12 で「木なら弦グラフ」と言っている根拠。
+  graphs*, JCTB 16(1), 1974。§13 で「木なら弦グラフ」と言っている根拠。
 - S. Hack, G. Goos, [*Optimal register allocation for SSA-form programs in polynomial
   time*][hack], Inf. Process. Lett. 98(4), 2006。SSA なら弦グラフになる、という側。
 - A. B. Kempe, *On the geographical problem of the four colours*, American Journal
@@ -633,7 +702,7 @@ MaxLive > K で本当に避けられないのかが分かっていません。�
 
 ## 実装の地図
 
-`regalloc.ml` は `allocate` 1つの中に閉じています。集合は `bitset.ml` で、§11 のとおりです。
+`regalloc.ml` は `allocate` 1つの中に閉じています。集合は `bitset.ml` で、§12 のとおりです。
 `Regalloc.trace` に関数を差すと各ステップが報告され、§7 の通し例（`tests/walkthrough.ml`）と
 その図はそこから作っています。
 
