@@ -140,6 +140,7 @@ class Kernel {
   bool exited = false;
   int exit_code = 0;
   bool trace = false;  // --trace-syscalls
+  u64 count = 0;       // how many ecalls have been served, for --stats
 
   void set_brk_start(u64 v) { brk_start_ = brk_ = v; }
 
@@ -149,6 +150,7 @@ class Kernel {
     const u64 num = h.x[17];
     const u64 a0 = h.x[10], a1 = h.x[11], a2 = h.x[12], a3 = h.x[13], a4 = h.x[14],
               a5 = h.x[15];
+    ++count;
     const i64 r = dispatch(num, a0, a1, a2, a3, a4, a5);
     if (trace) {
       std::print(stderr, "[syscall] {}({:#x}, {:#x}, {:#x}) = {}\n", num, a0, a1, a2, r);

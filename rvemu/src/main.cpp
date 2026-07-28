@@ -39,6 +39,7 @@ options:
   -t, --trace           print each instruction as it retires
   -T, --trace-syscalls  print each ecall and its result
   -n, --max-insns N     stop after N instructions
+  -s, --stats           report instructions, syscalls and pages on exit
   -e, --env NAME=VALUE  set one variable (repeatable); implies a clean environment
   -h, --help            this
 
@@ -104,6 +105,7 @@ int main(int argc, char** argv) {
       machine.opts.trace_syscalls = true;
       continue;
     }
+    if (a == "-s" || a == "--stats") { machine.opts.stats = true; continue; }
     if (a == "-n" || a == "--max-insns") {
       machine.opts.max_insns = std::strtoull(value("--max-insns"), nullptr, 0);
       continue;

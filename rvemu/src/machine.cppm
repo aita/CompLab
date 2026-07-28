@@ -48,6 +48,7 @@ struct RunOptions {
   std::vector<std::string> envp;
   bool trace = false;
   bool trace_syscalls = false;
+  bool stats = false;
   u64 max_insns = 0;  // 0 means no limit
 };
 
@@ -109,6 +110,7 @@ class Machine {
             std::chrono::system_clock::now().time_since_epoch())
             .count());
     kernel.trace = opts.trace_syscalls;
+    started_ = std::chrono::steady_clock::now();
 
     u64 p = kStackTop;
     // Strings live at the very top, and everything below points up at them.
@@ -226,12 +228,27 @@ class Machine {
     }
   }
 
+  // What the guest cost, for --stats. Wall time starts at start().
+  void report_stats(std::FILE* out) const {
+    const double secs = std::chrono::duration<double>(
+                            std::chrono::steady_clock::now() - started_)
+                            .count();
+    const u64 bytes = cpu.mem.page_count() * kPageSize;
+    std::print(out,
+               "rvemu: {} instructions, {} syscalls, {} pages ({} KiB), "
+               "{:.3f} s, {:.1f}M inst/s\n",
+               executed, kernel.count, cpu.mem.page_count(), bytes >> 10, secs,
+               secs > 0 ? executed / secs / 1e6 : 0.0);
+  }
+
   // Run to completion. Returns the process exit status.
   int run() {
     for (;;) {
       const Event e = resume(false);
       switch (e) {
-        case Event::Exited: return kernel.exit_code;
+        case Event::Exited:
+          if (opts.stats) report_stats(stderr);
+          return kernel.exit_code;
         case Event::Limit:
           std::print(stderr, "rvemu: stopped after {} instructions\n", executed);
           return 1;
@@ -271,6 +288,8 @@ class Machine {
   }
 
   // One line of `--trace`, before the instruction runs.
+  std::chrono::steady_clock::time_point started_{};
+
   void trace_one() {
     Inst in;
     if (!cpu.fetch(cpu.hart.pc, in)) {
