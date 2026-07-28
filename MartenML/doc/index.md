@@ -20,7 +20,7 @@ ML ふうの言語を RISC-V（RV64I/M）へコンパイルする処理系の解
 | 2 | [名前解決](modules.md) | `modules.ml`。モジュールとファンクタを、名前を付け替えるだけで消す |
 | 3 | [型推論](typing.md) | `typing.ml`・`types.ml`。単一化と、レベルによる一般化 |
 | 4 | [パターンマッチ](matching.md) | `match_check.ml`・`match_compile.ml`。網羅性の検査と決定木 |
-| 5 | [K正規化とその後](knormal.md) | `knormal.ml`・`alpha.ml`・`optim.ml`。中間結果に名前を付け、一意にし、畳む |
+| 5 | [K正規化とその後](knormal.md) | `knormal.ml`・`alpha.ml`・`inline.ml`・`optim.ml`。中間結果に名前を付け、一意にし、展開し、畳む |
 | 6 | [クロージャ変換](closure.md) | `closure.ml`。入れ子の関数をトップレベルへ |
 
 ### 後半 — 機械語へ

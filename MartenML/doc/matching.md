@@ -196,7 +196,7 @@ let fields = List.map (fun t -> (Ident.fresh "fld", t)) field_types in
 実際の K正規形（`--dump-knf`）の先頭は次のとおりで、図と一致します。
 
 ```
-$ martenmlc --dump-knf -o /dev/null score.mml
+$ martenmlc -inline 0 --dump-knf -o /dev/null score.mml
 let rec score.44 c.45 s.46 =
   let match.10.47 : (colour * shape) =
     (c.45, s.46)
@@ -291,17 +291,17 @@ let join_of = Array.mapi (fun i _ -> if counts.(i) > 1 then Some (Ident.fresh "c
 関数が1つ生成され、呼び出しは3か所です。
 
 ```
-$ ./martenml -S score.mml | grep '\.globl'
+$ ./martenml -inline 0 -S score.mml | grep '\.globl'
 	.globl martenml_case_20_48       ← (_, Circle r) -> r * 100 の本体
 	.globl martenml_score_44
 	.globl martenml_main
 
-$ ./martenml -S score.mml | grep -n 'tail martenml_case_20_48'
+$ ./martenml -inline 0 -S score.mml | grep -n 'tail martenml_case_20_48'
 53:	tail martenml_case_20_48
 66:	tail martenml_case_20_48
 88:	tail martenml_case_20_48
 
-$ ./martenml -S score.mml | sed -n '/^martenml_case_20_48:/,/^$/p'
+$ ./martenml -inline 0 -S score.mml | sed -n '/^martenml_case_20_48:/,/^$/p'
 martenml_case_20_48:
 	li t0, 100
 	mul a0, a0, t0
@@ -313,6 +313,24 @@ martenml_case_20_48:
 戻り先を積むこともスタックを伸ばすこともありません。`match` の結果を使う位置に書けば
 普通の `call` になりますが、そのときでも払うのは呼び出し1回ぶんで、複製した本体を
 持ち歩くよりは安く済みます。
+
+### インライン展開が、小さい合流点は戻す
+
+上のダンプに `-inline 0` を付けてあるのは、合流関数が小さいと
+[インライン展開](knormal.md#3-インライン展開--inlineml)が展開し直すからです。`score` の
+合流本体は `r * 100` の2命令で、既定の閾値をはるかに下回ります。
+
+**それで損をすることもあります。** `score` は展開すると79命令から82命令に増えます。3か所への
+末尾ジャンプより、本体3つのほうが高くついたということです。
+
+とはいえ噛み合ってはいます。合流点が防いでいるのは**指数的な**複製で、それが問題になるのは
+本体が大きいときです。大きい本体は閾値を越えるので展開されません。展開されるのは、複製が
+数命令で済む場合だけです。
+
+粗いのは、**閾値が呼び出し地点の数を見ていない**ことです。3か所から呼ばれる2命令の本体と、
+1か所から呼ばれる2命令の本体を同じに扱っています。合流関数だけを対象外にすれば例題群で
+3命令ぶん良くなりますが、それは `match_compile` の付ける名前に頼る細工で、0.06%のために
+入れる結合ではありません。直すなら呼び出し地点の数を数える費用モデルのほうです。
 
 ## 8. どのケースにも当たらなかったとき
 

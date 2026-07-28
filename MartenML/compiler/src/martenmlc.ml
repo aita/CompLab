@@ -3,6 +3,7 @@
 let output_file = ref "-"
 let register_budget = ref Riscv.max_colors
 let optimizer_rounds = ref 3
+let inline_threshold = ref 12
 let dump_knf = ref false
 let dump_closure = ref false
 let dump_linear = ref false
@@ -20,6 +21,9 @@ let options =
       Printf.sprintf "<n>  allocate out of n registers (%d..%d, default %d)"
         Riscv.min_colors Riscv.max_colors Riscv.max_colors );
     ("-O", Arg.Set_int optimizer_rounds, "<n>  run the optimizer n times (default 3)");
+    ( "-inline",
+      Arg.Set_int inline_threshold,
+      "<n>  inline functions of at most n nodes (0 disables, default 12)" );
     ("--dump-knf", Arg.Set dump_knf, "  print the K-normalized program");
     ("--dump-closure", Arg.Set dump_closure, "  print the closure-converted program");
     ("--dump-linear", Arg.Set dump_linear, "  print the linear IR: the control-flow graph before the machine");
@@ -73,6 +77,8 @@ let compile path =
   check ~unique:false "normalization" normalized;
   let normalized = Alpha.rename normalized in
   check ~unique:true "alpha renaming" normalized;
+  let normalized = Inline.expand ~threshold:!inline_threshold normalized in
+  check ~unique:true "inlining" normalized;
   let normalized = Optim.optimize ~rounds:!optimizer_rounds normalized in
   check ~unique:true "the optimizer" normalized;
   if !dump_knf then Dump.knormal stderr 0 normalized;

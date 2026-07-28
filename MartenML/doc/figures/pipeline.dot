@@ -31,6 +31,7 @@ match_compile.ml  match を決定木に\l  \
 knormal.ml        K正規化\l"];
 
   knf -> closure [label = "  alpha.ml    束縛子を一意にする\l  \
+inline.ml   小さな関数を展開\l  \
 optim.ml    伝播・除去\l  \
 closure.ml  クロージャ変換\l"];
 

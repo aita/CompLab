@@ -45,7 +45,7 @@ print_int (f 5)
 さきほどの `adder` を通すとこうなります。
 
 ```
-$ martenmlc --dump-closure -o /dev/null a.mml
+$ martenmlc -inline 0 --dump-closure -o /dev/null a.mml
 martenml_add_6 (x.7) capturing (n.5) =      ← n が引数の隣に並んだ
   x.7 + n.5
 martenml_adder_4 (n.5) =
@@ -54,8 +54,8 @@ martenml_adder_4 (n.5) =
   add.6
 martenml_main () =
   ...
-  let t.3.9 : int =
-    call closure f.8 (t.2.10)            ← f が何かは実行時にしか分からない
+  let t.3.11 : int =
+    call closure f.9 (t.2.10)            ← f が何かは実行時にしか分からない
   in
 ```
 

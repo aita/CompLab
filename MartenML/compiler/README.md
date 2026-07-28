@@ -18,6 +18,7 @@ martenmlc [options] <file.mml>
   -o <file>          write the assembly here (default: stdout)
   -nregs <n>         allocate out of n registers only (10..25, default 25)
   -O <n>             run the optimizer n times (default 3)
+  -inline <n>        inline functions of at most n nodes (0 disables, default 12)
   --dump-knf         print the K-normalized program
   --dump-closure     print the closure-converted program
   --dump-linear      print the linear IR: the control-flow graph before the machine
@@ -43,7 +44,7 @@ output that was actually produced.
 | [../doc/modules.md](../doc/modules.md) | モジュールとファンクタを名前解決だけで済ませる |
 | [../doc/typing.md](../doc/typing.md) | 型推論。単一化、レベル方式の一般化、値制限、rigid な型変数 |
 | [../doc/matching.md](../doc/matching.md) | パターンマッチ。網羅性・到達不能の判定、決定木、合流点 |
-| [../doc/knormal.md](../doc/knormal.md) | K正規化、α変換、最適化 |
+| [../doc/knormal.md](../doc/knormal.md) | K正規化、α変換、インライン展開、最適化 |
 | [../doc/closure.md](../doc/closure.md) | クロージャ変換 |
 | [../doc/selection.md](../doc/selection.md) | 線形IR、命令選択、生存解析 |
 | [../doc/regalloc.md](../doc/regalloc.md) | レジスタ割り付け。干渉グラフの実例、融合・スピル・callee-saved |
@@ -201,6 +202,7 @@ around a condition, commas where it has spaces.
 | match compilation | `match_compile.ml` | `match` into a decision tree |
 | K-normalization (KNF) | `knormal.ml` | name every intermediate result |
 | α-conversion | `alpha.ml` | make every binder unique |
+| inlining | `inline.ml` | copy small non-recursive function bodies to their call sites |
 | optimization | `optim.ml` | copy and constant propagation, dead-let elimination |
 | closure conversion | `closure.ml` | lift functions to the top level |
 | linear IR | `linear.ml` | the tree into basic blocks, still target-independent |
