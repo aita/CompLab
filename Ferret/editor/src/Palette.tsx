@@ -3,7 +3,7 @@ import { CATEGORIES, SPECS } from "./spec";
 export default function Palette({ onAdd }: { onAdd: (type: string) => void }) {
   return (
     <aside className="palette">
-      <div className="palette-title">ノード</div>
+      <div className="palette-title">Nodes</div>
       {CATEGORIES.map((category) => (
         <div className="palette-group" key={category}>
           <div className="palette-group-title">{category}</div>
@@ -28,7 +28,10 @@ export default function Palette({ onAdd }: { onAdd: (type: string) => void }) {
         </div>
       ))}
       <p className="palette-note">
-        クリックで追加、ドラッグでも置けます。四角い端子が実行の流れ、丸い端子が値です。
+        Click to add, or drag onto the canvas. Square ports are the flow of
+        execution, round ones are values. A number port with nothing plugged
+        into it can be typed into. Right-click a node or a wire to duplicate or
+        delete it.
       </p>
     </aside>
   );

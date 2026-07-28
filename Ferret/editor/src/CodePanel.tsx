@@ -6,7 +6,7 @@ type View = "ir" | "wat" | "bytes";
 export default function CodePanel({ compiled }: { compiled: CompileResult }) {
   const [view, setView] = useState<View>("wat");
   if (!compiled.ok) {
-    return <div className="panel-empty">コンパイルが通るとここに出ます。</div>;
+    return <div className="panel-empty">This fills in once the graph compiles.</div>;
   }
   return (
     <div className="codepanel">
@@ -15,7 +15,7 @@ export default function CodePanel({ compiled }: { compiled: CompileResult }) {
           className={view === "ir" ? "on" : ""}
           onClick={() => setView("ir")}
         >
-          中間表現
+          IR
         </button>
         <button
           className={view === "wat" ? "on" : ""}
@@ -27,7 +27,7 @@ export default function CodePanel({ compiled }: { compiled: CompileResult }) {
           className={view === "bytes" ? "on" : ""}
           onClick={() => setView("bytes")}
         >
-          バイト列
+          bytes
         </button>
       </div>
       <pre className="code">
@@ -48,7 +48,7 @@ export default function CodePanel({ compiled }: { compiled: CompileResult }) {
           URL.revokeObjectURL(a.href);
         }}
       >
-        flow.wasm をダウンロード
+        Download flow.wasm
       </button>
     </div>
   );

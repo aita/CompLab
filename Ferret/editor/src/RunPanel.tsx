@@ -1,6 +1,6 @@
-import { useState } from "react";
-import type { CompileResult, RunResult } from "./ferret";
-import { run } from "./ferret";
+import { useRef, useState } from "react";
+import type { CompileResult, Paused, Run, RunResult } from "./ferret";
+import { canPause, start } from "./ferret";
 
 interface Props {
   compiled: CompileResult;
@@ -10,14 +10,16 @@ interface Props {
 export default function RunPanel({ compiled, onFocusNode }: Props) {
   const [args, setArgs] = useState<Record<string, string>>({});
   const [result, setResult] = useState<RunResult | null>(null);
+  const [paused, setPaused] = useState<Paused | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const run = useRef<Run | null>(null);
 
   if (!compiled.ok) {
     return (
       <div className="runpanel">
         <div className="run-status bad">
-          コンパイルが通っていないので実行できません。
+          Nothing to run: the graph does not compile.
         </div>
         <ul className="problem-list">
           {compiled.errors.map((e, i) => (
@@ -35,28 +37,45 @@ export default function RunPanel({ compiled, onFocusNode }: Props) {
     );
   }
 
+  const watches = compiled.watches;
+  const where = (watch: number) => watches[watch] ?? { node: "?", label: "?" };
+
   const go = async () => {
     setBusy(true);
     setFailure(null);
+    setResult(null);
+    setPaused(null);
+    const active = start(
+      compiled.wasm,
+      compiled.params.map((p) => Number(args[p] ?? 0)),
+      setPaused,
+    );
+    run.current = active;
     try {
-      const values = compiled.params.map((p) => Number(args[p] ?? 0));
-      setResult(await run(compiled.wasm, values));
+      const finished = await active.done;
+      setResult(finished);
     } catch (e) {
-      setResult(null);
       setFailure(e instanceof Error ? e.message : String(e));
     } finally {
+      setPaused(null);
       setBusy(false);
+      run.current = null;
     }
+  };
+
+  const resume = () => {
+    setPaused(null);
+    run.current?.resume();
   };
 
   return (
     <div className="runpanel">
       <div className="run-status ok">
-        コンパイル成功 — {compiled.wasm.length} バイトの wasm
+        Compiled — {compiled.wasm.length} bytes of wasm
       </div>
 
       {compiled.params.length === 0 ? (
-        <p className="muted">開始ノードに入力はありません。</p>
+        <p className="muted">The start node takes no inputs.</p>
       ) : (
         compiled.params.map((p) => (
           <div className="field" key={p}>
@@ -66,6 +85,7 @@ export default function RunPanel({ compiled, onFocusNode }: Props) {
               step="any"
               value={args[p] ?? ""}
               placeholder="0"
+              disabled={busy}
               onChange={(e) => setArgs({ ...args, [p]: e.target.value })}
             />
           </div>
@@ -73,23 +93,89 @@ export default function RunPanel({ compiled, onFocusNode }: Props) {
       )}
 
       <button className="primary" disabled={busy} onClick={go}>
-        {busy ? "実行中…" : "▶ 実行する"}
+        {busy ? "Running…" : "▶ Run"}
       </button>
+
+      {watches.length > 0 && !busy && (
+        <p className="muted breakpoint-note">
+          {watches.length} breakpoint{watches.length === 1 ? "" : "s"} set.
+          {!canPause() &&
+            " This page is not cross-origin isolated, so a run reports them rather than stopping at them."}
+        </p>
+      )}
+
+      {paused && (
+        <div className="paused">
+          <div className="paused-head">
+            Paused at{" "}
+            <button
+              className="linkish"
+              onClick={() => onFocusNode(where(paused.watch).node)}
+            >
+              {where(paused.watch).node}
+            </button>
+          </div>
+          <div className="result">
+            <span className="result-label">{where(paused.watch).label}</span>
+            <span className="result-value">{format(paused.value)}</span>
+          </div>
+          <div className="muted">hit {paused.hit}</div>
+          <div className="paused-buttons">
+            <button className="primary" onClick={resume}>
+              Continue
+            </button>
+            <button onClick={() => run.current?.stop()}>Stop</button>
+          </div>
+        </div>
+      )}
 
       {failure && <div className="run-status bad">{failure}</div>}
 
       {result && (
         <>
           <div className="result">
-            <span className="result-label">戻り値</span>
-            <span className="result-value">{format(result.value)}</span>
+            <span className="result-label">
+              {result.stopped ? "stopped" : "returned"}
+            </span>
+            <span className="result-value">
+              {result.value === null ? "—" : format(result.value)}
+            </span>
           </div>
           <div className="muted">{result.ms.toFixed(2)} ms</div>
+
+          {result.hits.length > 0 && (
+            <div className="logs">
+              <div className="logs-title">Breakpoints ({result.hits.length})</div>
+              <table className="hits">
+                <tbody>
+                  {result.hits.slice(0, 300).map((h, i) => (
+                    <tr key={i}>
+                      <td className="hits-n">{i + 1}</td>
+                      <td>
+                        <button
+                          className="linkish"
+                          onClick={() => onFocusNode(where(h.watch).node)}
+                        >
+                          {where(h.watch).node}
+                        </button>
+                      </td>
+                      <td className="hits-label">{where(h.watch).label}</td>
+                      <td className="hits-value">{format(h.value)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {result.hits.length > 300 && (
+                <div className="muted">first 300 shown</div>
+              )}
+            </div>
+          )}
+
           {result.logs.length > 0 && (
             <div className="logs">
               <div className="logs-title">
-                ログ出力 ({result.logs.length}
-                {result.truncated ? " 以上" : ""})
+                Log output ({result.logs.length}
+                {result.truncated ? "+" : ""})
               </div>
               <ol>
                 {result.logs.map((x, i) => (

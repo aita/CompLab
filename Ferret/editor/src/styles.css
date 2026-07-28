@@ -297,6 +297,29 @@ select:focus {
   color: #98a2b3;
 }
 
+/* A number typed into the port itself, instead of wired to a constant. */
+.port-value {
+  width: 74px;
+  margin-left: auto;
+  padding: 1px 6px;
+  height: 20px;
+  border-radius: 5px;
+  border-color: #eaecf0;
+  background: #f9fafb;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  text-align: right;
+  color: #344054;
+}
+
+.port-value::placeholder {
+  color: #d0d5dd;
+}
+
+.port-value:focus {
+  background: #fff;
+}
+
 .port-exec .port-label {
   color: #344054;
   font-weight: 500;
@@ -522,4 +545,198 @@ select:focus {
 
 .codepanel > .ghost {
   margin: 8px 12px 12px;
+}
+
+/* ------------------------------------------------------- context menu */
+
+.ctxmenu {
+  position: fixed;
+  z-index: 20;
+  min-width: 184px;
+  padding: 4px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow:
+    0 2px 4px rgba(16, 24, 40, 0.06),
+    0 12px 28px rgba(16, 24, 40, 0.14);
+}
+
+.ctxmenu-title {
+  padding: 6px 10px 8px;
+  color: var(--muted);
+  font-size: 11px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ctxmenu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 7px 10px;
+  border-radius: 6px;
+  text-align: left;
+}
+
+.ctxmenu button.danger {
+  width: 100%;
+  margin: 0;
+  border: none;
+}
+
+.ctxmenu button:hover {
+  background: #f2f4f7;
+}
+
+.ctxmenu button.danger:hover {
+  background: #fef3f2;
+}
+
+.ctxmenu-hint {
+  color: #98a2b3;
+  font-size: 11px;
+}
+
+/* The minimap is a guide, not a panel: keep it out of the way. */
+.react-flow__minimap {
+  border-radius: 10px;
+  border: 1px solid var(--line);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.06);
+  opacity: 0.9;
+}
+
+.ctxmenu-section {
+  padding: 8px 10px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+}
+
+.ctxmenu > div:first-of-type .ctxmenu-section {
+  border-top: none;
+  margin-top: 0;
+}
+
+/* The document name sits in the toolbar and is edited in place. */
+.docname {
+  width: 220px;
+  border-color: transparent;
+  background: transparent;
+  font-weight: 600;
+}
+
+.docname:hover {
+  border-color: var(--line);
+}
+
+.notice {
+  padding: 4px 10px;
+  border-radius: 8px;
+  background: #fef3f2;
+  color: #b42318;
+}
+
+/* ------------------------------------------------------- breakpoints */
+
+.fnode.is-watched {
+  border-color: #fda29b;
+  box-shadow:
+    0 0 0 3px #fee4e2,
+    0 6px 16px rgba(16, 24, 40, 0.06);
+}
+
+.fnode-dot {
+  margin-left: auto;
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--bad);
+}
+
+.fnode-dot + .fnode-badge {
+  margin-left: 8px;
+}
+
+.breakpoint-note {
+  margin: 12px 0 0;
+  line-height: 1.6;
+}
+
+.paused {
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid #fda29b;
+  border-radius: 10px;
+  background: #fffbfa;
+}
+
+.paused-head {
+  font-weight: 600;
+  color: #b42318;
+}
+
+.paused .result {
+  background: #fff;
+}
+
+.paused-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.paused-buttons button {
+  flex: 1;
+}
+
+.hits {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  display: block;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.hits td {
+  padding: 2px 4px;
+  border-bottom: 1px solid #f2f4f7;
+  white-space: nowrap;
+}
+
+.hits-n {
+  color: #98a2b3;
+  text-align: right;
+}
+
+.hits-label {
+  color: var(--muted);
+}
+
+.hits-value {
+  text-align: right;
+  width: 100%;
+  color: var(--ink);
+}
+
+/* Flow ports sit in their own band at the top of the card, so the thread of
+   execution is read off the top edge and the values hang below it. */
+.fnode-flow {
+  padding-bottom: 4px;
+}
+
+.fnode-flow + .fnode-body {
+  border-top-style: dashed;
 }

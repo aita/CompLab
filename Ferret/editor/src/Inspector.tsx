@@ -3,7 +3,6 @@ import type { FerretNode } from "./FlowNode";
 
 interface Props {
   node: FerretNode | undefined;
-  variables: string[];
   problems: string[];
   onChange: (id: string, patch: NodeData) => void;
   onDelete: (id: string) => void;
@@ -11,7 +10,6 @@ interface Props {
 
 export default function Inspector({
   node,
-  variables,
   problems,
   onChange,
   onDelete,
@@ -19,25 +17,25 @@ export default function Inspector({
   if (!node) {
     return (
       <div className="panel-empty">
-        ノードを選ぶとここで設定できます。
+        Pick a node to configure it here.
         <br />
-        開始ノードを選べば、実行時の入力を増やせます。
+        The start node's inputs and a loop's state slots are edited from this
+        panel; everything else can be set on the card itself.
       </div>
     );
   }
   const spec = SPEC_BY_TYPE[node.type!];
   const data = node.data;
   const set = (patch: NodeData) => onChange(node.id, patch);
-  const params = (data.params as { name: string }[]) ?? [];
 
   return (
     <div className="inspector">
       <div className="inspector-head">
         <span className="fnode-glyph" style={{ background: spec.color }}>
-          {spec.glyph}
+          {spec.glyphOf?.(data) ?? spec.glyph}
         </span>
         <div>
-          <div className="inspector-title">{spec.title}</div>
+          <div className="inspector-title">{spec.titleOf?.(data) ?? spec.title}</div>
           <div className="inspector-id">{node.id}</div>
         </div>
       </div>
@@ -52,26 +50,28 @@ export default function Inspector({
       )}
 
       {spec.fields.map((field) => {
-        if (field.kind === "params") {
+        if (field.kind === "names") {
+          const items = (data[field.key] as { name: string }[] | undefined) ?? [];
           return (
             <div className="field" key={field.key}>
               <label>{field.label}</label>
-              {params.map((p, i) => (
+              {items.map((item, i) => (
                 <div className="param-row" key={i}>
                   <input
-                    value={p.name}
-                    onChange={(e) => {
-                      const next = params.map((q, j) =>
-                        j === i ? { name: e.target.value } : q,
-                      );
-                      set({ params: next });
-                    }}
+                    value={item.name}
+                    onChange={(e) =>
+                      set({
+                        [field.key]: items.map((q, j) =>
+                          j === i ? { name: e.target.value } : q,
+                        ),
+                      })
+                    }
                   />
                   <button
                     onClick={() =>
-                      set({ params: params.filter((_, j) => j !== i) })
+                      set({ [field.key]: items.filter((_, j) => j !== i) })
                     }
-                    title="この入力を消す"
+                    title={`Remove this ${field.itemLabel}`}
                   >
                     ×
                   </button>
@@ -80,10 +80,12 @@ export default function Inspector({
               <button
                 className="ghost"
                 onClick={() =>
-                  set({ params: [...params, { name: `x${params.length}` }] })
+                  set({
+                    [field.key]: [...items, { name: `x${items.length}` }],
+                  })
                 }
               >
-                + 入力を追加
+                + Add {field.itemLabel}
               </button>
             </div>
           );
@@ -105,15 +107,14 @@ export default function Inspector({
             </div>
           );
         }
-        if (field.kind === "number") {
+        if (field.kind === "text") {
           return (
             <div className="field" key={field.key}>
               <label>{field.label}</label>
               <input
-                type="number"
-                step="any"
-                value={String(data[field.key] ?? 0)}
-                onChange={(e) => set({ [field.key]: Number(e.target.value) })}
+                value={String(data[field.key] ?? "")}
+                spellCheck={false}
+                onChange={(e) => set({ [field.key]: e.target.value })}
               />
             </div>
           );
@@ -122,22 +123,18 @@ export default function Inspector({
           <div className="field" key={field.key}>
             <label>{field.label}</label>
             <input
-              list="ferret-variables"
-              value={String(data[field.key] ?? "")}
-              onChange={(e) => set({ [field.key]: e.target.value })}
+              type="number"
+              step="any"
+              value={String(data[field.key] ?? 0)}
+              onChange={(e) => set({ [field.key]: Number(e.target.value) })}
             />
-            <datalist id="ferret-variables">
-              {variables.map((v) => (
-                <option key={v} value={v} />
-              ))}
-            </datalist>
           </div>
         );
       })}
 
       {!spec.unique && (
         <button className="danger" onClick={() => onDelete(node.id)}>
-          このノードを削除
+          Delete this node
         </button>
       )}
     </div>

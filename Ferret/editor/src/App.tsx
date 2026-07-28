@@ -3,6 +3,7 @@ import {
   Background,
   BackgroundVariant,
   Controls,
+  MarkerType,
   MiniMap,
   ReactFlow,
   addEdge,
@@ -12,7 +13,6 @@ import {
   useReactFlow,
   type Connection,
   type Edge,
-  type EdgeTypes,
   type OnConnect,
 } from "@xyflow/react";
 import FlowNode, { type FerretNode } from "./FlowNode";
@@ -20,35 +20,70 @@ import Palette from "./Palette";
 import Inspector from "./Inspector";
 import RunPanel from "./RunPanel";
 import CodePanel from "./CodePanel";
-import { ErrorContext } from "./errors";
+import ContextMenu, { type MenuItem } from "./ContextMenu";
+import { ConnectedContext, ErrorContext, portKey } from "./errors";
 import { SPECS, SPEC_BY_TYPE, portKind, type NodeData } from "./spec";
 import { compile, type CompileResult } from "./ferret";
-import { EXAMPLES } from "./examples";
+import { EXAMPLES, blank } from "./examples";
 
 const nodeTypes = Object.fromEntries(SPECS.map((s) => [s.type, FlowNode]));
-const edgeTypes: EdgeTypes = {};
 const STORAGE_KEY = "ferret.graph";
 
+const EXEC_COLOR = "#94a3b8";
+const NUM_COLOR = "#38bdf8";
+const BOOL_COLOR = "#a78bfa";
+
 type Tab = "node" | "run" | "code";
+type Menu = { x: number; y: number; title: string; items: MenuItem[] };
+
+interface Doc {
+  name?: string;
+  nodes: { type?: string }[];
+  edges: unknown[];
+}
+
+/** Is this something the editor can open?  A file from an older node set, or
+ *  from something else entirely, is refused rather than half-loaded. */
+function readable(doc: unknown): doc is Doc {
+  const d = doc as Doc;
+  return (
+    !!d &&
+    Array.isArray(d.nodes) &&
+    Array.isArray(d.edges) &&
+    d.nodes.every((n) => !!n.type && n.type in SPEC_BY_TYPE)
+  );
+}
 
 export default function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState<FerretNode>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("run");
-  const [exampleKey, setExampleKey] = useState(EXAMPLES[0].key);
   const [fitToken, setFitToken] = useState(0);
+  const [menu, setMenu] = useState<Menu | null>(null);
+  const [docName, setDocName] = useState("Untitled");
+  const [notice, setNotice] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const counter = useRef(1);
+  const lastPicked = useRef<string | null>(null);
   const flowRef = useRef<HTMLDivElement>(null);
   const { screenToFlowPosition, fitView } = useReactFlow();
   const measured = useNodesInitialized();
 
-  const loadGraph = useCallback(
-    (graph: { nodes: unknown[]; edges: unknown[] }) => {
-      setNodes(structuredClone(graph.nodes) as FerretNode[]);
-      setEdges(structuredClone(graph.edges) as Edge[]);
+  const loadDoc = useCallback(
+    (doc: { name?: string; nodes: unknown[]; edges: unknown[] }) => {
+      const nodes = structuredClone(doc.nodes) as FerretNode[];
+      setNodes(nodes);
+      setEdges(structuredClone(doc.edges) as Edge[]);
       setSelected(null);
-      counter.current = graph.nodes.length + 1;
+      setDocName(doc.name ?? "Untitled");
+      // Ids from a file may already use the `kind_7` shape, so start counting
+      // past the highest one rather than at the node count.
+      counter.current =
+        nodes.reduce((top, n) => {
+          const tail = /_(\d+)$/.exec(n.id);
+          return tail ? Math.max(top, Number(tail[1])) : top;
+        }, 0) + 1;
       setFitToken((n) => n + 1);
     },
     [setNodes, setEdges],
@@ -60,19 +95,24 @@ export default function App() {
     if (measured && fitToken > 0) fitView({ padding: 0.2 });
   }, [measured, fitToken, fitView]);
 
-  // Start on whatever was last edited, or the first example.
+  // Start on whatever was last edited, or the first example.  A save made by
+  // an older node set is dropped rather than restored into a graph the
+  // compiler no longer understands.
   useEffect(() => {
     const saved = window.localStorage.getItem(STORAGE_KEY);
     if (saved) {
       try {
-        loadGraph(JSON.parse(saved));
-        return;
+        const doc = JSON.parse(saved);
+        if (readable(doc)) {
+          loadDoc(doc);
+          return;
+        }
       } catch {
         /* fall through to the example */
       }
     }
-    loadGraph(EXAMPLES[0].graph);
-  }, [loadGraph]);
+    loadDoc(EXAMPLES[0].graph);
+  }, [loadDoc]);
 
   const graph = useMemo(
     () => ({
@@ -95,8 +135,11 @@ export default function App() {
 
   useEffect(() => {
     if (nodes.length > 0)
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(graph));
-  }, [graph, nodes.length]);
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ name: docName, ...graph }),
+      );
+  }, [graph, docName, nodes.length]);
 
   // Compiling on every edit is what makes the errors feel like a linter; the
   // whole pipeline is well under a millisecond for graphs this size.
@@ -115,17 +158,10 @@ export default function App() {
     return map;
   }, [compiled]);
 
-  const variables = useMemo(() => {
-    const names = new Set<string>();
-    for (const n of nodes) {
-      if (n.type === "get" || n.type === "set") names.add(String(n.data.name));
-      if (n.type === "start")
-        for (const p of (n.data.params as { name: string }[]) ?? [])
-          names.add(p.name);
-    }
-    names.delete("");
-    return [...names].sort();
-  }, [nodes]);
+  const connected = useMemo(
+    () => new Set(edges.map((e) => portKey(e.target, e.targetHandle ?? "in"))),
+    [edges],
+  );
 
   const kindOf = useCallback(
     (nodeId: string, handle: string | null) => {
@@ -165,21 +201,50 @@ export default function App() {
     [kindOf, setEdges],
   );
 
+  // Everything is routed with right angles.  A loop's next value has to travel
+  // from a node's output back to the loop's input, which is right-to-left, and
+  // a curve for that swings out across half the canvas; a step route turns the
+  // corner instead.  While a node is selected, every wire that does not touch
+  // it fades, which is the only way to follow one thread through the feedback.
   const styledEdges = useMemo(
     () =>
       edges.map((e) => {
-        const exec = kindOf(e.source, e.sourceHandle ?? null) === "exec";
-        const bool = kindOf(e.source, e.sourceHandle ?? null) === "bool";
+        const kind = kindOf(e.source, e.sourceHandle ?? null);
+        const exec = kind === "exec";
+        const color = exec
+          ? EXEC_COLOR
+          : kind === "bool"
+            ? BOOL_COLOR
+            : NUM_COLOR;
+        const near =
+          selected === null || e.source === selected || e.target === selected;
+        // Parallel routes would otherwise stack into one line, and a line that
+        // lands on a card's border reads as part of the card.  Spread them by
+        // a fixed amount per edge so each gets its own corridor.
+        const lane =
+          (e.id.split("").reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7) &
+            7) * 8;
         return {
           ...e,
           type: "smoothstep" as const,
+          pathOptions: {
+            borderRadius: exec ? 14 : 8,
+            offset: (exec ? 24 : 14) + lane,
+          },
+          markerEnd: {
+            type: MarkerType.ArrowClosed,
+            width: 14,
+            height: 14,
+            color,
+          },
           style: {
             strokeWidth: exec ? 2 : 1.5,
-            stroke: exec ? "#94a3b8" : bool ? "#a78bfa" : "#7dd3fc",
+            stroke: color,
+            opacity: near ? 1 : 0.12,
           },
         };
       }),
-    [edges, kindOf],
+    [edges, kindOf, selected],
   );
 
   const addNode = useCallback(
@@ -225,152 +290,319 @@ export default function App() {
     [setNodes, setEdges],
   );
 
+  const duplicateNode = useCallback(
+    (id: string) => {
+      const source = nodes.find((n) => n.id === id);
+      if (!source) return;
+      const copy = {
+        ...source,
+        id: `${source.type}_${counter.current++}`,
+        position: { x: source.position.x + 40, y: source.position.y + 40 },
+        data: structuredClone(source.data),
+        selected: false,
+      };
+      setNodes((current) => [...current, copy]);
+      setSelected(copy.id);
+    },
+    [nodes, setNodes],
+  );
+
+  const disconnectNode = useCallback(
+    (id: string) => {
+      setEdges((current) =>
+        current.filter((e) => e.source !== id && e.target !== id),
+      );
+    },
+    [setEdges],
+  );
+
+  const saveFile = useCallback(() => {
+    const doc = JSON.stringify({ name: docName, ...graph }, null, 2);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([doc], { type: "application/json" }));
+    a.download = `${docName.trim().replace(/[^\w.-]+/g, "-") || "flow"}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, [docName, graph]);
+
+  const openFile = useCallback(
+    async (file: File) => {
+      try {
+        const doc = JSON.parse(await file.text());
+        if (!readable(doc)) throw new Error("not a Ferret graph");
+        loadDoc({ ...doc, name: doc.name ?? file.name.replace(/\.json$/i, "") });
+        setNotice(null);
+      } catch (e) {
+        setNotice(
+          `${file.name}: ${e instanceof Error ? e.message : String(e)}`,
+        );
+      }
+    },
+    [loadDoc],
+  );
+
+  const openFileMenu = useCallback(
+    (event: React.MouseEvent) => {
+      const box = (event.target as HTMLElement)
+        .closest("button")!
+        .getBoundingClientRect();
+      setMenu({
+        x: box.left,
+        y: box.bottom + 6,
+        title: "File",
+        items: [
+          { label: "New", onPick: () => loadDoc(blank()) },
+          { label: "Open…", onPick: () => fileInput.current?.click() },
+          { label: "Save as JSON", onPick: saveFile },
+          ...EXAMPLES.map((x, i) => ({
+            label: x.name,
+            heading: i === 0 ? "Examples" : undefined,
+            onPick: () => loadDoc(x.graph),
+          })),
+        ],
+      });
+    },
+    [loadDoc, saveFile],
+  );
+
+  const openNodeMenu = useCallback(
+    (event: React.MouseEvent, node: FerretNode) => {
+      event.preventDefault();
+      const spec = SPEC_BY_TYPE[node.type!];
+      const attached = edges.some(
+        (e) => e.source === node.id || e.target === node.id,
+      );
+      const items: MenuItem[] = [];
+      // A breakpoint on the start node would report what the caller passed in,
+      // which the Run panel already shows.
+      if (node.type !== "start")
+        items.push({
+          label: node.data.breakpoint
+            ? "Remove breakpoint"
+            : "Add breakpoint",
+          onPick: () =>
+            patchNode(node.id, { breakpoint: !node.data.breakpoint }),
+        });
+      // There can only be one start node, so it can be neither copied nor cut.
+      if (!spec?.unique)
+        items.push({ label: "Duplicate", onPick: () => duplicateNode(node.id) });
+      if (attached)
+        items.push({
+          label: "Disconnect",
+          onPick: () => disconnectNode(node.id),
+        });
+      if (!spec?.unique)
+        items.push({
+          label: "Delete",
+          hint: "Del",
+          danger: true,
+          onPick: () => deleteNode(node.id),
+        });
+      setSelected(node.id);
+      setMenu({
+        x: event.clientX,
+        y: event.clientY,
+        title: spec ? (spec.titleOf?.(node.data) ?? spec.title) : node.id,
+        items,
+      });
+    },
+    [edges, patchNode, duplicateNode, disconnectNode, deleteNode],
+  );
+
   const selectedNode = nodes.find((n) => n.id === selected);
 
   return (
     <ErrorContext.Provider value={problems}>
-      <div className="app">
-        <header className="topbar">
-          <span className="brand">
-            <span className="brand-mark">F</span> Ferret
-          </span>
-          <span className="tagline">ノードをつないで wasm にする</span>
-          <div className="spacer" />
-          <select
-            value={exampleKey}
-            onChange={(e) => {
-              setExampleKey(e.target.value);
-              const found = EXAMPLES.find((x) => x.key === e.target.value);
-              if (found) loadGraph(found.graph);
-            }}
-          >
-            {EXAMPLES.map((x) => (
-              <option key={x.key} value={x.key}>
-                {x.name}
-              </option>
-            ))}
-          </select>
-          <button
-            className="ghost"
-            onClick={() => {
-              const found = EXAMPLES.find((x) => x.key === exampleKey);
-              if (found) loadGraph(found.graph);
-            }}
-          >
-            読み直す
-          </button>
-          <span className={"pill " + (compiled.ok ? "ok" : "bad")}>
-            {compiled.ok
-              ? `${compiled.wasm.length} バイト`
-              : `${compiled.errors.length} 件の問題`}
-          </span>
-          <button
-            className="primary"
-            onClick={() => setTab("run")}
-            disabled={!compiled.ok}
-          >
-            ▶ 実行
-          </button>
-        </header>
-
-        <div className="workspace">
-          <Palette onAdd={(type) => addNode(type)} />
-
-          <div
-            className="canvas"
-            ref={flowRef}
-            onDragOver={(e) => {
-              e.preventDefault();
-              e.dataTransfer.dropEffect = "move";
-            }}
-            onDrop={(e) => {
-              e.preventDefault();
-              const type = e.dataTransfer.getData("application/ferret-node");
-              if (!type) return;
-              addNode(
-                type,
-                screenToFlowPosition({ x: e.clientX, y: e.clientY }),
-              );
-            }}
-          >
-            <ReactFlow
-              nodes={nodes}
-              edges={styledEdges}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
-              onConnect={onConnect}
-              isValidConnection={isValidConnection}
-              onSelectionChange={({ nodes: picked }) => {
-                setSelected(picked[0]?.id ?? null);
-                if (picked[0]) setTab("node");
+      <ConnectedContext.Provider value={connected}>
+        <div className="app">
+          <header className="topbar">
+            <span className="brand">
+              <span className="brand-mark">F</span> Ferret
+            </span>
+            <button className="ghost" onClick={openFileMenu}>
+              File ▾
+            </button>
+            <input
+              ref={fileInput}
+              type="file"
+              accept="application/json,.json"
+              hidden
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) openFile(file);
+                e.target.value = "";
               }}
-              defaultEdgeOptions={{ type: "smoothstep" }}
-              proOptions={{ hideAttribution: true }}
-              fitView
-              fitViewOptions={{ padding: 0.2 }}
-              // The default floor of 0.5 is above what a whole flow needs.
-              minZoom={0.15}
+            />
+            <input
+              className="docname"
+              value={docName}
+              spellCheck={false}
+              onChange={(e) => setDocName(e.target.value)}
+            />
+            <div className="spacer" />
+            {notice && <span className="notice">{notice}</span>}
+            <span className={"pill " + (compiled.ok ? "ok" : "bad")}>
+              {compiled.ok
+                ? `${compiled.wasm.length} bytes`
+                : `${compiled.errors.length} problem${
+                    compiled.errors.length === 1 ? "" : "s"
+                  }`}
+            </span>
+            <button
+              className="primary"
+              onClick={() => setTab("run")}
+              disabled={!compiled.ok}
             >
-              <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-              <Controls showInteractive={false} />
-              <MiniMap
-                pannable
-                zoomable
-                nodeColor={(n) => SPEC_BY_TYPE[n.type!]?.color ?? "#cbd5e1"}
-              />
-            </ReactFlow>
-          </div>
+              ▶ Run
+            </button>
+          </header>
 
-          <aside className="side">
-            <div className="tabs">
-              <button
-                className={tab === "node" ? "on" : ""}
-                onClick={() => setTab("node")}
+          <div className="workspace">
+            <Palette onAdd={(type) => addNode(type)} />
+
+            <div
+              className="canvas"
+              ref={flowRef}
+              onDragOver={(e) => {
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(e) => {
+                e.preventDefault();
+                const type = e.dataTransfer.getData("application/ferret-node");
+                if (!type) return;
+                addNode(
+                  type,
+                  screenToFlowPosition({ x: e.clientX, y: e.clientY }),
+                );
+              }}
+            >
+              <ReactFlow
+                nodes={nodes}
+                edges={styledEdges}
+                nodeTypes={nodeTypes}
+                onNodesChange={onNodesChange}
+                onEdgesChange={onEdgesChange}
+                onConnect={onConnect}
+                isValidConnection={isValidConnection}
+                onSelectionChange={({ nodes: picked }) => {
+                  // This fires again on any store update while something is
+                  // selected, not only when the selection changes, so react to
+                  // the change alone: switching the panel every time would undo
+                  // the tab the moment you clicked one.
+                  const id = picked[0]?.id ?? null;
+                  if (id === lastPicked.current) return;
+                  lastPicked.current = id;
+                  setSelected(id);
+                  if (id) setTab("node");
+                }}
+                onNodeContextMenu={openNodeMenu}
+                onEdgeContextMenu={(event, edge) => {
+                  event.preventDefault();
+                  setMenu({
+                    x: event.clientX,
+                    y: event.clientY,
+                    title: "Connection",
+                    items: [
+                      {
+                        label: "Delete",
+                        danger: true,
+                        onPick: () =>
+                          setEdges((current) =>
+                            current.filter((e) => e.id !== edge.id),
+                          ),
+                      },
+                    ],
+                  });
+                }}
+                onPaneContextMenu={(event) => {
+                  event.preventDefault();
+                  setMenu({
+                    x: (event as React.MouseEvent).clientX,
+                    y: (event as React.MouseEvent).clientY,
+                    title: "Canvas",
+                    items: [
+                      {
+                        label: "Fit view",
+                        onPick: () => fitView({ padding: 0.2 }),
+                      },
+                    ],
+                  });
+                }}
+                onPaneClick={() => setMenu(null)}
+                onMoveStart={() => setMenu(null)}
+                deleteKeyCode={["Delete", "Backspace"]}
+                onBeforeDelete={async ({ nodes: picked, edges: cut }) => ({
+                  // The start node is the entry point; there is nothing to
+                  // compile without it.
+                  nodes: picked.filter((n) => !SPEC_BY_TYPE[n.type!]?.unique),
+                  edges: cut,
+                })}
+                proOptions={{ hideAttribution: true }}
+                fitView
+                fitViewOptions={{ padding: 0.2 }}
+                minZoom={0.15}
               >
-                設定
-              </button>
-              <button
-                className={tab === "run" ? "on" : ""}
-                onClick={() => setTab("run")}
-              >
-                実行
-              </button>
-              <button
-                className={tab === "code" ? "on" : ""}
-                onClick={() => setTab("code")}
-              >
-                生成コード
-              </button>
-            </div>
-            <div className="side-body">
-              {tab === "node" && (
-                <Inspector
-                  node={selectedNode}
-                  variables={variables}
-                  problems={selected ? (problems.get(selected) ?? []) : []}
-                  onChange={patchNode}
-                  onDelete={deleteNode}
+                <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+                <Controls showInteractive={false} />
+                <MiniMap
+                  pannable
+                  zoomable
+                  style={{ width: 152, height: 104 }}
+                  nodeColor={(n) => SPEC_BY_TYPE[n.type!]?.color ?? "#cbd5e1"}
                 />
-              )}
-              {tab === "run" && (
-                <RunPanel
-                  compiled={compiled}
-                  onFocusNode={(id) => {
-                    setSelected(id);
-                    setTab("node");
-                    setNodes((current) =>
-                      current.map((n) => ({ ...n, selected: n.id === id })),
-                    );
-                  }}
-                />
-              )}
-              {tab === "code" && <CodePanel compiled={compiled} />}
+              </ReactFlow>
+              {menu && <ContextMenu {...menu} onClose={() => setMenu(null)} />}
             </div>
-          </aside>
+
+            <aside className="side">
+              <div className="tabs">
+                <button
+                  className={tab === "node" ? "on" : ""}
+                  onClick={() => setTab("node")}
+                >
+                  Node
+                </button>
+                <button
+                  className={tab === "run" ? "on" : ""}
+                  onClick={() => setTab("run")}
+                >
+                  Run
+                </button>
+                <button
+                  className={tab === "code" ? "on" : ""}
+                  onClick={() => setTab("code")}
+                >
+                  Code
+                </button>
+              </div>
+              <div className="side-body">
+                {tab === "node" && (
+                  <Inspector
+                    node={selectedNode}
+                    problems={selected ? (problems.get(selected) ?? []) : []}
+                    onChange={patchNode}
+                    onDelete={deleteNode}
+                  />
+                )}
+                {tab === "run" && (
+                  <RunPanel
+                    compiled={compiled}
+                    onFocusNode={(id) => {
+                      setSelected(id);
+                      setTab("node");
+                      setNodes((current) =>
+                        current.map((n) => ({ ...n, selected: n.id === id })),
+                      );
+                    }}
+                  />
+                )}
+                {tab === "code" && <CodePanel compiled={compiled} />}
+              </div>
+            </aside>
+          </div>
         </div>
-      </div>
+      </ConnectedContext.Provider>
     </ErrorContext.Provider>
   );
 }

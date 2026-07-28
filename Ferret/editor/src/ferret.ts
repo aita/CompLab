@@ -1,10 +1,18 @@
 // The bridge to the OCaml compiler.  `public/ferret.js` is ferretc built with
 // js_of_ocaml, loaded by a script tag in index.html, so this file only has to
-// unwrap what it returns.
+// unwrap what it returns -- and to drive the worker the module runs in.
+
+import { CONTINUE, STOP } from "./protocol";
 
 export interface CompileError {
   node: string | null;
   message: string;
+}
+
+/** Where a breakpoint sits: the node, and which of its values this one is. */
+export interface Watch {
+  node: string;
+  label: string;
 }
 
 export type CompileResult =
@@ -14,6 +22,7 @@ export type CompileResult =
       wat: string;
       ir: string;
       params: string[];
+      watches: Watch[];
     }
   | { ok: false; errors: CompileError[] };
 
@@ -23,15 +32,12 @@ interface RawResult {
   wat?: string;
   ir?: string;
   params?: string[];
+  watches?: Watch[];
   errors?: { node: string | null; message: string }[];
 }
 
 interface FerretApi {
   compile(source: string): RawResult;
-}
-
-export function compilerReady(): boolean {
-  return typeof (globalThis as { ferret?: FerretApi }).ferret !== "undefined";
 }
 
 export function compile(graph: unknown): CompileResult {
@@ -43,7 +49,7 @@ export function compile(graph: unknown): CompileResult {
         {
           node: null,
           message:
-            "コンパイラが読み込まれていません。`npm run compiler` で public/ferret.js を作ってください",
+            "The compiler is not loaded: run `npm run compiler` to build public/ferret.js",
         },
       ],
     };
@@ -56,48 +62,138 @@ export function compile(graph: unknown): CompileResult {
     wat: raw.wat ?? "",
     ir: raw.ir ?? "",
     params: raw.params ?? [],
+    watches: raw.watches ?? [],
   };
 }
 
-export interface RunResult {
+export interface Hit {
+  watch: number;
   value: number;
+}
+
+export interface Paused extends Hit {
+  hit: number;
+}
+
+export interface RunResult {
+  value: number | null;
   logs: number[];
+  hits: Hit[];
   ms: number;
   truncated: boolean;
+  stopped: boolean;
+}
+
+export interface Run {
+  done: Promise<RunResult>;
+  resume: () => void;
+  stop: () => void;
+  /** False when the page is not cross-origin isolated: breakpoints still
+   *  report, but the run cannot be held at one. */
+  canPause: boolean;
+}
+
+// Blocking the worker needs a buffer both threads can see, and that needs the
+// page to be cross-origin isolated.  Vite sends the headers for it; a build
+// served without them still runs, it just cannot stop.
+export function canPause(): boolean {
+  return (
+    typeof SharedArrayBuffer !== "undefined" && !!globalThis.crossOriginIsolated
+  );
+}
+
+function sharedFlag(): Int32Array | undefined {
+  return canPause() ? new Int32Array(new SharedArrayBuffer(4)) : undefined;
 }
 
 // The graph can describe a loop that never ends, so the module runs in a
-// worker that can be killed rather than on the UI thread.
-export function run(
+// worker that can be killed rather than on the UI thread.  The clock is
+// stopped while a breakpoint holds the run, or thinking at one would count as
+// hanging.
+export function start(
   wasm: Uint8Array,
   args: number[],
+  onPause: (p: Paused) => void,
   timeoutMs = 3000,
-): Promise<RunResult> {
-  return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./runner.ts", import.meta.url), {
-      type: "module",
-    });
-    const timer = setTimeout(() => {
-      worker.terminate();
-      reject(
-        new Error(
-          `${timeoutMs} ms を過ぎても終わりませんでした（止まらないループかもしれません）`,
-        ),
-      );
-    }, timeoutMs);
-    worker.onmessage = (e: MessageEvent) => {
-      clearTimeout(timer);
-      worker.terminate();
-      if (e.data.error) reject(new Error(e.data.error));
-      else resolve(e.data as RunResult);
-    };
-    worker.onerror = (e) => {
-      clearTimeout(timer);
-      worker.terminate();
-      reject(new Error(e.message));
-    };
-    // The bytes are copied rather than transferred: the caller keeps them for
-    // the hex dump.
-    worker.postMessage({ wasm, args });
+): Run {
+  const worker = new Worker(new URL("./runner.ts", import.meta.url), {
+    type: "module",
   });
+  const resume = sharedFlag();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settle: (r: RunResult) => void = () => {};
+  let fail: (e: Error) => void = () => {};
+
+  const done = new Promise<RunResult>((resolve, reject) => {
+    settle = resolve;
+    fail = reject;
+  });
+
+  const disarm = () => clearTimeout(timer);
+  const arm = () => {
+    disarm();
+    timer = setTimeout(() => {
+      worker.terminate();
+      fail(new Error(`Still running after ${timeoutMs} ms — the loop may never end`));
+    }, timeoutMs);
+  };
+
+  const wake = (how: number) => {
+    if (!resume) return;
+    Atomics.store(resume, 0, how);
+    Atomics.notify(resume, 0);
+    arm();
+  };
+
+  worker.onmessage = (e: MessageEvent) => {
+    const m = e.data;
+    if (m.type === "paused") {
+      disarm();
+      onPause(m as Paused);
+      return;
+    }
+    disarm();
+    worker.terminate();
+    if (m.type === "error") fail(new Error(m.error));
+    else
+      settle({
+        value: m.type === "done" ? m.value : null,
+        logs: m.logs ?? [],
+        hits: m.hits ?? [],
+        ms: m.ms ?? 0,
+        truncated: !!m.truncated,
+        stopped: m.type === "stopped",
+      });
+  };
+  worker.onerror = (e) => {
+    disarm();
+    worker.terminate();
+    fail(new Error(e.message));
+  };
+
+  arm();
+  // The bytes are copied rather than transferred: the caller keeps them for
+  // the hex dump.
+  worker.postMessage({ wasm, args, resume });
+
+  return {
+    done,
+    resume: () => wake(CONTINUE),
+    stop: () => {
+      if (resume) wake(STOP);
+      else {
+        disarm();
+        worker.terminate();
+        settle({
+          value: null,
+          logs: [],
+          hits: [],
+          ms: 0,
+          truncated: false,
+          stopped: true,
+        });
+      }
+    },
+    canPause: resume !== undefined,
+  };
 }
