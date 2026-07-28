@@ -102,7 +102,7 @@ let rec f p =
   | (Blue, Circle r) -> r
 in print_int (f (Red, Dot)); print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 Warning: this match is not exhaustive; no case matches (Blue, Dot)
 1
 ```
@@ -115,7 +115,7 @@ $ cat a.mml
 let rec f xs = match xs with [] -> 0 | x :: [] -> x in
 print_int (f [1]); print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 Warning: this match is not exhaustive; no case matches _ :: _ :: _
 1
 ```
@@ -132,7 +132,7 @@ let rec name c =
   | Blue -> 2
 in print_int (name Blue); print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 Warning: this match case is unused: Blue
 0
 ```
@@ -154,7 +154,7 @@ Warning: this match case is unused: Blue
 $ cat a.mml
 let rec f n = match n with 0 -> 10 | 1 -> 11 in print_int (f 0); print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 Warning: this match is not exhaustive; no case matches 2
 10
 ```
@@ -292,17 +292,17 @@ let join_of = Array.mapi (fun i _ -> if counts.(i) > 1 then Some (Ident.fresh "c
 関数が1つ生成され、呼び出しは3か所です。
 
 ```
-$ ./martenml -inline 0 -S score.mml | grep '\.globl'
+$ martenmlc -inline 0 score.mml | grep '\.globl'
 	.globl martenml_case_20_48       ← (_, Circle r) -> r * 100 の本体
 	.globl martenml_score_44
 	.globl martenml_main
 
-$ ./martenml -inline 0 -S score.mml | grep -n 'tail martenml_case_20_48'
+$ martenmlc -inline 0 score.mml | grep -n 'tail martenml_case_20_48'
 53:	tail martenml_case_20_48
 66:	tail martenml_case_20_48
 88:	tail martenml_case_20_48
 
-$ ./martenml -inline 0 -S score.mml | sed -n '/^martenml_case_20_48:/,/^$/p'
+$ martenmlc -inline 0 score.mml | sed -n '/^martenml_case_20_48:/,/^$/p'
 martenml_case_20_48:
 	li t0, 100
 	mul a0, a0, t0
@@ -342,7 +342,7 @@ martenml_case_20_48:
 $ cat a.mml
 let rec f n = match n with 0 -> 10 | 1 -> 11 in print_int (f 7); print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 Warning: this match is not exhaustive; no case matches 2
 martenml: match failure
 $ echo $?

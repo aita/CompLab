@@ -146,7 +146,7 @@ let a = id 1 in
 let b = id true in
 print_int (if b then a else 0); print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 1
 ```
 
@@ -190,7 +190,7 @@ let f = cell.(0) in
 print_int (f 42); print_newline ();
 print_int (if f true then 1 else 0); print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 a.mml:4:14: type error in a function application:
   expected: (int -> int)
   but got:  (bool -> 'a)
@@ -206,7 +206,7 @@ let f = fun x -> x in
 print_int (f 42); print_newline ();
 print_int (if f true then 1 else 0); print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 42
 1
 ```
@@ -240,7 +240,7 @@ let rec eq a b = a = b in
 print_int (if eq 1 2 then 1 else 0); print_newline ();
 print_int (if eq true false then 1 else 0); print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 a.mml:3:14: type error in a function application:
   expected: (int * int -> bool)
   but got:  (bool * bool -> 'a)
@@ -257,7 +257,7 @@ let a = (1, 2) in
 let b = (1, 2) in
 print_int (if a = b then 1 else 0); print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 a.mml:3:14: `=` cannot compare values of type (int * int).
 Only int, bool and unit compare as a single machine word.
 ```
@@ -301,7 +301,7 @@ module A = struct let rec id x = x + 0 end in
 module F (X : S) = struct let rec go n = X.id n end in
 module M = F (A) in print_int (M.go 1)
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 a.mml:4:0: type error in a signature:
   expected: ('a -> 'a)
   but got:  (int -> int)
@@ -321,7 +321,7 @@ module M = F (A) in
 let (a, b) = M.both "text" 7 in
 print_string a; print_char 32; print_int b; print_newline ()
 
-$ ./martenml a.mml
+$ martenmlc -run a.mml
 text 7
 ```
 
@@ -358,7 +358,7 @@ text 7
   and g y = (f 1, f true) in
   print_int 0; print_newline ()
 
-  $ ./martenml a.mml
+  $ martenmlc -run a.mml
   a.mml:2:16: type error in a function application:
     expected: (int -> int)
     but got:  (bool -> 'a)

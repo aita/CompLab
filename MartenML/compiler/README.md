@@ -1,21 +1,38 @@
 # MartenML
 
 A compiler from an ML-like language to RISC-V (RV64I/M), written in OCaml.
-Register allocation is by graph colouring.
+Register allocation is by graph colouring. There is a second back end that
+emits WebAssembly and needs none of that.
 
 ```
-dune build          # build the compiler
-dune test           # compile, link and run every example under qemu
-./martenml examples/tour.mml
+dune build                                   # build the compiler
+dune test                                    # every example on both back ends
+alias martenmlc=$PWD/_build/default/src/martenmlc.exe
+
+martenmlc examples/tour.mml                  # print the assembly
+martenmlc -run examples/tour.mml             # or run it
+martenmlc -run -target wasm examples/tour.mml
 ```
 
-`./martenml` builds the program, links it against `runtime/martenml_runtime.c` with
-`riscv64-linux-gnu-gcc`, and runs it under `qemu-riscv64`. `./martenml -S` prints
-the assembly instead.
+Without `-run` the compiler writes its output and stops: RV64 assembly, or
+WebAssembly text with `-target wasm`. With `-run` it also drives the tools that
+turn that into something runnable — `riscv64-linux-gnu-gcc` and `qemu-riscv64`
+for RISC-V, `wat2wasm` and node for wasm — in a scratch directory it throws away
+afterwards. Both paths are in `src/toolchain.ml`, and the golden tests use the
+same code. See [Two back ends](#two-back-ends) below and
+[the write-up](../doc/wasm.md).
+
+Run it from `compiler/`, or say where the runtime is with `-runtime`.
 
 ```
 martenmlc [options] <file.mml>
-  -o <file>          write the assembly here (default: stdout)
+  -o <file>          write the output here (default: stdout)
+  -target riscv|wasm emit RV64 assembly, or WebAssembly text (default: riscv)
+  -run               assemble, link and run it instead of writing it out
+  -runtime <file>    the runtime: linked in for riscv, copied into the module
+                     for wasm (default: runtime/martenml_runtime.c or .wat)
+  -host <file.mjs>   what runs a wasm module under WASI
+                     (default: runtime/martenml_wasm.mjs)
   -nregs <n>         allocate out of n registers only (10..25, default 25)
   -O <n>             run the optimizer n times (default 3)
   -inline <n>        inline functions of at most n nodes (0 disables, default 12)
@@ -49,6 +66,7 @@ output that was actually produced.
 | [../doc/selection.md](../doc/selection.md) | 線形IR、制御フローグラフ、命令選択、生存解析 |
 | [../doc/regalloc.md](../doc/regalloc.md) | レジスタ割り付け。干渉グラフの実例、融合・スピル・callee-saved |
 | [../doc/emit.md](../doc/emit.md) | のぞき穴最適化、アセンブリ出力、呼び出し規約、実行時表現 |
+| [../doc/wasm.md](../doc/wasm.md) | もう1つのバックエンド。WebAssembly へ、木のまま |
 | [../doc/language.md](../doc/language.md) | 付録A. 言語リファレンス — 書ける形の一覧 |
 
 ## Two forms
@@ -212,6 +230,7 @@ around a condition, commas where it has spaces.
 | **register allocation** | **`regalloc.ml`** | **graph colouring with iterated coalescing** |
 | peephole | `peephole.ml` | local rewrites once registers are assigned |
 | assembly | `emit.ml` | frame layout and instruction printing |
+| — or WebAssembly | `wasm.ml` | the closure-converted tree straight into `.wat`, skipping all six rows above |
 
 `bitset.ml` holds the sets the allocator lives on -- the worklists and the
 interference itself, a bit per pair. It is the one data-structure choice that
@@ -250,6 +269,58 @@ free.
 The heap is a bump allocator in the runtime and nothing is freed. A collector
 would need the compiler to describe where the pointers are, which is a different
 project.
+
+## Two back ends
+
+`wasm.ml` leaves the pipeline where `linear.ml` picks it up, and the six passes
+after that point — linear IR, instruction selection, liveness, register
+allocation, peephole, assembly, nine files and 2224 lines — become one file of
+515. Not because anything was given up, but because the work is not there to do:
+
+- **The tree stays a tree.** `linear.ml` exists because machine code is a graph
+  and closure-converted code is not. WebAssembly's control flow is structured,
+  so an `if` with two arms is already what the target spells. No control-flow
+  graph, no blocks, no acyclicity check — and the join that `linear.ml` calls
+  out as the reason its IR is not SSA is just `if (result i64)`.
+- **The engine allocates the registers.** A wasm function declares as many
+  locals as it likes, so every value closure conversion named becomes a local
+  and the interference graph is never built.
+
+Three things do have to be spelled differently. A closure's first word is a
+slot in the module's function table rather than an address, because wasm
+functions do not live in linear memory. Every function takes its environment as
+an extra first parameter, because `call_indirect` checks the callee's whole
+type and the call site cannot know whether what it reaches captures anything —
+the RISC-V back end hands the closure over in `t6` and so leaves the parameter
+list alone. And there is no linker: `runtime/martenml_runtime.wat` is a
+fragment, and `-runtime` says where to copy it from.
+
+Everything below that is unchanged. Values are the same 64-bit words with the
+same block layouts, in linear memory instead of a process heap.
+
+```
+$ martenmlc -target wasm examples/sum.mml
+  (func $martenml_sum_18 (param $wasm.env i64) (param $l.19 i64) (result i64)
+    ...
+    i64.eq
+    if (result i64)
+      i64.const 0
+    else
+      ...
+      call $martenml_sum_18
+```
+
+The wasm build has no golden files of its own: all eighteen programs are
+compared against the same `.expected` files the RISC-V build uses, output,
+stderr and exit status alike. It needs `wat2wasm` (wabt) and `node`; tail calls
+are `return_call`, so `--enable-tail-call` is not optional.
+
+Two things genuinely differ, and both are in [the write-up](../doc/wasm.md).
+Recursion that is *not* a tail call runs out of stack sooner — the host decides
+that, and V8's default leaves room for only a few thousand frames, which is why
+the driver raises `--stack-size`. And dividing the most negative integer by −1
+answers that integer on RISC-V and traps on wasm; the two specifications pick
+different answers for a value that does not fit.
 
 ### Calling convention
 
@@ -359,7 +430,7 @@ save and restore `s0`. Two values ended up in memory: `v0`, which is the saved
 function that needs nothing, the whole thing collapses:
 
 ```
-$ echo 'let rec f x = x + 1 in print_int (f 1)' > add.mml && ./martenml -S add.mml
+$ echo 'let rec f x = x + 1 in print_int (f 1)' > add.mml && martenmlc -inline 0 add.mml
 martenml_f_4:
 	addi a0, a0, 1
 	ret
@@ -371,7 +442,7 @@ different scopes do not collide. The listings above drop it for readability.)
 `--dump-regalloc` reports what happened:
 
 ```
-$ ./martenml --dump-regalloc examples/pressure.mml
+$ martenmlc --dump-regalloc -o /dev/null examples/pressure.mml
 martenml_blend:      1 round(s), 27/27 moves coalesced, 0 spill slot(s)
 martenml_pressure:   2 round(s), 46/75 moves coalesced, 16 spill slot(s) [spilled ...]
 martenml_accumulate: 2 round(s), 42/44 moves coalesced, 2 spill slot(s) [spilled ...]
@@ -451,11 +522,14 @@ follows most closely:
 
 ```
 src/          the compiler
-runtime/      martenml_runtime.c: entry point, heap, primitives
+  toolchain.ml    the assembler, the linker and the machine that runs the result
+runtime/      martenml_runtime.c:   entry point, heap, primitives
+              martenml_runtime.wat: the same, for wasm, copied into every module
+              martenml_wasm.mjs:    runs a compiled module on node under WASI
 examples/     programs, all run by the test suite
 tests/        golden tests, including the compile-error messages
+  runner.ml       drives them; the only program in there besides walkthrough.ml
 ../doc/       one write-up per pass, and the graphviz sources for their figures
-martenml      compile + link + run under qemu
 ```
 
 The figures are generated: edit `../doc/figures/*.dot` and run

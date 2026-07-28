@@ -20,6 +20,7 @@ digraph pipeline {
   virtual [label = "RISC-V 制御フローグラフ\n無制限の仮想レジスタ"];
   machine [label = "RISC-V 制御フローグラフ\n物理レジスタ"];
   asm     [label = "a.s", fillcolor = "#ffffff"];
+  wat     [label = "a.wat", fillcolor = "#ffffff"];
 
   ml    -> syntax [label = "  lexer.mll\n  parser.mly"];
   brace -> syntax [label = "  brace_lexer.mll\n  brace_parser.mly\n  brace_build.ml"];
@@ -36,6 +37,9 @@ optim.ml    伝播・除去\l  \
 closure.ml  クロージャ変換\l"];
 
   closure -> graph_ir [label = "  linear.ml  木をブロックに"];
+
+  // WebAssembly は構造化制御フローと無制限のローカルを持つので、木のまま出せる。
+  closure -> wat [label = "  wasm.ml  木のまま\l  グラフにも\l  レジスタにも\l  しない\l"];
 
   graph_ir -> virtual [label = "  selection.ml  命令選択"];
 

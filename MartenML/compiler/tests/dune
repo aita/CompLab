@@ -1,12 +1,21 @@
-; Golden tests.  Each program is compiled, linked against the runtime, and run
-; under qemu twice -- with the full register file and with `-nregs 10` -- and
-; the two runs must agree before the output is compared with the .expected
-; file.  Update them all with `dune promote` after `dune test`.
+; Golden tests, driven by runner.ml.  Each program is compiled, linked against
+; the runtime, and run under qemu twice -- with the full register file and with
+; `-nregs 10` -- and the two runs must agree before the output is compared with
+; the .expected file.  Update them all with `dune promote` after `dune test`.
+
+; The runner, and the worked example below, are the two things in this
+; directory that are programs rather than rules.
+(executable
+ (name runner)
+ (modules runner)
+ (libraries martenml)
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
 
 (rule
  (with-stdout-to
   tour.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/tour.mml})))
 
 (rule
@@ -17,7 +26,7 @@
 (rule
  (with-stdout-to
   tree.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/tree.mml})))
 
 (rule
@@ -28,7 +37,7 @@
 (rule
  (with-stdout-to
   list.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/list.mml})))
 
 (rule
@@ -39,7 +48,7 @@
 (rule
  (with-stdout-to
   queens.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/queens.mml})))
 
 (rule
@@ -50,7 +59,7 @@
 (rule
  (with-stdout-to
   sort.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/sort.mml})))
 
 (rule
@@ -61,7 +70,7 @@
 (rule
  (with-stdout-to
   pressure.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/pressure.mml})))
 
 (rule
@@ -72,7 +81,7 @@
 (rule
  (with-stdout-to
   patterns.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:cases/patterns.mml})))
 
 (rule
@@ -83,7 +92,7 @@
 (rule
  (with-stdout-to
   closures.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:cases/closures.mml})))
 
 (rule
@@ -94,7 +103,7 @@
 (rule
  (with-stdout-to
   codegen.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:cases/codegen.mml})))
 
 (rule
@@ -105,7 +114,7 @@
 (rule
  (with-stdout-to
   lists.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/lists.mml})))
 
 (rule
@@ -116,7 +125,7 @@
 (rule
  (with-stdout-to
   strings.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/strings.mml})))
 
 (rule
@@ -127,7 +136,7 @@
 (rule
  (with-stdout-to
   polymorphism.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:cases/polymorphism.mml})))
 
 (rule
@@ -138,7 +147,7 @@
 (rule
  (with-stdout-to
   modules.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/modules.mml})))
 
 (rule
@@ -149,7 +158,7 @@
 (rule
  (with-stdout-to
   functors.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/functors.mml})))
 
 (rule
@@ -163,7 +172,7 @@
 (rule
  (with-stdout-to
   sum.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/sum.mml})))
 
 (rule
@@ -176,7 +185,7 @@
 (rule
  (with-stdout-to
   brace.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:../examples/tour.mmb})))
 
 (rule
@@ -187,7 +196,7 @@
 (rule
  (with-stdout-to
   mutual_closures.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:cases/mutual_closures.mml})))
 
 (rule
@@ -201,7 +210,7 @@
 (rule
  (with-stdout-to
   match_failure.out
-  (run sh %{dep:run.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} riscv %{exe:../src/martenmlc.exe}
     %{dep:../runtime/martenml_runtime.c} %{dep:cases/match_failure.mml})))
 
 (rule
@@ -215,7 +224,7 @@
 (rule
  (with-stdout-to
   errors.out
-  (run sh %{dep:errors.sh} %{exe:../src/martenmlc.exe}
+  (run %{exe:runner.exe} errors %{exe:../src/martenmlc.exe}
     %{dep:errors/branches.mml} %{dep:errors/compare_string.mml}
     %{dep:errors/compare_tuple.mml} %{dep:errors/list_element_types.mml}
     %{dep:errors/constructor_arity.mml} %{dep:errors/duplicate_pattern_var.mml}
@@ -324,3 +333,226 @@
  (alias runtest)
  (action
   (diff cfg.expected cfg.out)))
+
+; ---------------------------------------------------------------- WebAssembly
+;
+; The same programs through the other back end, compared against the same
+; golden files.  Nothing here is wasm-specific: if the two back ends agree on
+; every one of these, they agree.  Needs wat2wasm (wabt) and node.
+
+(rule
+ (with-stdout-to
+  tour.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/tour.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.wasm.out)))
+
+(rule
+ (with-stdout-to
+  brace.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/tour.mmb})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff brace.expected brace.wasm.out)))
+
+(rule
+ (with-stdout-to
+  tree.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/tree.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tree.expected tree.wasm.out)))
+
+(rule
+ (with-stdout-to
+  list.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/list.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff list.expected list.wasm.out)))
+
+(rule
+ (with-stdout-to
+  lists.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/lists.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff lists.expected lists.wasm.out)))
+
+(rule
+ (with-stdout-to
+  queens.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/queens.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff queens.expected queens.wasm.out)))
+
+(rule
+ (with-stdout-to
+  sort.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/sort.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff sort.expected sort.wasm.out)))
+
+(rule
+ (with-stdout-to
+  pressure.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/pressure.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff pressure.expected pressure.wasm.out)))
+
+(rule
+ (with-stdout-to
+  strings.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/strings.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff strings.expected strings.wasm.out)))
+
+(rule
+ (with-stdout-to
+  modules.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/modules.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff modules.expected modules.wasm.out)))
+
+(rule
+ (with-stdout-to
+  functors.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/functors.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff functors.expected functors.wasm.out)))
+
+(rule
+ (with-stdout-to
+  sum.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:../examples/sum.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff sum.expected sum.wasm.out)))
+
+(rule
+ (with-stdout-to
+  patterns.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:cases/patterns.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff patterns.expected patterns.wasm.out)))
+
+(rule
+ (with-stdout-to
+  closures.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:cases/closures.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff closures.expected closures.wasm.out)))
+
+(rule
+ (with-stdout-to
+  codegen.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:cases/codegen.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff codegen.expected codegen.wasm.out)))
+
+(rule
+ (with-stdout-to
+  polymorphism.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:cases/polymorphism.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff polymorphism.expected polymorphism.wasm.out)))
+
+(rule
+ (with-stdout-to
+  mutual_closures.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:cases/mutual_closures.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff mutual_closures.expected mutual_closures.wasm.out)))
+
+(rule
+ (with-stdout-to
+  match_failure.wasm.out
+  (run %{exe:runner.exe} wasm %{exe:../src/martenmlc.exe}
+    %{dep:../runtime/martenml_runtime.wat} %{dep:../runtime/martenml_wasm.mjs}
+    %{dep:cases/match_failure.mml})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff match_failure.expected match_failure.wasm.out)))
+

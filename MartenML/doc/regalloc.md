@@ -375,7 +375,7 @@ martenml_sum_18: 2 round(s), 41/41 moves coalesced, 1 spill slot(s) [spilled v16
 
 ```
 $ echo 'let rec f a b = a * b + a in print_int (f 2 3)' > /tmp/leaf.mml
-$ ./martenml -inline 0 -S /tmp/leaf.mml
+$ martenmlc -inline 0 /tmp/leaf.mml
 martenml_f_5:
 	mul t0, a0, a1
 	add a0, t0, a0
@@ -502,7 +502,7 @@ martenml_main:
 成り立たなくなるので常に残し、削るのはそれ以外です（下限10本）。
 
 これは意地悪のためではなくテストのためにあります。**すべての例題は25本と10本の両方でビルドされ、
-出力が一致することを要求されます**（`tests/run.sh`）。スピル処理を検査する手段がこれです。
+出力が一致することを要求されます**（`tests/runner.ml`）。スピル処理を検査する手段がこれです。
 
 `sum` は3本しか要らないので、10本に絞っても生成コードは1バイトも変わりません。変わるのは
 `main` のほうです。
@@ -541,7 +541,7 @@ martenml_main:
 呼び出しをまたいで生き続けるように書いてあります。
 
 ```
-$ ./martenml --dump-regalloc examples/pressure.mml
+$ martenmlc --dump-regalloc -o /dev/null examples/pressure.mml
 martenml_blend_49:       1 round(s), 27/27 moves coalesced, 0 spill slot(s)
 martenml_pressure_60:    2 round(s), 46/75 moves coalesced, 16 spill slot(s)
 martenml_accumulate_108: 2 round(s), 42/44 moves coalesced, 2 spill slot(s)

@@ -145,7 +145,7 @@ true  false
 コンパイルエラーになります。
 
 ```
-$ echo 'print_int (if "a" = "b" then 1 else 0)' > /tmp/a.mml && ./martenml -S /tmp/a.mml
+$ echo 'print_int (if "a" = "b" then 1 else 0)' > /tmp/a.mml && martenmlc /tmp/a.mml
 /tmp/a.mml:1:16: `=` cannot compare strings; use `String.equal`
 ```
 

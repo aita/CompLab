@@ -4,6 +4,9 @@ ML ふうの言語を RISC-V（RV64I/M）へコンパイルする処理系の解
 どの章も**実際に動かした出力**を載せています。ダンプも警告も測定値も、手で書いたものは
 ありません。
 
+対象はもう1つあります。WebAssembly です。**構造化制御フローと無制限のローカルを持つ対象
+では、7章から9章がまるごと要らなくなります** — その話が10章です。
+
 コンパイラそのものは[コンパイラの README](../compiler/README.md) に、言語の仕様と使い方が
 まとまっています。
 
@@ -31,6 +34,12 @@ ML ふうの言語を RISC-V（RV64I/M）へコンパイルする処理系の解
 | 8 | [レジスタ割り付け](regalloc.md) | `regalloc.ml`・`bitset.ml`。グラフ彩色と反復融合。この処理系の中心 |
 | 9 | [のぞき穴最適化と出力](emit.md) | `peephole.ml`・`emit.ml`。呼び出し規約と実行時表現も |
 
+### もう1つの対象
+
+| | | |
+|---|---|---|
+| 10 | [もう1つのバックエンド](wasm.md) | `wasm.ml`。WebAssembly へ。7〜9章が要らなくなる理由 |
+
 ### 付録
 
 | | | |
@@ -50,19 +59,24 @@ ML ふうの言語を RISC-V（RV64I/M）へコンパイルする処理系の解
 扱っています。実例（§7）は1つの関数を8つの値・3レジスタで最後まで追ったもので、
 `tests/walkthrough.exe` の出力から起こしてあります。
 
+**後半が何のためにあるのかを知りたいなら** [10章](wasm.md)を7章の直後に読むのも手です。
+7〜9章が要らない対象を並べて見ると、それぞれのパスが何を買っていたのかがはっきりします。
+
 **手元で確かめるなら** 各章のダンプは次のコマンドで再現できます。
 
 ```sh
-./martenml -S examples/sum.mml                            # 最終アセンブリ
-martenmlc --dump-knf      -o /dev/null examples/sum.mml   # K正規形（5章）
-martenmlc --dump-closure  -o /dev/null examples/sum.mml   # クロージャ変換後（6章）
-martenmlc --dump-linear   -o /dev/null examples/sum.mml   # 線形IR（7章）
-martenmlc --dump-riscv    -o /dev/null examples/sum.mml   # 割り付け前（7章）
-martenmlc --dump-regalloc -o /dev/null examples/sum.mml   # 割り付けの結果（8章）
-martenmlc --check-knf     -o /dev/null examples/sum.mml   # 正規形の検査（5章）
-martenmlc --check-linear  -o /dev/null examples/sum.mml   # 線形IRの検査（7章）
-martenmlc --check-cfg     -o /dev/null examples/sum.mml   # 閉路がないことの検査（7章）
-dune exec tests/walkthrough.exe                   # 割り付けを1手ずつ（8章 §7）
+martenmlc                 examples/sum.mml               # 最終アセンブリ（9章）
+martenmlc -target wasm    examples/sum.mml               # WebAssembly テキスト（10章）
+martenmlc -run            examples/sum.mml               # 走らせる
+martenmlc --dump-knf      -o /dev/null examples/sum.mml  # K正規形（5章）
+martenmlc --dump-closure  -o /dev/null examples/sum.mml  # クロージャ変換後（6章）
+martenmlc --dump-linear   -o /dev/null examples/sum.mml  # 線形IR（7章）
+martenmlc --dump-riscv    -o /dev/null examples/sum.mml  # 割り付け前（7章）
+martenmlc --dump-regalloc -o /dev/null examples/sum.mml  # 割り付けの結果（8章）
+martenmlc --check-knf     -o /dev/null examples/sum.mml  # 正規形の検査（5章）
+martenmlc --check-linear  -o /dev/null examples/sum.mml  # 線形IRの検査（7章）
+martenmlc --check-cfg     -o /dev/null examples/sum.mml  # 閉路がないことの検査（7章）
+dune exec tests/walkthrough.exe                          # 割り付けを1手ずつ（8章 §7）
 ```
 
 ## 各章の作り
