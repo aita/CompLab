@@ -167,6 +167,25 @@
  (action
   (diff state.ir.expected state.ir)))
 
+; The one thing the host hands a graph: the time the run started, asked for
+; once however many times it is read.
+(rule
+ (target time.ir)
+ (action
+  (with-stdout-to
+   time.ir
+   (run ../bin/ferretc.exe --emit ir %{dep:time.json}))))
+
+(rule
+ (target time.wasm)
+ (action
+  (run ../bin/ferretc.exe %{dep:time.json} -o time.wasm)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff time.ir.expected time.ir)))
+
 ; The node catalogue the editor draws from: what the palette offers, what
 ; ports each kind has, and what the inspector puts in its form.
 (rule
@@ -229,6 +248,7 @@
   typing.wasm
   formula.wasm
   nested.wasm
-  state.wasm)
+  state.wasm
+  time.wasm)
  (action
   (run node run_wasm.mjs)))

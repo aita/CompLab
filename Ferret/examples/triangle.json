@@ -8,13 +8,7 @@
         "x": 0,
         "y": 0
       },
-      "data": {
-        "params": [
-          {
-            "name": "n"
-          }
-        ]
-      }
+      "data": {}
     },
     {
       "id": "rows",
@@ -26,7 +20,8 @@
       "data": {
         "name": "r",
         "values": {
-          "first": 1
+          "first": 1,
+          "last": 4
         }
       }
     },
@@ -134,13 +129,6 @@
       "sourceHandle": "done",
       "target": "fin",
       "targetHandle": "in"
-    },
-    {
-      "id": "p",
-      "source": "start",
-      "sourceHandle": "var:n",
-      "target": "rows",
-      "targetHandle": "last"
     }
   ]
 }

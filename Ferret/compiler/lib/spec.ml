@@ -131,11 +131,10 @@ let catalogue : t list =
       color = "#12b76a";
       category = "Flow";
       hint =
-        "Where the flow begins. Its inputs are the exported function's \
-         parameters.";
+        "Where the flow begins. It hands out one thing: when the run started, \
+         in milliseconds, from the host. A graph takes no arguments.";
       exec_out = next;
-      data = [ ("params", `List [ `Assoc [ ("name", `String "n") ] ]) ];
-      fields = [ Names { key = "params"; label = "Inputs"; item = "input" } ];
+      outputs = [ num "time" "started at" ];
       unique = true;
     };
     {
@@ -411,23 +410,6 @@ let describe ~kind ~(data : Yojson.Safe.t) : described =
   in
   let name_field default = Graph.string_field n "name" ~default in
   match kind with
-  | "start" ->
-      (* Each input the start node declares is an output port to wire from. *)
-      let params =
-        match Graph.node_data n "params" with
-        | `List xs ->
-            List.filter_map
-              (function
-                | `Assoc _ as p -> (
-                    match Graph.member "name" p with
-                    | `String "" | `Null -> None
-                    | `String name -> Some (num ("var:" ^ name) name)
-                    | _ -> None)
-                | _ -> None)
-              xs
-        | _ -> []
-      in
-      { plain with d_outputs = params }
   | "counter" ->
       (* Two of them in a row both saying "Counter" is what makes a loop look
          like ceremony; the name is the thing that tells them apart. *)

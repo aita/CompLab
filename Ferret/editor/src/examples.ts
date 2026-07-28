@@ -20,7 +20,7 @@ export function blank(): Example["graph"] & { name: string } {
         id: "start",
         type: "start",
         position: { x: 0, y: 0 },
-        data: { params: [{ name: "n" }] },
+        data: {},
       },
       {
         id: "end",

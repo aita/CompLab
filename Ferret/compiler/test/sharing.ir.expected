@@ -1,7 +1,7 @@
-fun main(n) -> f64 {
-  var b0_value : float = 0
-  var b1_value : float = 0
-  b0_value = (n + n)
+fun main() -> f64 {
+  var b0_value : int = 0
+  var b1_value : int = 0
+  b0_value = (2 + 2)
   b1_value = (b0_value + b0_value)
-  return (b1_value + b1_value)
+  return float((b1_value + b1_value))
 }

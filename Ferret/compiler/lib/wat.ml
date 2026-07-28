@@ -140,6 +140,7 @@ let rec expr env e =
       expr env b;
       expr env c;
       line env "select"
+  | Now -> line env "call $now"
   | Rand (lo, hi) ->
       let parked =
         if Emit.is_atom lo then None else Some (take_scratch env 1)
@@ -231,14 +232,14 @@ let of_func (f : func) : string =
   in
   let names =
     Array.of_list
-      (List.map (fun n -> "$" ^ n) (f.params @ List.map fst f.vars)
+      (List.map (fun n -> "$" ^ n) (List.map fst f.vars)
       @ List.map fst scratch)
   in
   let env =
     {
       names;
       ty;
-      scratch_next = List.length f.params + List.length f.vars;
+      scratch_next = List.length f.vars;
       labels = [];
       b = Buffer.create 512;
       indent = 0;
@@ -250,12 +251,8 @@ let of_func (f : func) : string =
       line env "(import \"env\" \"random\" (func $random (result f64)))";
       line env
         "(import \"env\" \"watch\" (func $watch (param i32) (param f64) (result f64)))";
-      let params =
-        String.concat " "
-          (List.map (fun p -> Printf.sprintf "(param $%s f64)" p) f.params)
-      in
-      line env "(func $main (export \"main\") %s(result f64)"
-        (if params = "" then "" else params ^ " ");
+      line env "(import \"env\" \"now\" (func $now (result f64)))";
+      line env "(func $main (export \"main\") (result f64)";
       nested env (fun () ->
           List.iter (fun (v, t) -> line env "(local $%s %s)" v (kind t)) f.vars;
           List.iter (fun (n, t) -> line env "(local %s %s)" n (kind t)) scratch;

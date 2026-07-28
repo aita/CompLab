@@ -7,7 +7,6 @@ export const CONTINUE = 1;
 export const STOP = 2;
 export interface RunRequest {
   wasm: Uint8Array;
-  args: number[];
   /** Absent when the page is not cross-origin isolated. */
   resume?: Int32Array;
 }

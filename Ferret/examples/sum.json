@@ -8,13 +8,7 @@
         "x": 0,
         "y": 40
       },
-      "data": {
-        "params": [
-          {
-            "name": "n"
-          }
-        ]
-      }
+      "data": {}
     },
     {
       "id": "cond",
@@ -71,7 +65,10 @@
         "y": 300
       },
       "data": {
-        "op": "le"
+        "op": "le",
+        "values": {
+          "b": 100
+        }
       }
     }
   ],
@@ -138,13 +135,6 @@
       "sourceHandle": "value",
       "target": "done",
       "targetHandle": "value"
-    },
-    {
-      "id": "p",
-      "source": "start",
-      "sourceHandle": "var:n",
-      "target": "test",
-      "targetHandle": "b"
     }
   ]
 }

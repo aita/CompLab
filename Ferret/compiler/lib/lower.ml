@@ -32,7 +32,8 @@ type ctx = {
   slots : (string, int) Hashtbl.t;  (* internal key -> local index *)
   used : (string, unit) Hashtbl.t;  (* display names already taken *)
   fanout : (string, int) Hashtbl.t;  (* "node\000port" -> how many edges leave *)
-  mutable params : string list;
+  (* The one thing the host gives a graph, and only if it is asked for. *)
+  mutable wants_time : bool;
   mutable vars : (string * vtype) list;
   mutable errs : Graph.error list;  (* collected, reported all at once *)
   active : (string, unit) Hashtbl.t;  (* data nodes on the current path *)
@@ -153,42 +154,6 @@ let coerce ctx (e, ty) want =
     ctx.too_narrow <- true;
     Int 0)
 
-(* ------------------------------------------------------- declared names *)
-
-let name_of_entry = function
-  | `String s -> Some s
-  | `Assoc _ as j -> (
-      match Graph.member "name" j with `String s -> Some s | _ -> None)
-  | _ -> None
-
-let declared_names (n : Graph.node) key =
-  match Graph.node_data n key with
-  | `List items ->
-      List.filter_map
-        (fun j -> match name_of_entry j with Some "" | None -> None | s -> s)
-        items
-  | _ -> []
-
-let check_names ctx (n : Graph.node) key what =
-  let items =
-    match Graph.node_data n key with
-    | `List items -> items
-    | `Null -> []
-    | _ ->
-        complain ctx ~node:n.id "the %s of this node are not a list" what;
-        []
-  in
-  let seen = Hashtbl.create 8 in
-  List.iter
-    (fun j ->
-      match name_of_entry j with
-      | Some "" | None -> complain ctx ~node:n.id "one of the %s has no name" what
-      | Some s ->
-          if Hashtbl.mem seen s then
-            complain ctx ~node:n.id "%s is declared twice" s
-          else Hashtbl.replace seen s ())
-    items
-
 (* ---------------------------------------------------------------- data *)
 
 let binop_of_string = function
@@ -237,11 +202,6 @@ let binop_of_string_symbol = function
   | "%" -> Some Mod
   | _ -> None
 
-let after_colon port =
-  match String.index_opt port ':' with
-  | Some i -> String.sub port (i + 1) (String.length port - i - 1)
-  | None -> port
-
 let untrue = Cmp (Ne, Int 0, Int 0)
 
 let rec value ctx (e : Graph.edge) : expr * vtype =
@@ -255,7 +215,7 @@ let rec value ctx (e : Graph.edge) : expr * vtype =
         (Int 0, VInt))
       else (
         Hashtbl.replace ctx.active n.id ();
-        let built = value_of ctx n e.src_port in
+        let built = value_of ctx n in
         Hashtbl.remove ctx.active n.id;
         share ctx ~key ~from:n (watched ctx n built))
 
@@ -290,17 +250,17 @@ and watched ctx (n : Graph.node) (expr, ty) =
     let i = watch_point ctx ~node:n.id ~label:"value" in
     (Watch (i, ty, expr), ty)
 
-and value_of ctx (n : Graph.node) port : expr * vtype =
+(* Every node that carries a value carries exactly one, so which output port
+   was asked for does not come into it. *)
+and value_of ctx (n : Graph.node) : expr * vtype =
   let bad fmt = Printf.ksprintf (fun s -> complain ctx ~node:n.id "%s" s) fmt in
   match n.kind with
   | "start" ->
-      (* Whatever the host passes in arrives as an f64. *)
-      let name = after_colon port in
-      if List.mem name ctx.params then
-        (Local (slot ctx ~key:("\001" ^ name) ~display:name ~ty:VFloat), VFloat)
-      else (
-        bad "the start node has no input called %s" name;
-        (Int 0, VInt))
+      (* The start node hands out one thing: when the run began.  It is asked
+         for once and kept in a local, so every reader of it sees the same
+         moment -- the same rule that makes one Random node one draw. *)
+      ctx.wants_time <- true;
+      (Local (slot ctx ~key:"\001time" ~display:"time" ~ty:VFloat), VFloat)
   | "counter" | "forloop" | "state" ->
       (* Reading what a counter holds stops the backward walk: the value is a
          local, so the step may name the counter itself without that being a
@@ -796,7 +756,7 @@ let once (g : Graph.t) slot_ty =
       slots = Hashtbl.create 16;
       used = Hashtbl.create 16;
       fanout;
-      params = [];
+      wants_time = false;
       vars = [];
       errs = [];
       active = Hashtbl.create 16;
@@ -826,13 +786,6 @@ let once (g : Graph.t) slot_ty =
     match start with
     | None -> []
     | Some start ->
-        check_names ctx start "params" "inputs";
-        ctx.params <- declared_names start "params";
-        (* Parameters take the first local slots, in the order the start node
-           lists them, so the wasm signature matches the editor's form. *)
-        List.iter
-          (fun p -> ignore (slot ctx ~key:("\001" ^ p) ~display:p ~ty:VFloat))
-          ctx.params;
         ctx.vars <- [];
         (* Every slot is set up before anything runs, whichever loop it later
            turns out to sit inside.  One starting value may read another, so
@@ -906,7 +859,14 @@ let once (g : Graph.t) slot_ty =
                   u);
             starts @ tidy_block (structure ctx cfg))
   in
-  (ctx, { params = ctx.params; vars = ctx.vars; body })
+  (* Asking the host for the time is the first thing the module does, and only
+     if something reads it. *)
+  let body =
+    if ctx.wants_time then
+      Assign (Hashtbl.find ctx.slots "\001time", Now) :: body
+    else body
+  in
+  (ctx, { vars = ctx.vars; body })
 
 let func_of_graph (g : Graph.t) : func * (string * string) list =
   let slot_ty = Hashtbl.create 16 in

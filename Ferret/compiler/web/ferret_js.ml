@@ -29,9 +29,6 @@ let compile (source : Js.js_string Js.t) =
           ("wasm", inject (byte_array out.wasm));
           ("wat", inject (Js.string out.wat));
           ("ir", inject (Js.string out.ir));
-          ( "params",
-            inject
-              (Js.array (Array.of_list (List.map Js.string out.params))) );
           ( "watches",
             inject
               (Js.array

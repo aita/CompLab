@@ -1,9 +1,9 @@
-fun main(n) -> f64 {
+fun main() -> f64 {
   var r : int = 0
   var c : int = 0
   r = 1
   loop $1 {
-    if (float(r) <= n) {
+    if (r <= 4) {
       c = 1
       loop $2 {
         if (c <= r) {

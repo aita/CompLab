@@ -21,7 +21,7 @@ let is_atom = function Num _ | Int _ | Local _ -> true | _ -> false
    parks its argument, and a breakpoint on a whole number parks it while the
    host is handed a float copy. *)
 let rec scratch_of_expr ty = function
-  | Int _ | Num _ | Local _ -> []
+  | Int _ | Num _ | Local _ | Now -> []
   | Bin (Mod, l, r) ->
       (if ty l = VFloat then [ VFloat; VFloat ] else [])
       @ scratch_of_expr ty l @ scratch_of_expr ty r
@@ -50,7 +50,10 @@ and scratch_of_stmt ty = function
 let log_index = 0
 let random_index = 1
 let watch_index = 2
-let main_index = 3
+let now_index = 3
+
+(* The only function the module defines, so it comes after the imports. *)
+let main_index = 4
 
 type env = {
   ty : expr -> vtype;
@@ -174,6 +177,7 @@ let rec expr env b e =
       expr env b b';
       expr env b c;
       Wasm.op b Wasm.op_select
+  | Now -> Wasm.call b now_index
   | Rand (lo, hi) ->
       (* lo + random() * (hi - lo).  Only lo is read twice, so only lo has to
          be parked, and not even that when it is already a local or a
@@ -262,11 +266,7 @@ let runs types =
          | _ -> (1, v) :: acc)
        [] types)
 
-(* Parameters are f64 whatever the graph does with them: they come from the
-   host, which has only one kind of number. *)
-let local_types (f : func) i =
-  let nparams = List.length f.params in
-  if i < nparams then VFloat else snd (List.nth f.vars (i - nparams))
+let local_types (f : func) i = snd (List.nth f.vars i)
 
 let module_of_func (f : func) : string =
   let ty = Ir.type_of (local_types f) in
@@ -274,7 +274,7 @@ let module_of_func (f : func) : string =
   let env =
     {
       ty;
-      scratch_next = List.length f.params + List.length f.vars;
+      scratch_next = List.length f.vars;
       labels = [];
     }
   in
@@ -283,11 +283,11 @@ let module_of_func (f : func) : string =
   (* A flow that never reaches an end node still has to leave a result. *)
   Wasm.f64_const code 0.;
   let locals = runs (List.map snd f.vars @ scratch) in
-  let main_type =
-    { Wasm.args = List.map (fun _ -> Wasm.F64) f.params; result = Some Wasm.F64 }
-  in
+  let main_type = { Wasm.args = []; result = Some Wasm.F64 } in
   let log_type = { Wasm.args = [ Wasm.F64 ]; result = None } in
   let random_type = { Wasm.args = []; result = Some Wasm.F64 } in
+  (* [now] has the same shape as [random], and is asked the same way: the host
+     is the only thing that knows. *)
   let watch_type =
     { Wasm.args = [ Wasm.I32; Wasm.F64 ]; result = Some Wasm.F64 }
   in
@@ -298,6 +298,7 @@ let module_of_func (f : func) : string =
         { Wasm.imp_module = "env"; imp_field = "log"; imp_type = 0 };
         { Wasm.imp_module = "env"; imp_field = "random"; imp_type = 1 };
         { Wasm.imp_module = "env"; imp_field = "watch"; imp_type = 2 };
+        { Wasm.imp_module = "env"; imp_field = "now"; imp_type = 1 };
       ]
     ~funcs:[ 3 ]
     ~exports:[ ("main", main_index) ]

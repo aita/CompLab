@@ -158,13 +158,4 @@ let () =
                    { "source": "c", "sourceHandle": "next",
                      "target": "e", "targetHandle": "in" } ] }|};
 
-  case "an unknown start input"
-    {|{ "nodes": [ { "id": "s", "type": "start",
-                     "data": { "params": [ { "name": "n" } ] } },
-                   { "id": "e", "type": "end", "data": {} } ],
-        "edges": [ { "source": "s", "sourceHandle": "next",
-                     "target": "e", "targetHandle": "in" },
-                   { "source": "s", "sourceHandle": "var:m",
-                     "target": "e", "targetHandle": "value" } ] }|};
-
   case "not JSON at all" {|{ "nodes": [ |}

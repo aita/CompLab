@@ -21,7 +21,6 @@ export type CompileResult =
       wasm: Uint8Array;
       wat: string;
       ir: string;
-      params: string[];
       watches: Watch[];
     }
   | { ok: false; errors: CompileError[] };
@@ -31,7 +30,6 @@ interface RawResult {
   wasm?: number[];
   wat?: string;
   ir?: string;
-  params?: string[];
   watches?: Watch[];
   errors?: { node: string | null; message: string }[];
 }
@@ -79,7 +77,6 @@ export function compile(graph: unknown): CompileResult {
     wasm: new Uint8Array(raw.wasm ?? []),
     wat: raw.wat ?? "",
     ir: raw.ir ?? "",
-    params: raw.params ?? [],
     watches: raw.watches ?? [],
   };
 }
@@ -130,7 +127,6 @@ function sharedFlag(): Int32Array | undefined {
 // hanging.
 export function start(
   wasm: Uint8Array,
-  args: number[],
   onPause: (p: Paused) => void,
   timeoutMs = 3000,
 ): Run {
@@ -192,7 +188,7 @@ export function start(
   arm();
   // The bytes are copied rather than transferred: the caller keeps them for
   // the hex dump.
-  worker.postMessage({ wasm, args, resume });
+  worker.postMessage({ wasm, resume });
 
   return {
     done,

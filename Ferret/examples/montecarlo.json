@@ -8,13 +8,7 @@
         "x": 0,
         "y": 40
       },
-      "data": {
-        "params": [
-          {
-            "name": "darts"
-          }
-        ]
-      }
+      "data": {}
     },
     {
       "id": "loop",
@@ -187,6 +181,17 @@
           "a": 4
         }
       }
+    },
+    {
+      "id": "darts",
+      "type": "const",
+      "position": {
+        "x": 0,
+        "y": 220
+      },
+      "data": {
+        "value": 2000
+      }
     }
   ],
   "edges": [
@@ -234,8 +239,8 @@
     },
     {
       "id": "e2",
-      "source": "start",
-      "sourceHandle": "var:darts",
+      "source": "darts",
+      "sourceHandle": "out",
       "target": "more",
       "targetHandle": "b"
     },
@@ -318,8 +323,8 @@
     },
     {
       "id": "e14",
-      "source": "start",
-      "sourceHandle": "var:darts",
+      "source": "darts",
+      "sourceHandle": "out",
       "target": "ratio",
       "targetHandle": "b"
     },

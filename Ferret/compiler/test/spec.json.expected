@@ -7,20 +7,13 @@
       "glyph": "▶",
       "color": "#12b76a",
       "category": "Flow",
-      "hint": "Where the flow begins. Its inputs are the exported function's parameters.",
+      "hint": "Where the flow begins. It hands out one thing: when the run started, in milliseconds, from the host. A graph takes no arguments.",
       "execIn": [],
       "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
       "inputs": [],
-      "outputs": [],
-      "data": { "params": [ { "name": "n" } ] },
-      "fields": [
-        {
-          "key": "params",
-          "label": "Inputs",
-          "kind": "names",
-          "itemLabel": "input"
-        }
-      ],
+      "outputs": [ { "id": "time", "label": "started at", "kind": "num" } ],
+      "data": {},
+      "fields": [],
       "entry": null,
       "variants": null,
       "unique": true

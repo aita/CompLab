@@ -1,11 +1,11 @@
-fun main(n) -> f64 {
+fun main() -> f64 {
   var run : int = 0
   var r : int = 0
   var c : int = 0
   run = 0
   r = 1
   loop $1 {
-    if (float(r) <= n) {
+    if (r <= 5) {
       run = 0
       c = 1
       loop $2 {

@@ -7,12 +7,17 @@
         "x": 0,
         "y": 0
       },
+      "data": {}
+    },
+    {
+      "id": "n",
+      "type": "const",
+      "position": {
+        "x": 0,
+        "y": 160
+      },
       "data": {
-        "params": [
-          {
-            "name": "n"
-          }
-        ]
+        "value": 5
       }
     },
     {
@@ -80,15 +85,15 @@
     },
     {
       "id": "e2",
-      "source": "start",
-      "sourceHandle": "var:n",
+      "source": "n",
+      "sourceHandle": "out",
       "target": "size",
       "targetHandle": "n"
     },
     {
       "id": "e3",
-      "source": "start",
-      "sourceHandle": "var:n",
+      "source": "n",
+      "sourceHandle": "out",
       "target": "band",
       "targetHandle": "n"
     },

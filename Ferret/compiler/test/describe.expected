@@ -1,12 +1,12 @@
 start     { "params": [ { "name": "n" }, { "name": "size" } ] }
   Start [▶]
   in   
-  out  var:n:n(num), var:size:size(num)
+  out  time:started at(num)
 
 start     { "params": [] }
   Start [▶]
   in   
-  out  
+  out  time:started at(num)
 
 counter   { "name": "total" }
   total [i]

@@ -7,13 +7,7 @@
         "x": 0,
         "y": 0
       },
-      "data": {
-        "params": [
-          {
-            "name": "n"
-          }
-        ]
-      }
+      "data": {}
     },
     {
       "id": "loop",
@@ -59,7 +53,10 @@
         "y": 0
       },
       "data": {
-        "op": "lt"
+        "op": "lt",
+        "values": {
+          "b": 3
+        }
       }
     }
   ],
@@ -112,13 +109,6 @@
       "sourceHandle": "value",
       "target": "done",
       "targetHandle": "value"
-    },
-    {
-      "id": "p",
-      "source": "start",
-      "sourceHandle": "var:n",
-      "target": "more",
-      "targetHandle": "b"
     }
   ]
 }

@@ -19,7 +19,6 @@ export default function RunPanel({
   const [result, setResult] = useState<RunResult | null>(null);
   const [paused, setPaused] = useState<Paused | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  const [args, setArgs] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [stepping, setStepping] = useState(false);
   const run = useRef<Run | null>(null);
@@ -59,15 +58,11 @@ export default function RunPanel({
     setFailure(null);
     setResult(null);
     setPaused(null);
-    const active = start(
-      build.wasm,
-      build.params.map((p) => Number(args[p] ?? 0)),
-      (p) => {
-        setPaused(p);
-        const w = build.ok ? build.watches[p.watch] : undefined;
-        if (w) onReveal(w.node);
-      },
-    );
+    const active = start(build.wasm, (p) => {
+      setPaused(p);
+      const w = build.ok ? build.watches[p.watch] : undefined;
+      if (w) onReveal(w.node);
+    });
     run.current = active;
     try {
       const finished = await active.done;
@@ -94,23 +89,10 @@ export default function RunPanel({
         Compiled — {compiled.wasm.length} bytes of wasm
       </div>
 
-      {compiled.params.length === 0 ? (
-        <p className="muted">The start node takes no inputs.</p>
-      ) : (
-        compiled.params.map((p) => (
-          <div className="field" key={p}>
-            <label>{p}</label>
-            <input
-              type="number"
-              step="any"
-              value={args[p] ?? ""}
-              placeholder="0"
-              disabled={busy}
-              onChange={(e) => setArgs({ ...args, [p]: e.target.value })}
-            />
-          </div>
-        ))
-      )}
+      <p className="muted">
+        A graph takes no arguments. The start node hands out the time the run
+        began; everything else it works out for itself.
+      </p>
 
       <div className="run-buttons">
         <button

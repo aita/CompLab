@@ -8,13 +8,7 @@
         "x": 0,
         "y": 40
       },
-      "data": {
-        "params": [
-          {
-            "name": "n"
-          }
-        ]
-      }
+      "data": {}
     },
     {
       "id": "cur",
@@ -24,7 +18,10 @@
         "y": 0
       },
       "data": {
-        "name": "cur"
+        "name": "cur",
+        "values": {
+          "initial": 27
+        }
       }
     },
     {
@@ -296,13 +293,6 @@
       "sourceHandle": "out",
       "target": "pick",
       "targetHandle": "b"
-    },
-    {
-      "id": "p",
-      "source": "start",
-      "sourceHandle": "var:n",
-      "target": "cur",
-      "targetHandle": "initial"
     }
   ]
 }

@@ -38,6 +38,8 @@ type expr =
   | Select of expr * expr * expr
   (* A number in [min, max), from the host. *)
   | Rand of expr * expr
+  (* When the run started, from the host.  Asked for once, at the entry. *)
+  | Now
   (* Hand the value to the host and carry on with it: a breakpoint.  The index
      is into the function's list of watch points. *)
   | Watch of int * vtype * expr
@@ -61,8 +63,9 @@ type stmt =
 and block = stmt list
 
 type func = {
-  params : string list;  (* locals 0 .. n-1, all f64 *)
-  vars : (string * vtype) list;  (* locals n .. n+m-1, zero initialised *)
+  (* A graph takes nothing: the only thing the host hands it is the time, and
+     it asks for that itself. *)
+  vars : (string * vtype) list;  (* the locals, zero initialised *)
   body : block;
 }
 
@@ -70,7 +73,7 @@ type func = {
    a type can be read straight back off the tree. *)
 let rec type_of locals = function
   | Int _ -> VInt
-  | Num _ | Widen _ | Rand _ -> VFloat
+  | Num _ | Widen _ | Rand _ | Now -> VFloat
   | Local i -> locals i
   | Bin ((Div | Min | Max), _, _) -> VFloat
   | Bin (_, a, _) -> type_of locals a
@@ -80,9 +83,7 @@ let rec type_of locals = function
   | Select (_, a, _) -> type_of locals a
   | Watch (_, t, _) -> t
 
-let local_name f i =
-  let np = List.length f.params in
-  if i < np then List.nth f.params i else fst (List.nth f.vars (i - np))
+let local_name f i = fst (List.nth f.vars i)
 
 let string_of_binop = function
   | Add -> "+"
@@ -132,6 +133,7 @@ let to_string f =
     | Select (c, a, b) ->
         Printf.sprintf "(if %s then %s else %s)" (expr c) (expr a) (expr b)
     | Rand (lo, hi) -> Printf.sprintf "random(%s, %s)" (expr lo) (expr hi)
+    | Now -> "now()"
     | Watch (i, _, e) -> Printf.sprintf "watch#%d(%s)" i (expr e)
   in
   let rec block ind stmts = List.iter (stmt ind) stmts
@@ -162,7 +164,7 @@ let to_string f =
         block (ind + 1) e;
         pr "%s}\n" pad
   in
-  pr "fun main(%s) -> f64 {\n" (String.concat ", " f.params);
+  pr "fun main() -> f64 {\n";
   List.iter
     (fun (v, t) ->
       pr "  var %s : %s = %s\n" v

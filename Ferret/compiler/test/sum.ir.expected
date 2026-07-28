@@ -1,10 +1,10 @@
-fun main(n) -> f64 {
+fun main() -> f64 {
   var total : int = 0
   var i : int = 0
   total = 0
   i = 1
   loop $1 {
-    if (float(i) <= n) {
+    if (i <= 100) {
       total = (total + i)
       i = (i + 1)
       br $1

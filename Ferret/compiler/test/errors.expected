@@ -34,9 +34,6 @@
 # a counter carrying the old mode
   c: a Counter adds its step to what it holds; a State node is the one that takes a value outright
 
-# an unknown start input
-  s: the start node has no input called m
-
 # not JSON at all
   the graph is not valid JSON: Line 1, bytes 12-13:
 Unexpected end of input

@@ -18,7 +18,7 @@ const HIT_LIMIT = 5000;
 class Stopped extends Error {}
 
 ctx.onmessage = async (e: MessageEvent<RunRequest>) => {
-  const { wasm, args, resume } = e.data;
+  const { wasm, resume } = e.data;
   const logs: number[] = [];
   const hits: { watch: number; value: number }[] = [];
   let truncated = false;
@@ -31,6 +31,9 @@ ctx.onmessage = async (e: MessageEvent<RunRequest>) => {
           else truncated = true;
         },
         random: () => Math.random(),
+        // What the start node hands out.  A wall-clock millisecond count,
+        // which is what a graph would want it for.
+        now: () => Date.now(),
         watch: (watch: number, value: number) => {
           if (hits.length < HIT_LIMIT) hits.push({ watch, value });
           // Without a shared buffer to wait on -- the page is not
@@ -48,7 +51,7 @@ ctx.onmessage = async (e: MessageEvent<RunRequest>) => {
     });
     const main = source.instance.exports.main as (...xs: number[]) => number;
     const started = performance.now();
-    const value = main(...args);
+    const value = main();
     ctx.postMessage({
       type: "done",
       value,
