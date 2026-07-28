@@ -30,7 +30,7 @@ let live_in_of_block (block : Riscv.block) live_out =
 
 (* Live-out sets for every block, keyed by label. *)
 let analyze (func : Riscv.func) =
-  let cfg = Cfg.build func in
+  let cfg = Riscv.cfg func in
   let order = List.map (Cfg.block cfg) cfg.Cfg.postorder in
   let live_out = Hashtbl.create 16 in
   let live_in = Hashtbl.create 16 in

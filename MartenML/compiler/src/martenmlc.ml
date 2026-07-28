@@ -100,7 +100,7 @@ let compile path =
          loop depth (doc/regalloc.md §10).  Nothing in the language can produce
          a loop inside a function -- a loop in the source is a recursive call,
          which leaves it -- and this is what says so out loud. *)
-      if !check_cfg && not (Cfg.is_acyclic (Cfg.build func)) then
+      if !check_cfg && not (Cfg.is_acyclic (Riscv.cfg func)) then
         failwith
           (Printf.sprintf "%s: the control-flow graph has a cycle" func.Riscv.name);
       Liveness.eliminate_dead_code func;
@@ -111,7 +111,7 @@ let compile path =
       (* Order the blocks so that terminators fall through where they can.
          After peephole, which is what threads the jumps and strands the
          blocks this drops. *)
-      Cfg.relayout func)
+      Riscv.relayout func)
     functions;
   let channel = if !output_file = "-" then stdout else open_out !output_file in
   Emit.program channel functions;

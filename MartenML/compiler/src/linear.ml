@@ -89,6 +89,14 @@ let successors = function
   | Branch (_, _, _, t, f) -> [ t; f ]
   | Return _ | Tail _ -> []
 
+(* Cfg is generic over the block type; these are the two things it needs to
+   walk this one. *)
+let cfg (f : func) =
+  Cfg.build
+    ~label:(fun (b : block) -> b.label)
+    ~successors:(fun (b : block) -> successors b.terminator)
+    f.blocks
+
 let defines = function
   | Let (x, _) -> [ x ]
   | Closures definitions -> List.map (fun (x, _, _) -> x) definitions
@@ -317,24 +325,17 @@ let check (f : func) =
   (* Every block has to be on some path from the entry.  A block with no way
      in is not wrong so much as a sign that the builder emitted one it then
      never jumped to, which is the kind of mistake that stays invisible until
-     the allocator reports a value live in a place it cannot be. *)
-  let index = Hashtbl.create 16 in
-  List.iteri (fun i (b : block) -> Hashtbl.replace index b.label i) f.blocks;
-  let blocks = Array.of_list f.blocks in
-  let seen = Array.make (Array.length blocks) false in
-  let rec visit i =
-    if not seen.(i) then begin
-      seen.(i) <- true;
-      List.iter
-        (fun l -> match Hashtbl.find_opt index l with Some s -> visit s | None -> ())
-        (successors blocks.(i).terminator)
-    end
-  in
-  if Array.length blocks > 0 then visit 0;
+     the allocator reports a value live in a place it cannot be.
+     Cfg answers it; the same walk that Liveness uses on the other graph. *)
+  let g = cfg f in
   Array.iteri
     (fun i reached ->
-      if not reached then broken "%s: block `%s' cannot be reached" where blocks.(i).label)
-    seen;
+      if not reached then broken "%s: block `%s' cannot be reached" where (Cfg.block g i).label)
+    g.Cfg.reachable;
+  (* Loops are recursive calls, which leave the function, so this graph has no
+     cycles -- and the back end reads it that way (doc/regalloc.md §10).  The
+     property starts here, so it is checked here as well as where it is used. *)
+  if not (Cfg.is_acyclic g) then broken "%s: the control-flow graph has a cycle" where;
   (* Defined anywhere in the function, or coming in as a parameter. *)
   let defined = Hashtbl.create 64 in
   List.iter (fun x -> Hashtbl.replace defined x ()) (f.args @ f.captures);

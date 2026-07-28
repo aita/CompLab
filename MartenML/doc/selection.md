@@ -103,6 +103,7 @@ $ martenmlc --check-linear -o /dev/null examples/queens.mml
 - 同じラベルのブロックが2つない
 - 終端命令が名指しする後続が実在する
 - 入口から到達できないブロックがない
+- **閉路がない**（§3）
 - どの値も、どこかで定義されている（上のとおり、支配関係はまだ言えない）
 
 テストが例題9本に対して走らせます。
@@ -204,11 +205,20 @@ function martenml_sum_18 (20 registers, 0 spill slots)
 残すのは損です（`match_compile.ml`）。この並べ替えだけで、例題群のタグ判定用 `li` が
 18個から13個に減りました。
 
-## 3. 制御フローグラフ — `cfg.ml`
+## 3. グラフを歩く — `cfg.ml`
 
-`Riscv.func` はもともと制御フローグラフです（ブロックの列と、後続を名指しする終端命令）。
-`cfg.ml` が足すのは、それを歩くのに要るものだけです。ラベルから番号、前任者、入口から
-到達できるブロック、そして訪問順。
+**制御フローグラフはこの章に2つあります。** §1 の `Linear.func` と §2 の `Riscv.func` で、
+どちらも「ブロックの列と、後続を名指しする終端命令」です。歩くのに要るものも同じ —
+ラベルから番号、前任者、入口から到達できるブロック、訪問順。
+
+だから `cfg.ml` は**ブロックの型を決めていません**。知りようのない2つを引数で受け取ります。
+
+```ocaml
+let build ~label ~successors blocks = ...
+```
+
+`Linear` と `Riscv` がそれぞれ自分の `cfg` を用意し、中身は共有します。**`cfg.ml` は
+`Linear` にも `Riscv` にも触れません** — 触れば、機械独立な側が機械に依存してしまいます。
 
 深さ優先の走査1回で3つが出ます。
 
@@ -219,13 +229,18 @@ function martenml_sum_18 (20 registers, 0 spill slots)
 3つ目が効いてきます。バックエンドは**関数の制御フローグラフに閉路がないこと**を2箇所で
 当てにしています（[レジスタ割り付け §10](regalloc.md#10-この実装で効いている単純化)）。
 ソース上のループは再帰呼び出しで、呼び出しは関数から出ていくのでそうなります。
-**当てにする以上は確かめる**というのが `--check-cfg` で、テストが全例に対して走らせます。
+
+**当てにする以上は確かめます。**性質が生まれるのは `Linear` の側なので `--check-linear` が
+そこで見て、実際に読むのは `Riscv` の側なので `--check-cfg` がそこでも見ます。命令選択は
+ブロックを1つも作らないので2つは必ず一致しますが、一致することのほうが仮定です。
 
 ```
-$ martenmlc --check-cfg -o /dev/null examples/queens.mml
+$ martenmlc --check-linear -o /dev/null examples/queens.mml
+$ martenmlc --check-cfg    -o /dev/null examples/queens.mml
 ```
 
-**ブロック配置**も同じグラフから決めます。終端命令が次のブロックへ落ちれば、ジャンプ命令が
+**ブロック配置**も同じグラフから決めます。こちらは機械の側だけの話なので、落ちる先の
+好みを渡す `Riscv.relayout` が `Cfg.layout` を呼びます。終端命令が次のブロックへ落ちれば、ジャンプ命令が
 1つ出ずに済みます（[アセンブリ出力](emit.md)）。入口から辺をたどってトレースを作り、**そのブロックからしか
 入れない後続**にだけ延ばします。合流点まで引きずると、他の前任者がジャンプする羽目に
 なるからです。
@@ -263,14 +278,16 @@ Appel の *Modern Compiler Implementation* が10章で扱っています。生�
 
 | | |
 |---|---|
-| `linear.ml` 32–114行 | 型。`op`・`instr`・`terminator`・`block`・`func` |
-| `linear.ml` 118–140行 | ブロックを組み立てる builder |
-| `linear.ml` 142–280行 | `translate` — クロージャ変換済みの木 → ブロック。分岐は `generate_branch`（231行） |
-| `linear.ml` 282–353行 | `check` — 整った形かどうか。`--check-linear` |
+| `linear.ml` 32–92行 | 型。`op`・`instr`・`terminator`・`block`・`func` |
+| `linear.ml` 94–100行 | `cfg` — Cfg に渡す2つの関数 |
+| `linear.ml` 126–148行 | ブロックを組み立てる builder |
+| `linear.ml` 150–288行 | `translate` — クロージャ変換済みの木 → ブロック。分岐は `generate_branch`（239行） |
+| `linear.ml` 290–354行 | `check` — 整った形かどうか。`--check-linear` |
 | `riscv.ml` | 命令と制御フローの型、レジスタファイル、呼び出し規約。対象機械を1つだけ知っている側です |
 | `selection.ml` | `Linear.func` → `Riscv.func` |
-| `cfg.ml` 27–67行 | `build` — 深さ優先1回で後行順・到達可能性・閉路の有無 |
-| `cfg.ml` 91–128行 | `layout`・`relayout` — フォールスルーを増やすブロック順 |
+| `cfg.ml` 34–70行 | `build` — 深さ優先1回で後行順・到達可能性・閉路の有無。ブロックの型は問わない |
+| `cfg.ml` 98–129行 | `layout` — フォールスルーを増やすブロック順 |
+| `riscv.ml` 268–294行 | `cfg`・`relayout` — 機械側のグラフの作り方と落ちる先の好み |
 | `liveness.ml` | 後ろ向きデータフローと、そのついでのデッドコード除去 |
 
 ---

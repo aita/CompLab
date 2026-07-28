@@ -151,7 +151,7 @@ shadow.mml: after alpha renaming, x is bound in two places
 ```
 
 と言います。テストは例題9本を `-O 0` と既定の回数の両方で通します
-（[制御フローグラフの検査](selection.md#3-制御フローグラフ--cfgml)と同じ扱いです）。
+（[制御フローグラフの検査](selection.md#3-グラフを歩く--cfgml)と同じ扱いです）。
 
 ### A正規形との違い
 

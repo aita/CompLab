@@ -266,3 +266,29 @@ let print_func out func =
       List.iter (fun i -> Printf.fprintf out "    %s\n" (string_of_instr i)) b.body;
       Printf.fprintf out "    %s\n" (string_of_terminator b.terminator))
     func.blocks
+
+(* ------------------------------------------------------------- the graph *)
+
+(* Cfg is generic over the block type; these are the two things it needs to
+   walk this one. *)
+let cfg (func : func) =
+  Cfg.build
+    ~label:(fun (b : block) -> b.label)
+    ~successors:(fun (b : block) -> successors b.terminator)
+    func.blocks
+
+(* Reorder a function's blocks so that terminators fall through where they can,
+   dropping any the entry cannot reach.  The entry block stays first: the
+   emitter puts the prologue there.
+
+   A `Jump` has one candidate.  A `Branch` offers both arms: `emit.ml` prints
+   whichever one is not next and inverts the condition when that is the true
+   arm, so either can become a fall-through. *)
+let relayout (func : func) =
+  let preferred (b : block) =
+    match b.terminator with
+    | Jump l -> [ l ]
+    | Branch (_, _, _, if_true, if_false) -> [ if_true; if_false ]
+    | Return _ | Tail_call _ -> []
+  in
+  func.blocks <- Cfg.layout ~preferred (cfg func)
