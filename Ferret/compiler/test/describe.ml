@@ -32,6 +32,8 @@ let () =
   case "counter" {|{ "name": "cur", "mode": "becomes" }|};
   case "counter" {|{}|};
 
+  case "forloop" {|{ "name": "row" }|};
+
 
   (* An operator names itself after the operator it is on. *)
   case "binop" {|{ "op": "mul" }|};

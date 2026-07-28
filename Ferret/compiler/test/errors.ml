@@ -115,6 +115,16 @@ let () =
                    { "source": "c2", "sourceHandle": "false",
                      "target": "e", "targetHandle": "in" } ] }|};
 
+  case "a for loop with nothing after it"
+    {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
+                   { "id": "l", "type": "forloop",
+                     "data": { "name": "i", "values": { "first": 1, "last": 3 } } },
+                   { "id": "a", "type": "log", "data": { "values": { "value": 1 } } } ],
+        "edges": [ { "source": "s", "sourceHandle": "next",
+                     "target": "l", "targetHandle": "in" },
+                   { "source": "l", "sourceHandle": "body",
+                     "target": "a", "targetHandle": "in" } ] }|};
+
   case "an unknown start input"
     {|{ "nodes": [ { "id": "s", "type": "start",
                      "data": { "params": [ { "name": "n" } ] } },

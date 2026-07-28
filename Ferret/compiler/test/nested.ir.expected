@@ -1,0 +1,22 @@
+fun main(n) -> f64 {
+  var r : int = 0
+  var c : int = 0
+  r = 1
+  loop $1 {
+    if (float(r) <= n) {
+      c = 1
+      loop $2 {
+        if (c <= r) {
+          log float((r * c))
+          c = (c + 1)
+          br $2
+        } else {
+          r = (r + 1)
+          br $1
+        }
+      }
+    } else {
+      return 0
+    }
+  }
+}

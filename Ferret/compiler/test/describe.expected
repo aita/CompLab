@@ -23,6 +23,11 @@ counter   {}
   in   from:starts at(num), by:moves by(num)
   out  value:value(num)
 
+forloop   { "name": "row" }
+  For row [1..n]
+  in   first:from(num), last:to(num)
+  out  index:index(num)
+
 binop     { "op": "mul" }
   Multiply [×]
   in   a:A(num), b:B(num)

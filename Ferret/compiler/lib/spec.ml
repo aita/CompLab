@@ -202,6 +202,28 @@ let catalogue : t list =
     };
     {
       blank with
+      kind = "forloop";
+      title = "For Loop";
+      glyph = "1..n";
+      color = "#d444f1";
+      category = "Flow";
+      hint =
+        "Counts from the first value to the last, running the body once for \
+         each. It is a Counter and a Condition wired into a loop, drawn as one \
+         node: the end of the body goes back to it on its own.";
+      exec_in = true;
+      exec_out = [ exec "body" "body"; exec "done" "done" ];
+      inputs = [ num "first" "from"; num "last" "to" ];
+      outputs = [ num "index" "index" ];
+      data =
+        [
+          ("name", `String "i");
+          ("values", `Assoc [ ("first", `Int 1); ("last", `Int 10) ]);
+        ];
+      fields = [ Text { key = "name"; label = "Name" } ];
+    };
+    {
+      blank with
       kind = "log";
       title = "Log";
       glyph = "✎";
@@ -376,6 +398,7 @@ let describe ~kind ~(data : Yojson.Safe.t) : described =
             num "by" (if becomes then "becomes" else "moves by");
           ];
       }
+  | "forloop" -> { plain with d_title = "For " ^ name_field "i" }
   | "const" ->
       {
         plain with

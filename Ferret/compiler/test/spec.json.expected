@@ -104,6 +104,27 @@
       "unique": false
     },
     {
+      "type": "forloop",
+      "title": "For Loop",
+      "glyph": "1..n",
+      "color": "#d444f1",
+      "category": "Flow",
+      "hint": "Counts from the first value to the last, running the body once for each. It is a Counter and a Condition wired into a loop, drawn as one node: the end of the body goes back to it on its own.",
+      "execIn": true,
+      "execOut": [
+        { "id": "body", "label": "body", "kind": "exec" },
+        { "id": "done", "label": "done", "kind": "exec" }
+      ],
+      "inputs": [
+        { "id": "first", "label": "from", "kind": "num" },
+        { "id": "last", "label": "to", "kind": "num" }
+      ],
+      "outputs": [ { "id": "index", "label": "index", "kind": "num" } ],
+      "data": { "name": "i", "values": { "first": 1, "last": 10 } },
+      "fields": [ { "key": "name", "label": "Name", "kind": "text" } ],
+      "unique": false
+    },
+    {
       "type": "log",
       "title": "Log",
       "glyph": "✎",

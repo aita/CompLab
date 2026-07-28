@@ -281,10 +281,10 @@ and value_of ctx (n : Graph.node) port : expr * vtype =
       else (
         bad "the start node has no input called %s" name;
         (Int 0, VInt))
-  | "counter" ->
+  | "counter" | "forloop" ->
       (* Reading what a counter holds stops the backward walk: the value is a
          local, so the step may name the counter itself without that being a
-         cycle. *)
+         cycle.  A for loop's index is the same thing. *)
       (Local (state_slot ctx n), assumed ctx (slot_key n))
   | "const" -> literal (Graph.number_field n "value" ~default:0.)
   | "binop" -> (
@@ -402,7 +402,14 @@ let note_type ctx (n : Graph.node) (e, ty) =
     ctx.too_narrow <- true);
   (e, ty)
 
-let exec_kinds = [ "log"; "end"; "condition"; "counter" ]
+let exec_kinds = [ "log"; "end"; "condition"; "counter"; "forloop" ]
+
+(* A for loop is three places rather than one: the setup it is entered at, the
+   test it comes back to, and the step the body falls into.  So a vertex of
+   the control-flow graph is a node and the door it was entered by. *)
+let vertex_for ctx ~dst ~port =
+  let n = Graph.find ctx.g dst in
+  if n.kind = "forloop" && port = "in" then dst ^ "#init" else dst
 
 (* A way out that was left unwired is a vertex of its own rather than a
    missing successor, so that a node with two exits keeps two of them however
@@ -431,6 +438,18 @@ let rec statements ctx v : block =
   let n = Graph.find ctx.g (node_of v) in
   match (n.kind, part_of v) with
   | _, part when is_gap part -> []
+  | "forloop", "init" ->
+      let i = state_slot ctx n in
+      let want = assumed ctx (slot_key n) in
+      let pre, e = group ctx (fun () -> note_type ctx n (number ctx n "first")) in
+      pre @ [ Assign (i, coerce ctx e want) ]
+  | "forloop", "step" ->
+      let i = state_slot ctx n in
+      let want = assumed ctx (slot_key n) in
+      let a, b, ty = unify (Local i, want) (Int 1, VInt) in
+      ignore (note_type ctx n (Bin (Add, a, b), ty));
+      [ Assign (i, coerce ctx (Bin (Add, a, b), ty) want) ]
+  | "forloop", _ -> []
   | _ -> statements_of ctx n
 
 and statements_of ctx (n : Graph.node) : block =
@@ -442,6 +461,7 @@ and statements_of ctx (n : Graph.node) : block =
       let pre, v = group ctx (fun () -> reported ctx n (number ctx n "value")) in
       pre @ [ Ret v ]
   | "condition" -> []
+  | "forloop" -> []
   | "counter" ->
       (* Passing through moves it.  Usually that means adding the step to what
          it holds; a counter set to "becomes" takes the value outright, which
@@ -469,16 +489,19 @@ let exec_succs ctx v =
   let n = Graph.find ctx.g (node_of v) in
   let out port =
     match Graph.out_of ctx.g ~node:n.id ~port with
-    | Some e -> [ e.dst ]
+    | Some e -> [ vertex_for ctx ~dst:e.dst ~port:e.dst_port ]
     | None -> []
   in
   let way port =
     match Graph.out_of ctx.g ~node:n.id ~port with
-    | Some e -> e.dst
+    | Some e -> vertex_for ctx ~dst:e.dst ~port:e.dst_port
     | None -> gap ~node:n.id ~port
   in
   match (n.kind, part_of v) with
   | _, part when is_gap part -> []
+  | "forloop", "init" -> [ n.id ]
+  | "forloop", "step" -> [ n.id ]
+  | "forloop", _ -> [ way "body"; way "done" ]
   | "condition", _ -> [ way "true"; way "false" ]
   | "end", _ -> []
   | _ -> out "next"
@@ -548,6 +571,17 @@ let structure ctx (g : Cfg.t) =
                    (condition ctx (node n) "cond", VBool)))
         in
         stmts @ pre @ [ If (c, go t, go f) ]
+    | "forloop", "", [ body; after ] ->
+        (* index <= last, worked out afresh at the top of every pass *)
+        let m = node n in
+        let i = state_slot ctx m in
+        let want = assumed ctx (slot_key m) in
+        let pre, c =
+          group ctx (fun () ->
+              let a, b, _ = unify (Local i, want) (number ctx m "last") in
+              fst (watched_as ctx m "index" (Cmp (Le, a, b), VBool)))
+        in
+        stmts @ pre @ [ If (c, go body, go after) ]
     (* Reaching a pin that was never wired.  Inside a loop body this would
        have been closed back to the step; anywhere else there is nothing it
        could sensibly mean. *)
@@ -707,8 +741,37 @@ let once (g : Graph.t) slot_ty =
                 Hashtbl.replace succs v ss;
                 List.iter walk ss)
             in
-            let entry = e.dst in
+            let entry = vertex_for ctx ~dst:e.dst ~port:e.dst_port in
             walk entry;
+            (* A for loop's body returns to it when the chain runs out, the
+               way a Blueprint macro does: whatever the body reaches that
+               leads nowhere goes back to the step. *)
+            List.iter
+              (fun (l : Graph.node) ->
+                match Graph.out_of g ~node:l.id ~port:"body" with
+                | None -> ()
+                | Some b ->
+                    let seen = Hashtbl.create 16 in
+                    let rec close v =
+                      (* Coming back round to the loop itself is the end of
+                         the walk, not another leaf to tie down. *)
+                      if node_of v <> l.id && not (Hashtbl.mem seen v) then (
+                        Hashtbl.replace seen v ();
+                        let n = Graph.find g (node_of v) in
+                        match Hashtbl.find_opt succs v with
+                        | Some [] when n.kind <> "end" ->
+                            Hashtbl.replace succs v [ l.id ^ "#step" ]
+                        | Some [ _; after ] when n.kind = "forloop" ->
+                            (* Another loop's body is that loop's own affair;
+                               only what comes after it belongs to this one. *)
+                            close after
+                        | Some ss -> List.iter close ss
+                        | None -> ())
+                    in
+                    close (vertex_for ctx ~dst:b.dst ~port:b.dst_port);
+                    if not (Hashtbl.mem succs (l.id ^ "#step")) then
+                      Hashtbl.replace succs (l.id ^ "#step") [ l.id ])
+              (Graph.nodes_of_kind g "forloop");
             let cfg = Cfg.build ~entry ~succs in
             (match Cfg.irreducible cfg with
             | [] -> ()

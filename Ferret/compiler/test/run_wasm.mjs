@@ -78,5 +78,11 @@ const typed = await load("typing.wasm");
 check("i64 loop returns", typed.main(), 5);
 check("i64 remainder", typed.logged, [0, 1, 2, 0, 1, 2, 0, 1, 2, 0]);
 
+// Rows of a multiplication triangle: the inner loop counts up to the outer
+// one's index, which only works if it starts again on every outer pass.
+const nested = await load("nested.wasm");
+check("nested loops", nested.main(4), 0);
+check("triangle", nested.logged, [1, 2, 4, 3, 6, 9, 4, 8, 12, 16]);
+
 if (failures > 0) process.exit(1);
 console.log("ok");
