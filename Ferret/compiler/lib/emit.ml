@@ -23,7 +23,8 @@ let rec scratch_of_block b =
 and scratch_of_stmt = function
   | Assign (_, e) | Log e | Ret e -> scratch_of_expr e
   | If (c, t, e) -> scratch_of_expr c + scratch_of_block t + scratch_of_block e
-  | While (c, body) -> scratch_of_expr c + scratch_of_block body
+  | While (pre, c, body) ->
+      scratch_of_block pre + scratch_of_expr c + scratch_of_block body
 
 let log_index = 0 (* the only import, so it takes function index 0 *)
 let main_index = 1
@@ -124,10 +125,11 @@ and stmt env b = function
       Wasm.if_else b
         ~then_:(fun () -> block env b t)
         ~else_:(if e = [] then None else Some (fun () -> block env b e))
-  | While (c, body) ->
-      (* block { loop { br_if 1 (!cond); body; br 0 } } *)
+  | While (pre, c, body) ->
+      (* block { loop { pre; br_if 1 (!cond); body; br 0 } } *)
       Wasm.block b (fun () ->
           Wasm.loop b (fun () ->
+              block env b pre;
               expr env b c;
               Wasm.op b Wasm.i32_eqz;
               Wasm.br_if b 1;

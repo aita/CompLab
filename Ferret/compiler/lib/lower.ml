@@ -9,7 +9,13 @@
    loop: it declares named slots, takes an initial value and a next value for
    each, and offers the current value as an output. So the loop node is the
    phi, written down. Everything the lowering emits below -- the assignments,
-   the temporaries -- exists only in the IR. *)
+   the temporaries -- exists only in the IR.
+
+   A node whose output feeds several inputs is computed once, into a local,
+   because with no way to name an intermediate value in the graph, feeding one
+   output into many places is how you are meant to work: expanding it at every
+   use doubles the code at every level, and a chain twenty deep would not
+   finish. See [share] below for what makes that safe. *)
 
 open Ir
 
@@ -24,6 +30,12 @@ type ctx = {
   mutable errs : Graph.error list;  (* collected, reported all at once *)
   active : (string, unit) Hashtbl.t;  (* data nodes on the current path *)
   entered : (string, unit) Hashtbl.t;  (* exec nodes already emitted *)
+  fanout : (string, int) Hashtbl.t;  (* "node\000port" -> how many edges leave *)
+  (* the group being lowered: what it has already computed, and the
+     assignments that have to run before it *)
+  mutable shared : (string, int * vtype) Hashtbl.t;
+  mutable prelude : stmt list;  (* reversed *)
+  mutable temps : int;
 }
 
 let complain ctx ?node fmt =
@@ -63,6 +75,22 @@ let slot ctx ~key ~display =
 
 let state_slot ctx (n : Graph.node) name =
   slot ctx ~key:(n.id ^ "\000" ^ name) ~display:name
+
+(* A group is one place in the emitted code where a set of expressions is
+   evaluated together: a statement, a loop's condition, a loop's whole set of
+   next values.  Sharing is scoped to a group, and the assignments it hoists
+   run at the head of it -- which is only sound because a group never writes a
+   local that its own expressions read.  Between groups nothing is shared, so
+   a value read on either side of an update is read twice, as it must be. *)
+let group ctx f =
+  let outer_shared = ctx.shared and outer_prelude = ctx.prelude in
+  ctx.shared <- Hashtbl.create 8;
+  ctx.prelude <- [];
+  let result = f () in
+  let pre = List.rev ctx.prelude in
+  ctx.shared <- outer_shared;
+  ctx.prelude <- outer_prelude;
+  (pre, result)
 
 (* ------------------------------------------------------- declared names *)
 
@@ -138,15 +166,35 @@ let after_colon port =
 let untrue = Cmp (Ne, Num 0., Num 0.)
 
 let rec value ctx (e : Graph.edge) : expr * vtype =
-  let n = Graph.find ctx.g e.src in
-  if Hashtbl.mem ctx.active n.id then (
-    complain ctx ~node:n.id "this node's value depends on itself";
-    (Num 0., VNum))
-  else (
-    Hashtbl.replace ctx.active n.id ();
-    let built = value_of ctx n e.src_port in
-    Hashtbl.remove ctx.active n.id;
-    built)
+  let key = e.src ^ "\000" ^ e.src_port in
+  match Hashtbl.find_opt ctx.shared key with
+  | Some (i, ty) -> (Local i, ty)
+  | None ->
+      let n = Graph.find ctx.g e.src in
+      if Hashtbl.mem ctx.active n.id then (
+        complain ctx ~node:n.id "this node's value depends on itself";
+        (Num 0., VNum))
+      else (
+        Hashtbl.replace ctx.active n.id ();
+        let built = value_of ctx n e.src_port in
+        Hashtbl.remove ctx.active n.id;
+        share ctx ~key ~from:n built)
+
+and share ctx ~key ~from (expr, ty) =
+  let uses = Option.value (Hashtbl.find_opt ctx.fanout key) ~default:1 in
+  match expr with
+  | Local _ | Num _ -> (expr, ty) (* already as cheap as a local read *)
+  | _ when uses < 2 -> (expr, ty)
+  | _ ->
+      ctx.temps <- ctx.temps + 1;
+      let i =
+        slot ctx
+          ~key:(Printf.sprintf "\002%d" ctx.temps)
+          ~display:(from.Graph.id ^ "_value")
+      in
+      ctx.prelude <- Assign (i, expr) :: ctx.prelude;
+      Hashtbl.replace ctx.shared key (i, ty);
+      (Local i, ty)
 
 and value_of ctx (n : Graph.node) port : expr * vtype =
   let bad fmt = Printf.ksprintf (fun s -> complain ctx ~node:n.id "%s" s) fmt in
@@ -268,10 +316,12 @@ let rec chain ctx (from : Graph.node) port : block =
 and step ctx (n : Graph.node) : block =
   match n.kind with
   | "log" ->
-      let v = number ctx n "value" in
+      let pre, v = group ctx (fun () -> number ctx n "value") in
       let rest = chain ctx n "next" in
-      Log v :: rest
-  | "end" -> [ Ret (number ctx n "value") ]
+      (pre @ [ Log v ]) @ rest
+  | "end" ->
+      let pre, v = group ctx (fun () -> number ctx n "value") in
+      pre @ [ Ret v ]
   | "while" -> loop ctx n
   | kind ->
       complain ctx ~node:n.id "the %s node cannot be part of the flow" kind;
@@ -283,15 +333,24 @@ and loop ctx (n : Graph.node) : block =
   (* The slots come first so that the condition and the next-value
      expressions, which read them, resolve to locals rather than recursing. *)
   let slots = List.map (fun s -> state_slot ctx n s) states in
+  (* One group per initial value: the group's own assignment writes a state
+     slot, which a later initial value is allowed to read. *)
   let inits =
-    List.map2 (fun i s -> Assign (i, number ctx n ("init:" ^ s))) slots states
+    List.concat
+      (List.map2
+         (fun i s ->
+           let pre, v = group ctx (fun () -> number ctx n ("init:" ^ s)) in
+           pre @ [ Assign (i, v) ])
+         slots states)
   in
-  let cond = condition ctx n "cond" in
+  let pre_cond, cond = group ctx (fun () -> condition ctx n "cond") in
   let body = chain ctx n "body" in
   (* Every next-value expression reads the state as it was at the top of the
      iteration, so with more than one slot they land in temporaries before any
      of them is written back. *)
-  let steps = List.map (fun s -> number ctx n ("step:" ^ s)) states in
+  let pre_steps, steps =
+    group ctx (fun () -> List.map (fun s -> number ctx n ("step:" ^ s)) states)
+  in
   let updates =
     match (slots, steps) with
     | [], _ | _, [] -> []
@@ -307,11 +366,20 @@ and loop ctx (n : Graph.node) : block =
         @ List.map2 (fun i t -> Assign (i, Local t)) slots temps
   in
   let rest = chain ctx n "next" in
-  inits @ [ While (cond, body @ updates) ] @ rest
+  inits
+  @ [ While (pre_cond, cond, body @ pre_steps @ updates) ]
+  @ rest
 
 (* --------------------------------------------------------------- entry *)
 
 let func_of_graph (g : Graph.t) : func =
+  let fanout = Hashtbl.create 32 in
+  List.iter
+    (fun (e : Graph.edge) ->
+      let k = e.src ^ "\000" ^ e.src_port in
+      Hashtbl.replace fanout k
+        (1 + Option.value (Hashtbl.find_opt fanout k) ~default:0))
+    g.edges;
   let ctx =
     {
       g;
@@ -322,6 +390,10 @@ let func_of_graph (g : Graph.t) : func =
       errs = [];
       active = Hashtbl.create 16;
       entered = Hashtbl.create 16;
+      fanout;
+      shared = Hashtbl.create 8;
+      prelude = [];
+      temps = 0;
     }
   in
   let start =

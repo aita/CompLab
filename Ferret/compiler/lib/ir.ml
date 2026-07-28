@@ -26,7 +26,9 @@ type expr =
 type stmt =
   | Assign of int * expr
   | If of expr * block * block
-  | While of expr * block
+  (* The preamble is re-evaluated with the condition, at the top of every
+     iteration, so anything the condition shares can live in it. *)
+  | While of block * expr * block
   | Log of expr
   | Ret of expr
 
@@ -96,8 +98,14 @@ let to_string f =
     | Assign (i, e) -> pr "%s%s = %s\n" pad (local_name f i) (expr e)
     | Log e -> pr "%slog %s\n" pad (expr e)
     | Ret e -> pr "%sreturn %s\n" pad (expr e)
-    | While (c, body) ->
+    | While ([], c, body) ->
         pr "%swhile %s {\n" pad (expr c);
+        block (ind + 1) body;
+        pr "%s}\n" pad
+    | While (pre, c, body) ->
+        pr "%sloop {\n" pad;
+        block (ind + 1) pre;
+        pr "%s  exit unless %s\n" pad (expr c);
         block (ind + 1) body;
         pr "%s}\n" pad
     | If (c, t, []) ->

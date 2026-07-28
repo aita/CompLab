@@ -1,0 +1,7 @@
+fun main(n) -> f64 {
+  var b0_value = 0
+  var b1_value = 0
+  b0_value = (n + n)
+  b1_value = (b0_value + b0_value)
+  return (b1_value + b1_value)
+}

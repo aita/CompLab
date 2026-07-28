@@ -1,0 +1,19 @@
+{
+  "nodes": [
+    {"id":"start","type":"start","position":{"x":0,"y":0},"data":{"params":[{"name":"n"}]}},
+    {"id":"b0","type":"binop","position":{"x":200,"y":0},"data":{"op":"add"}},
+    {"id":"b1","type":"binop","position":{"x":400,"y":0},"data":{"op":"add"}},
+    {"id":"b2","type":"binop","position":{"x":600,"y":0},"data":{"op":"add"}},
+    {"id":"done","type":"end","position":{"x":800,"y":0},"data":{}}
+  ],
+  "edges": [
+    {"id":"x","source":"start","sourceHandle":"next","target":"done","targetHandle":"in"},
+    {"id":"e1","source":"start","sourceHandle":"var:n","target":"b0","targetHandle":"a"},
+    {"id":"e2","source":"start","sourceHandle":"var:n","target":"b0","targetHandle":"b"},
+    {"id":"e3","source":"b0","sourceHandle":"out","target":"b1","targetHandle":"a"},
+    {"id":"e4","source":"b0","sourceHandle":"out","target":"b1","targetHandle":"b"},
+    {"id":"e5","source":"b1","sourceHandle":"out","target":"b2","targetHandle":"a"},
+    {"id":"e6","source":"b1","sourceHandle":"out","target":"b2","targetHandle":"b"},
+    {"id":"e7","source":"b2","sourceHandle":"out","target":"done","targetHandle":"value"}
+  ]
+}

@@ -129,11 +129,12 @@ and stmt env = function
         line env "else";
         nested env (fun () -> block env e));
       line env "end"
-  | While (c, body) ->
+  | While (pre, c, body) ->
       line env "block";
       nested env (fun () ->
           line env "loop";
           nested env (fun () ->
+              block env pre;
               expr env c;
               line env "i32.eqz";
               line env "br_if 1";

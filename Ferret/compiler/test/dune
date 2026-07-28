@@ -27,6 +27,20 @@
    collatz.wat
    (run ../bin/ferretc.exe --emit wat %{dep:../../examples/collatz.json}))))
 
+; A node feeding two inputs is computed once: without this the emitted code
+; doubles at every level.
+(rule
+ (target sharing.ir)
+ (action
+  (with-stdout-to
+   sharing.ir
+   (run ../bin/ferretc.exe --emit ir %{dep:sharing.json}))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff sharing.ir.expected sharing.ir)))
+
 (rule
  (target errors.out)
  (action
