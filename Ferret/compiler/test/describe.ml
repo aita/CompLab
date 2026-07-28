@@ -46,4 +46,14 @@ let () =
   case "const" {|{ "value": 12 }|};
   case "const" {|{ "value": 0.25 }|};
 
+  (* The names a formula leaves free are its ports, and a formula that is a
+     comparison hands back a condition rather than a number. *)
+  case "expr" {|{ "text": "x * x + y * y" }|};
+  case "expr" {|{ "text": "min(w, 2) + sqrt(w)" }|};
+  case "expr" {|{ "text": "a > b && a < 10" }|};
+  case "expr" {|{ "text": "!(a == b)" }|};
+  (* Halfway through typing: no tree yet, but the ports are still there. *)
+  case "expr" {|{ "text": "a * b + " }|};
+  case "expr" {|{ "text": "" }|};
+
   case "nonesuch" {|{}|}

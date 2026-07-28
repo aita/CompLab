@@ -68,13 +68,13 @@
     },
     {
       "id": "cell",
-      "type": "binop",
+      "type": "expr",
       "position": {
         "x": 1000,
         "y": 260
       },
       "data": {
-        "op": "mul"
+        "text": "r * c"
       }
     }
   ],
@@ -105,14 +105,14 @@
       "source": "rows",
       "sourceHandle": "index",
       "target": "cell",
-      "targetHandle": "a"
+      "targetHandle": "r"
     },
     {
       "id": "e6",
       "source": "cols",
       "sourceHandle": "index",
       "target": "cell",
-      "targetHandle": "b"
+      "targetHandle": "c"
     },
     {
       "id": "e7",

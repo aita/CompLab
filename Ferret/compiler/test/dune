@@ -110,6 +110,25 @@
  (action
   (diff typing.wat.expected typing.wat)))
 
+; A typed-in expression parses with the precedence it reads with, and the
+; names it leaves free are the ports it is fed through.
+(rule
+ (target formula.ir)
+ (action
+  (with-stdout-to
+   formula.ir
+   (run ../bin/ferretc.exe --emit ir %{dep:formula.json}))))
+
+(rule
+ (target formula.wasm)
+ (action
+  (run ../bin/ferretc.exe %{dep:formula.json} -o formula.wasm)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff formula.ir.expected formula.ir)))
+
 ; A for loop inside a for loop: the inner one starts again on every pass of
 ; the outer, and the end of its body falls into the outer one's step.
 (rule
@@ -189,6 +208,7 @@
   random.wasm
   breakpoints.wasm
   typing.wasm
+  formula.wasm
   nested.wasm)
  (action
   (run node run_wasm.mjs)))

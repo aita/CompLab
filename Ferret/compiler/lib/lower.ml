@@ -219,6 +219,24 @@ let cmpop_of_string = function
   | "ne" -> Some Ne
   | _ -> None
 
+(* The same operators, spelled the way they are typed into an Expression. *)
+let cmpop_of_string_symbol = function
+  | "<" -> Some Lt
+  | "<=" -> Some Le
+  | ">" -> Some Gt
+  | ">=" -> Some Ge
+  | "==" -> Some Eq
+  | "!=" -> Some Ne
+  | _ -> None
+
+let binop_of_string_symbol = function
+  | "+" -> Some Add
+  | "-" -> Some Sub
+  | "*" -> Some Mul
+  | "/" -> Some Div
+  | "%" -> Some Mod
+  | _ -> None
+
 let after_colon port =
   match String.index_opt port ':' with
   | Some i -> String.sub port (i + 1) (String.length port - i - 1)
@@ -339,6 +357,15 @@ and value_of ctx (n : Graph.node) port : expr * vtype =
       | op ->
           bad "unknown logical operator %s" op;
           (untrue, VBool))
+  | "expr" -> (
+      (* One card standing in for a chain of arithmetic nodes.  The names the
+         text leaves free are this node's input ports, so it plugs into the
+         graph like anything else. *)
+      match Formula.of_string (Graph.string_field n "text" ~default:"") with
+      | Error m ->
+          bad "%s" m;
+          (Int 0, VInt)
+      | Ok e -> formula ctx n e)
   | "select" ->
       let c = condition ctx n "cond" in
       let a = number ctx n "a" in
@@ -372,6 +399,74 @@ and number ctx (n : Graph.node) port : expr * vtype =
 
 (* The parsed text, node by node, using the same helpers the wired-up version
    goes through -- so it types and shares exactly the same way. *)
+and formula ctx (n : Graph.node) (f : Formula.t) : expr * vtype =
+  let bad fmt = Printf.ksprintf (fun s -> complain ctx ~node:n.id "%s" s) fmt in
+  let num f =
+    let e, ty = formula ctx n f in
+    if is_num ty then (e, ty)
+    else (
+      bad "this needs a number, not a true or false";
+      (Int 0, VInt))
+  in
+  let bool f =
+    let e, ty = formula ctx n f in
+    if ty = VBool then e
+    else (
+      bad "this needs a true or false, not a number";
+      untrue)
+  in
+  let arith op a b =
+    match op with
+    | Div | Min | Max -> (Bin (op, as_float (num a), as_float (num b)), VFloat)
+    | _ ->
+        let x, y, ty = unify (num a) (num b) in
+        (Bin (op, x, y), ty)
+  in
+  match f with
+  | Formula.Num v -> literal v
+  | Formula.Var name -> number ctx n name
+  | Formula.Un ("-", a) ->
+      let e, ty = num a in
+      (Un (Neg, e), ty)
+  | Formula.Un ("!", a) -> (Not (bool a), VBool)
+  | Formula.Un (op, _) ->
+      bad "%s is not an operator here" op;
+      (Int 0, VInt)
+  | Formula.Bin ("&&", a, b) -> (And (bool a, bool b), VBool)
+  | Formula.Bin ("||", a, b) -> (Or (bool a, bool b), VBool)
+  | Formula.Bin (op, a, b) -> (
+      match cmpop_of_string_symbol op with
+      | Some c ->
+          let x, y, _ = unify (num a) (num b) in
+          (Cmp (c, x, y), VBool)
+      | None -> (
+          match binop_of_string_symbol op with
+          | Some o -> arith o a b
+          | None ->
+              bad "%s is not an operator here" op;
+              (Int 0, VInt)))
+  | Formula.Call (name, args) -> (
+      match (name, args) with
+      | "min", [ a; b ] -> arith Min a b
+      | "max", [ a; b ] -> arith Max a b
+      | "abs", [ a ] ->
+          let e, ty = num a in
+          (Un (Abs, e), ty)
+      | ("sqrt" | "floor" | "ceil" | "round"), [ a ] ->
+          let u =
+            match name with
+            | "sqrt" -> Sqrt
+            | "floor" -> Floor
+            | "ceil" -> Ceil
+            | _ -> Round
+          in
+          (Un (u, as_float (num a)), VFloat)
+      | "random", [ a; b ] ->
+          (Rand (as_float (num a), as_float (num b)), VFloat)
+      | _ ->
+          bad "%s is not one of the functions this understands" name;
+          (Int 0, VInt))
+
 and condition ctx (n : Graph.node) port : expr =
   match Graph.into ctx.g ~node:n.id ~port with
   | None ->

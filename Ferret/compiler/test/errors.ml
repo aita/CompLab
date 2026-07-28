@@ -115,6 +115,26 @@ let () =
                    { "source": "c2", "sourceHandle": "false",
                      "target": "e", "targetHandle": "in" } ] }|};
 
+  (* The parser's complaints reach the same place a wiring mistake does, so
+     they are written for the person who typed the line, not for a compiler. *)
+  case "an expression that does not parse"
+    {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
+                   { "id": "f", "type": "expr", "data": { "text": "n * * 2" } },
+                   { "id": "e", "type": "end", "data": {} } ],
+        "edges": [ { "source": "s", "sourceHandle": "next",
+                     "target": "e", "targetHandle": "in" },
+                   { "source": "f", "sourceHandle": "out",
+                     "target": "e", "targetHandle": "value" } ] }|};
+
+  case "an expression naming something that is not there"
+    {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
+                   { "id": "f", "type": "expr", "data": { "text": "wobble(2)" } },
+                   { "id": "e", "type": "end", "data": {} } ],
+        "edges": [ { "source": "s", "sourceHandle": "next",
+                     "target": "e", "targetHandle": "in" },
+                   { "source": "f", "sourceHandle": "out",
+                     "target": "e", "targetHandle": "value" } ] }|};
+
   case "a for loop with nothing after it"
     {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
                    { "id": "l", "type": "forloop",

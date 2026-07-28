@@ -1,0 +1,124 @@
+{
+  "nodes": [
+    {
+      "id": "start",
+      "type": "start",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "params": [
+          {
+            "name": "n"
+          }
+        ]
+      }
+    },
+    {
+      "id": "size",
+      "type": "expr",
+      "position": {
+        "x": 280,
+        "y": 160
+      },
+      "data": {
+        "text": "min(n * n + 1, 100) / 2"
+      }
+    },
+    {
+      "id": "band",
+      "type": "expr",
+      "position": {
+        "x": 280,
+        "y": 300
+      },
+      "data": {
+        "text": "n > 3 && n < 10"
+      }
+    },
+    {
+      "id": "pick",
+      "type": "select",
+      "position": {
+        "x": 560,
+        "y": 300
+      },
+      "data": {
+        "values": {
+          "a": 1,
+          "b": 0
+        }
+      }
+    },
+    {
+      "id": "say",
+      "type": "log",
+      "position": {
+        "x": 560,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "fin",
+      "type": "end",
+      "position": {
+        "x": 820,
+        "y": 0
+      },
+      "data": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "start",
+      "sourceHandle": "next",
+      "target": "say",
+      "targetHandle": "in"
+    },
+    {
+      "id": "e2",
+      "source": "start",
+      "sourceHandle": "var:n",
+      "target": "size",
+      "targetHandle": "n"
+    },
+    {
+      "id": "e3",
+      "source": "start",
+      "sourceHandle": "var:n",
+      "target": "band",
+      "targetHandle": "n"
+    },
+    {
+      "id": "e4",
+      "source": "size",
+      "sourceHandle": "out",
+      "target": "say",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e5",
+      "source": "band",
+      "sourceHandle": "out",
+      "target": "pick",
+      "targetHandle": "cond"
+    },
+    {
+      "id": "e6",
+      "source": "say",
+      "sourceHandle": "next",
+      "target": "fin",
+      "targetHandle": "in"
+    },
+    {
+      "id": "e7",
+      "source": "pick",
+      "sourceHandle": "out",
+      "target": "fin",
+      "targetHandle": "value"
+    }
+  ]
+}

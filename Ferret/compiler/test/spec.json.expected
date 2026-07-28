@@ -21,6 +21,7 @@
           "itemLabel": "input"
         }
       ],
+      "entry": null,
       "unique": true
     },
     {
@@ -36,6 +37,7 @@
       "outputs": [],
       "data": {},
       "fields": [],
+      "entry": null,
       "unique": false
     },
     {
@@ -55,6 +57,7 @@
       "outputs": [ { "id": "out", "label": "result", "kind": "num" } ],
       "data": {},
       "fields": [],
+      "entry": null,
       "unique": false
     },
     {
@@ -73,6 +76,7 @@
       "outputs": [],
       "data": {},
       "fields": [],
+      "entry": null,
       "unique": false
     },
     {
@@ -101,6 +105,7 @@
           ]
         }
       ],
+      "entry": null,
       "unique": false
     },
     {
@@ -122,6 +127,7 @@
       "outputs": [ { "id": "index", "label": "index", "kind": "num" } ],
       "data": { "name": "i", "values": { "first": 1, "last": 10 } },
       "fields": [ { "key": "name", "label": "Name", "kind": "text" } ],
+      "entry": null,
       "unique": false
     },
     {
@@ -137,6 +143,7 @@
       "outputs": [],
       "data": {},
       "fields": [],
+      "entry": null,
       "unique": false
     },
     {
@@ -170,6 +177,7 @@
           ]
         }
       ],
+      "entry": null,
       "unique": false
     },
     {
@@ -199,6 +207,7 @@
           ]
         }
       ],
+      "entry": null,
       "unique": false
     },
     {
@@ -231,6 +240,7 @@
           ]
         }
       ],
+      "entry": null,
       "unique": false
     },
     {
@@ -258,6 +268,23 @@
           ]
         }
       ],
+      "entry": null,
+      "unique": false
+    },
+    {
+      "type": "expr",
+      "title": "Expression",
+      "glyph": "()",
+      "color": "#2e90fa",
+      "category": "Operators",
+      "hint": "A whole calculation typed as text, instead of a chain of a dozen nodes. The names it uses become its input ports, so it wires up like anything else. min, max, abs, sqrt, floor, ceil, round and random are available.",
+      "execIn": false,
+      "execOut": [],
+      "inputs": [],
+      "outputs": [ { "id": "out", "label": "result", "kind": "num" } ],
+      "data": { "text": "x * x + y * y" },
+      "fields": [ { "key": "text", "label": "Expression", "kind": "text" } ],
+      "entry": { "key": "text", "placeholder": "x * x + y * y" },
       "unique": false
     },
     {
@@ -273,6 +300,7 @@
       "outputs": [ { "id": "out", "label": "value", "kind": "num" } ],
       "data": { "value": 0 },
       "fields": [ { "key": "value", "label": "Value", "kind": "number" } ],
+      "entry": null,
       "unique": false
     },
     {
@@ -291,6 +319,7 @@
       "outputs": [ { "id": "out", "label": "value", "kind": "num" } ],
       "data": { "values": { "min": 0, "max": 1 } },
       "fields": [],
+      "entry": null,
       "unique": false
     }
   ]

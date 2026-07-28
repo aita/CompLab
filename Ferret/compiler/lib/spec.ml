@@ -38,6 +38,8 @@ type t = {
   outputs : port list;
   data : (string * Yojson.Safe.t) list;
   fields : field list;
+  (* A line of text edited on the card, for a node that mostly *is* its text *)
+  entry : (string * string) option;  (* key, placeholder *)
   unique : bool;
 }
 
@@ -62,6 +64,7 @@ let blank =
     outputs = [];
     data = [];
     fields = [];
+    entry = None;
     unique = false;
   }
 
@@ -291,6 +294,23 @@ let catalogue : t list =
     };
     {
       blank with
+      kind = "expr";
+      title = "Expression";
+      glyph = "()";
+      color = "#2e90fa";
+      category = "Operators";
+      hint =
+        "A whole calculation typed as text, instead of a chain of a dozen \
+         nodes. The names it uses become its input ports, so it wires up like \
+         anything else. min, max, abs, sqrt, floor, ceil, round and random are \
+         available.";
+      outputs = [ num "out" "result" ];
+      data = [ ("text", `String "x * x + y * y") ];
+      fields = [ Text { key = "text"; label = "Expression" } ];
+      entry = Some ("text", "x * x + y * y");
+    };
+    {
+      blank with
       kind = "const";
       title = "Constant";
       glyph = "#";
@@ -404,6 +424,19 @@ let describe ~kind ~(data : Yojson.Safe.t) : described =
         plain with
         d_badge = Some (show_number (Graph.number_field n "value" ~default:0.));
       }
+  | "expr" ->
+      (* The names the text leaves free are the ports.  Reading them off the
+         tokens rather than the parse keeps the ports still while a formula is
+         half-typed and does not parse yet. *)
+      let text = Graph.string_field n "text" ~default:"" in
+      let out =
+        if Formula.is_condition text then cond "out" "result" else num "out" "result"
+      in
+      {
+        plain with
+        d_inputs = List.map (fun v -> num v v) (Formula.free_names text);
+        d_outputs = [ out ];
+      }
   | "logic" ->
       {
         plain with
@@ -471,6 +504,11 @@ let json_of_spec s : Yojson.Safe.t =
       ("outputs", json_of_ports s.outputs);
       ("data", `Assoc s.data);
       ("fields", `List (List.map json_of_field s.fields));
+      ( "entry",
+        match s.entry with
+        | Some (key, placeholder) ->
+            `Assoc [ ("key", `String key); ("placeholder", `String placeholder) ]
+        | None -> `Null );
       ("unique", `Bool s.unique);
     ]
 

@@ -80,6 +80,20 @@ function FlowNode({ id, type, data, selected }: NodeProps<FerretNode>) {
         )}
       </div>
 
+      {spec.entry && (
+        <div className="fnode-body fnode-entry">
+          <input
+            className="nodrag"
+            spellCheck={false}
+            placeholder={spec.entry.placeholder}
+            value={String(data[spec.entry.key] ?? "")}
+            onChange={(e) =>
+              updateNodeData(id, { [spec.entry!.key]: e.target.value })
+            }
+          />
+        </div>
+      )}
+
       {bodyExec.length > 0 && (
         <div className="fnode-body fnode-flow">
           {bodyExec.map((p) => (

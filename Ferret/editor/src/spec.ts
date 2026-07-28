@@ -44,6 +44,8 @@ export interface Spec {
   outputs: Port[];
   data: NodeData;
   fields: Field[];
+  /** A line of text edited on the card, for a node that mostly *is* its text. */
+  entry: { key: string; placeholder: string } | null;
   unique: boolean;
 }
 

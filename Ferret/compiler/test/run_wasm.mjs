@@ -78,6 +78,14 @@ const typed = await load("typing.wasm");
 check("i64 loop returns", typed.main(), 5);
 check("i64 remainder", typed.logged, [0, 1, 2, 0, 1, 2, 0, 1, 2, 0]);
 
+// min(n*n+1, 100)/2 logged, and n>3 && n<10 returned as 1 or 0: precedence,
+// a call, and the two connectives, all from one line of text.
+const formula = await load("formula.wasm");
+check("in the band", formula.main(5), 1);
+check("below it", formula.main(2), 0);
+check("above it", formula.main(20), 0);
+check("the expression logged", formula.logged, [13, 2.5, 50]);
+
 // Rows of a multiplication triangle: the inner loop counts up to the outer
 // one's index, which only works if it starts again on every outer pass.
 const nested = await load("nested.wasm");

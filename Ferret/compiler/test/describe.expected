@@ -68,6 +68,36 @@ const     { "value": 0.25 }
   in   
   out  out:value(num)
 
+expr      { "text": "x * x + y * y" }
+  Expression [()]
+  in   x:x(num), y:y(num)
+  out  out:result(num)
+
+expr      { "text": "min(w, 2) + sqrt(w)" }
+  Expression [()]
+  in   w:w(num)
+  out  out:result(num)
+
+expr      { "text": "a > b && a < 10" }
+  Expression [()]
+  in   a:a(num), b:b(num)
+  out  out:result(bool)
+
+expr      { "text": "!(a == b)" }
+  Expression [()]
+  in   a:a(num), b:b(num)
+  out  out:result(bool)
+
+expr      { "text": "a * b + " }
+  Expression [()]
+  in   a:a(num), b:b(num)
+  out  out:result(num)
+
+expr      { "text": "" }
+  Expression [()]
+  in   
+  out  out:result(num)
+
 nonesuch  {}
   nonesuch [?]
   in   

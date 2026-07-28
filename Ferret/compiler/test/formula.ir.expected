@@ -1,0 +1,4 @@
+fun main(n) -> f64 {
+  log (min(((n * n) + 1), 100) / 2)
+  return float((if ((n > 3) and (n < 10)) then 1 else 0))
+}
