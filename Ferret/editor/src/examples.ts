@@ -3,6 +3,7 @@ import sum from "../../examples/sum.json";
 import collatz from "../../examples/collatz.json";
 import montecarlo from "../../examples/montecarlo.json";
 import triangle from "../../examples/triangle.json";
+import rowsums from "../../examples/rowsums.json";
 
 export interface Example {
   key: string;
@@ -45,4 +46,5 @@ export const EXAMPLES: Example[] = [
   { key: "collatz", name: collatz.name, graph: collatz },
   { key: "montecarlo", name: montecarlo.name, graph: montecarlo },
   { key: "triangle", name: triangle.name, graph: triangle },
+  { key: "rowsums", name: rowsums.name, graph: rowsums },
 ];

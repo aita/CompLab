@@ -31,6 +31,9 @@
 # a for loop with nothing after it
   l: both ways out of this node have to go somewhere
 
+# a counter carrying the old mode
+  c: a Counter adds its step to what it holds; a State node is the one that takes a value outright
+
 # an unknown start input
   s: the start node has no input called m
 

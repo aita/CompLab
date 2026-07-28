@@ -282,7 +282,9 @@ and watched ctx (n : Graph.node) (expr, ty) =
   (* A loop reports its whole state once per iteration, from the top of the
      loop, rather than every time a slot is read; the start node has nothing
      to report that its caller does not already know. *)
-  if n.kind = "counter" || n.kind = "start" || not (Graph.flag n "breakpoint")
+  if
+    n.kind = "counter" || n.kind = "state" || n.kind = "start"
+    || not (Graph.flag n "breakpoint")
   then (expr, ty)
   else
     let i = watch_point ctx ~node:n.id ~label:"value" in
@@ -299,10 +301,11 @@ and value_of ctx (n : Graph.node) port : expr * vtype =
       else (
         bad "the start node has no input called %s" name;
         (Int 0, VInt))
-  | "counter" | "forloop" ->
+  | "counter" | "forloop" | "state" ->
       (* Reading what a counter holds stops the backward walk: the value is a
          local, so the step may name the counter itself without that being a
-         cycle.  A for loop's index is the same thing. *)
+         cycle.  A for loop's index and a state's contents are the same
+         thing. *)
       (Local (state_slot ctx n), assumed ctx (slot_key n))
   | "const" -> literal (Graph.number_field n "value" ~default:0.)
   | "binop" -> (
@@ -497,14 +500,21 @@ let note_type ctx (n : Graph.node) (e, ty) =
     ctx.too_narrow <- true);
   (e, ty)
 
-let exec_kinds = [ "log"; "end"; "condition"; "counter"; "forloop" ]
+let exec_kinds = [ "log"; "end"; "condition"; "counter"; "forloop"; "state" ]
+
+(* The nodes that own a local, and the port each one starts from. *)
+let holds_state (n : Graph.node) = List.mem n.kind [ "counter"; "state" ]
+let start_port (n : Graph.node) = if n.kind = "state" then "initial" else "from"
 
 (* A for loop is three places rather than one: the setup it is entered at, the
    test it comes back to, and the step the body falls into.  So a vertex of
    the control-flow graph is a node and the door it was entered by. *)
 let vertex_for ctx ~dst ~port =
   let n = Graph.find ctx.g dst in
-  if n.kind = "forloop" && port = "in" then dst ^ "#init" else dst
+  match (n.kind, port) with
+  | "forloop", "in" -> dst ^ "#init"
+  | "state", "reset" -> dst ^ "#reset"
+  | _ -> dst
 
 (* A way out that was left unwired is a vertex of its own rather than a
    missing successor, so that a node with two exits keeps two of them however
@@ -545,6 +555,13 @@ let rec statements ctx v : block =
       ignore (note_type ctx n (Bin (Add, a, b), ty));
       [ Assign (i, coerce ctx (Bin (Add, a, b), ty) want) ]
   | "forloop", _ -> []
+  | "state", "reset" ->
+      (* Coming in this way puts back what it started with, which is what a
+         state inside a loop needs and a counter cannot say. *)
+      let i = state_slot ctx n in
+      let want = assumed ctx (slot_key n) in
+      let pre, e = group ctx (fun () -> note_type ctx n (number ctx n "initial")) in
+      pre @ [ Assign (i, coerce ctx e want) ]
   | _ -> statements_of ctx n
 
 and statements_of ctx (n : Graph.node) : block =
@@ -558,20 +575,28 @@ and statements_of ctx (n : Graph.node) : block =
   | "condition" -> []
   | "forloop" -> []
   | "counter" ->
-      (* Passing through moves it.  Usually that means adding the step to what
-         it holds; a counter set to "becomes" takes the value outright, which
-         is what a state that is not counting anything needs. *)
+      (* Passing through moves it: the step is added to what it holds. *)
+      if Graph.string_field n "mode" ~default:"by" = "becomes" then
+        complain ctx ~node:n.id
+          "a Counter adds its step to what it holds; a State node is the one \
+           that takes a value outright";
       let i = state_slot ctx n in
       let want = assumed ctx (slot_key n) in
-      let replace = Graph.string_field n "mode" ~default:"by" = "becomes" in
       let pre, v =
         group ctx (fun () ->
             let step = number ctx n "by" in
-            note_type ctx n
-              (if replace then step
-               else
-                 let a, b, ty = unify (Local i, want) step in
-                 (Bin (Add, a, b), ty)))
+            let a, b, ty = unify (Local i, want) step in
+            note_type ctx n (Bin (Add, a, b), ty))
+      in
+      let e, ty = watched_as ctx n "value" v in
+      pre @ [ Assign (i, coerce ctx (e, ty) want) ]
+  | "state" ->
+      (* Passing through stores what it is fed, and nothing else does: this is
+         the whole of assignment in the language. *)
+      let i = state_slot ctx n in
+      let want = assumed ctx (slot_key n) in
+      let pre, v =
+        group ctx (fun () -> note_type ctx n (number ctx n "value"))
       in
       let e, ty = watched_as ctx n "value" v in
       pre @ [ Assign (i, coerce ctx (e, ty) want) ]
@@ -597,6 +622,10 @@ let exec_succs ctx v =
   | "forloop", "init" -> [ n.id ]
   | "forloop", "step" -> [ n.id ]
   | "forloop", _ -> [ way "body"; way "done" ]
+  (* Storing and resetting are two ways through one node, and each carries on
+     somewhere of its own: the reset usually leads into the loop that the
+     store sits inside. *)
+  | "state", "reset" -> out "after"
   | "condition", _ -> [ way "true"; way "false" ]
   | "end", _ -> []
   | _ -> out "next"
@@ -706,9 +735,8 @@ and tidy = function
   | If (c, t, e) -> If (c, tidy_block t, tidy_block e)
   | s -> s
 
-(* Which counters a counter's starting value reads.  The walk stops at a
-   counter, because that is where the backward walk stops when the value is
-   built for real. *)
+(* Which slots a slot's starting value reads.  The walk stops at one, because
+   that is where the backward walk stops when the value is built for real. *)
 let start_reads ctx (n : Graph.node) =
   let seen = Hashtbl.create 8 in
   let found = ref [] in
@@ -717,7 +745,7 @@ let start_reads ctx (n : Graph.node) =
     | None -> ()
     | Some e ->
         let src = Graph.find ctx.g e.src in
-        if src.kind = "counter" then found := src.id :: !found
+        if holds_state src then found := src.id :: !found
         else if not (Hashtbl.mem seen src.id) then (
           Hashtbl.replace seen src.id ();
           List.iter
@@ -725,10 +753,10 @@ let start_reads ctx (n : Graph.node) =
               if edge.dst = src.id then walk src.id edge.dst_port)
             ctx.g.edges)
   in
-  walk n.id "from";
+  walk n.id (start_port n);
   !found
 
-let ordered_counters ctx counters =
+let ordered_slots ctx counters =
   let done_ = Hashtbl.create 16 and busy = Hashtbl.create 16 in
   let out = ref [] in
   let by_id = List.map (fun (n : Graph.node) -> (n.id, n)) counters in
@@ -736,7 +764,7 @@ let ordered_counters ctx counters =
     if not (Hashtbl.mem done_ n.id) then
       if Hashtbl.mem busy n.id then
         complain ctx ~node:n.id
-          "these counters' starting values depend on each other"
+          "these starting values depend on each other"
       else (
         Hashtbl.replace busy n.id ();
         List.iter
@@ -806,21 +834,21 @@ let once (g : Graph.t) slot_ty =
           (fun p -> ignore (slot ctx ~key:("\001" ^ p) ~display:p ~ty:VFloat))
           ctx.params;
         ctx.vars <- [];
-        (* Every counter is set up before anything runs, whichever loop it
-           later turns out to sit inside.  One counter's starting value may
-           read another's, so they go in an order that respects that rather
-           than in whatever order the file happens to list them: moving a node
-           in the editor must not change what a program means. *)
-        let counters = ordered_counters ctx (Graph.nodes_of_kind g "counter") in
+        (* Every slot is set up before anything runs, whichever loop it later
+           turns out to sit inside.  One starting value may read another, so
+           they go in an order that respects that rather than in whatever
+           order the file happens to list them: moving a node in the editor
+           must not change what a program means. *)
+        let slots = ordered_slots ctx (List.filter holds_state g.nodes) in
         let starts =
           List.concat_map
             (fun n ->
               let i = state_slot ctx n in
               let want = assumed ctx (slot_key n) in
-              let pre, v = group ctx (fun () -> number ctx n "from") in
+              let pre, v = group ctx (fun () -> number ctx n (start_port n)) in
               ignore (note_type ctx n v);
               pre @ [ Assign (i, coerce ctx v want) ])
-            counters
+            slots
         in
         (match Graph.out_of g ~node:start.id ~port:"next" with
         | None -> starts
@@ -884,7 +912,10 @@ let func_of_graph (g : Graph.t) : func * (string * string) list =
   let slot_ty = Hashtbl.create 16 in
   (* Every pass that is thrown away has loosened at least one counter, and a
      counter only loosens once, so this settles well inside the bound. *)
-  let budget = List.length (Graph.nodes_of_kind g "counter") + 2 in
+  let budget =
+    List.length (List.filter (fun n -> holds_state n || n.Graph.kind = "forloop") g.nodes)
+    + 2
+  in
   let rec attempt left =
     let ctx, f = once g slot_ty in
     if ctx.too_narrow && left > 0 then attempt (left - 1) else (ctx, f)

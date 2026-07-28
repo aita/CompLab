@@ -27,13 +27,15 @@ let () =
   case "start" {|{ "params": [ { "name": "n" }, { "name": "size" } ] }|};
   case "start" {|{ "params": [] }|};
 
-  (* A counter says what it is called, and what its step means. *)
-  case "counter" {|{ "name": "total", "mode": "by" }|};
-  case "counter" {|{ "name": "cur", "mode": "becomes" }|};
+  (* A counter is told apart by its name. *)
+  case "counter" {|{ "name": "total" }|};
   case "counter" {|{}|};
 
   case "forloop" {|{ "name": "row" }|};
 
+  (* A state is told apart by its name too, and has a second way in. *)
+  case "state" {|{ "name": "run" }|};
+  case "state" {|{}|};
 
   (* An operator names itself after the operator it is on. *)
   case "binop" {|{ "op": "mul" }|};

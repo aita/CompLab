@@ -8,14 +8,9 @@ start     { "params": [] }
   in   
   out  
 
-counter   { "name": "total", "mode": "by" }
+counter   { "name": "total" }
   total [i]
   in   from:starts at(num), by:moves by(num)
-  out  value:value(num)
-
-counter   { "name": "cur", "mode": "becomes" }
-  cur [i] badge becomes
-  in   from:starts at(num), by:becomes(num)
   out  value:value(num)
 
 counter   {}
@@ -27,6 +22,16 @@ forloop   { "name": "row" }
   For row [1..n]
   in   first:from(num), last:to(num)
   out  index:index(num)
+
+state     { "name": "run" }
+  run [S]
+  in   initial:starts at(num), value:stores(num)
+  out  value:value(num)
+
+state     {}
+  State [S]
+  in   initial:starts at(num), value:stores(num)
+  out  value:value(num)
 
 binop     { "op": "mul" }
   Multiply [×]

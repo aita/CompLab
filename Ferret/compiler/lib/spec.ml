@@ -32,7 +32,9 @@ type t = {
   color : string;
   category : string;
   hint : string;
-  exec_in : bool;
+  (* The ways in.  The first is drawn on the header, along the line the flow
+     runs; any others get a row of their own. *)
+  exec_in : port list;
   exec_out : port list;
   inputs : port list;
   outputs : port list;
@@ -60,7 +62,7 @@ let blank =
     color = "#667085";
     category = "Values";
     hint = "";
-    exec_in = false;
+    exec_in = [];
     exec_out = [];
     inputs = [];
     outputs = [];
@@ -144,7 +146,7 @@ let catalogue : t list =
       color = "#f79009";
       category = "Flow";
       hint = "Return a value and stop.";
-      exec_in = true;
+      exec_in = [ exec "in" "in" ];
       inputs = [ num "value" "result" ];
     };
     {
@@ -171,7 +173,7 @@ let catalogue : t list =
       hint =
         "Sends the flow one way or the other. A loop is a Condition with a \
          wire running back into it from the end of the body.";
-      exec_in = true;
+      exec_in = [ exec "in" "in" ];
       exec_out = [ exec "true" "true"; exec "false" "false" ];
       inputs = [ cond "cond" "test" ];
     };
@@ -183,30 +185,43 @@ let catalogue : t list =
       color = "#06aed4";
       category = "Flow";
       hint =
-        "The only node that holds anything. It starts at one value, and every \
-         time the flow passes through it, it moves by another. Wire `by` to \
-         something other than a constant and it accumulates.";
-      exec_in = true;
+        "Counts. It starts at one value and, every time the flow passes \
+         through it, adds another to what it holds. Wire `by` to something \
+         other than a constant and it accumulates.";
+      exec_in = [ exec "in" "in" ];
       exec_out = next;
       inputs = [ num "from" "starts at"; num "by" "moves by" ];
       outputs = [ num "value" "value" ];
       data =
         [
           ("name", `String "i");
-          ("mode", `String "by");
           ("values", `Assoc [ ("from", `Int 0); ("by", `Int 1) ]);
         ];
-      fields =
+      fields = [ Text { key = "name"; label = "Name" } ];
+    };
+    {
+      blank with
+      kind = "state";
+      title = "State";
+      glyph = "S";
+      color = "#15b79e";
+      category = "Flow";
+      hint =
+        "Remembers one number. Passing through stores what it is fed, and \
+         reading its output anywhere gives back the last thing stored. There \
+         is a second way through, `reset`, that puts back what it started \
+         with -- which is what a state inside a loop needs and a Counter \
+         cannot say.";
+      exec_in = [ exec "in" "in"; exec "reset" "reset" ];
+      exec_out = [ exec "next" "next"; exec "after" "after reset" ];
+      inputs = [ num "initial" "starts at"; num "value" "stores" ];
+      outputs = [ num "value" "value" ];
+      data =
         [
-          Text { key = "name"; label = "Name" };
-          Select
-            {
-              key = "mode";
-              label = "Each pass it";
-              options =
-                [ ("by", "moves by the step"); ("becomes", "becomes the step") ];
-            };
+          ("name", `String "s");
+          ("values", `Assoc [ ("initial", `Int 0) ]);
         ];
+      fields = [ Text { key = "name"; label = "Name" } ];
     };
     {
       blank with
@@ -219,7 +234,7 @@ let catalogue : t list =
         "Counts from the first value to the last, running the body once for \
          each. It is a Counter and a Condition wired into a loop, drawn as one \
          node: the end of the body goes back to it on its own.";
-      exec_in = true;
+      exec_in = [ exec "in" "in" ];
       exec_out = [ exec "body" "body"; exec "done" "done" ];
       inputs = [ num "first" "from"; num "last" "to" ];
       outputs = [ num "index" "index" ];
@@ -238,7 +253,7 @@ let catalogue : t list =
       color = "#0ba5ec";
       category = "Flow";
       hint = "Hand a value to the host. In the module this is a call to env.log.";
-      exec_in = true;
+      exec_in = [ exec "in" "in" ];
       exec_out = next;
       inputs = [ num "value" "value" ];
     };
@@ -414,20 +429,13 @@ let describe ~kind ~(data : Yojson.Safe.t) : described =
       in
       { plain with d_outputs = params }
   | "counter" ->
-      let becomes = Graph.string_field n "mode" ~default:"by" = "becomes" in
-      {
-        plain with
-        (* Two of them in a row both saying "Counter" is what makes a loop look
-           like ceremony; the name is the thing that tells them apart. *)
-        d_title = name_field "Counter";
-        d_badge = (if becomes then Some "becomes" else None);
-        d_inputs =
-          [
-            num "from" "starts at";
-            num "by" (if becomes then "becomes" else "moves by");
-          ];
-      }
+      (* Two of them in a row both saying "Counter" is what makes a loop look
+         like ceremony; the name is the thing that tells them apart. *)
+      { plain with d_title = name_field "Counter" }
   | "forloop" -> { plain with d_title = "For " ^ name_field "i" }
+  | "state" ->
+      (* Like a counter, what tells two of them apart is the name. *)
+      { plain with d_title = name_field "State" }
   | "const" ->
       {
         plain with
@@ -516,7 +524,7 @@ let json_of_spec s : Yojson.Safe.t =
       ("color", `String s.color);
       ("category", `String s.category);
       ("hint", `String s.hint);
-      ("execIn", `Bool s.exec_in);
+      ("execIn", json_of_ports s.exec_in);
       ("execOut", json_of_ports s.exec_out);
       ("inputs", json_of_ports s.inputs);
       ("outputs", json_of_ports s.outputs);

@@ -45,7 +45,8 @@ export interface Spec {
   color: string;
   category: string;
   hint: string;
-  execIn: boolean;
+  /** The ways in.  The first runs along the header; any others get a row. */
+  execIn: Port[];
   execOut: Port[];
   /** The ports of the kind, before one node's own settings are read. */
   inputs: Port[];
@@ -121,11 +122,6 @@ export function portKind(
   const spec = SPEC_BY_TYPE[type];
   if (!spec) return undefined;
   const node = describe(type, data);
-  const all = [
-    ...spec.execOut,
-    ...(spec.execIn ? [{ id: "in", kind: "exec" as const, label: "" }] : []),
-    ...node.inputs,
-    ...node.outputs,
-  ];
+  const all = [...spec.execIn, ...spec.execOut, ...node.inputs, ...node.outputs];
   return all.find((p) => p.id === handle)?.kind;
 }

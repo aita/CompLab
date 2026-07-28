@@ -145,6 +145,19 @@ let () =
                    { "source": "l", "sourceHandle": "body",
                      "target": "a", "targetHandle": "in" } ] }|};
 
+  (* A graph saved when a Counter could take a value outright.  Reading it as
+     a counting one would quietly compute something else. *)
+  case "a counter carrying the old mode"
+    {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
+                   { "id": "c", "type": "counter",
+                     "data": { "name": "c", "mode": "becomes",
+                               "values": { "from": 0, "by": 1 } } },
+                   { "id": "e", "type": "end", "data": { "values": { "value": 0 } } } ],
+        "edges": [ { "source": "s", "sourceHandle": "next",
+                     "target": "c", "targetHandle": "in" },
+                   { "source": "c", "sourceHandle": "next",
+                     "target": "e", "targetHandle": "in" } ] }|};
+
   case "an unknown start input"
     {|{ "nodes": [ { "id": "s", "type": "start",
                      "data": { "params": [ { "name": "n" } ] } },

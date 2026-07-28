@@ -148,6 +148,25 @@
  (action
   (diff nested.ir.expected nested.ir)))
 
+; A State reset at the top of a loop body: it starts again on every pass,
+; which is the thing a Counter set up at the entry to the function cannot do.
+(rule
+ (target state.ir)
+ (action
+  (with-stdout-to
+   state.ir
+   (run ../bin/ferretc.exe --emit ir %{dep:../../examples/rowsums.json}))))
+
+(rule
+ (target state.wasm)
+ (action
+  (run ../bin/ferretc.exe %{dep:../../examples/rowsums.json} -o state.wasm)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff state.ir.expected state.ir)))
+
 ; The node catalogue the editor draws from: what the palette offers, what
 ; ports each kind has, and what the inspector puts in its form.
 (rule
@@ -209,6 +228,7 @@
   breakpoints.wasm
   typing.wasm
   formula.wasm
-  nested.wasm)
+  nested.wasm
+  state.wasm)
  (action
   (run node run_wasm.mjs)))

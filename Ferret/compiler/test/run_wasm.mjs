@@ -92,5 +92,11 @@ const nested = await load("nested.wasm");
 check("nested loops", nested.main(4), 0);
 check("triangle", nested.logged, [1, 2, 4, 3, 6, 9, 4, 8, 12, 16]);
 
+// Row sums of the triangle: the running total is put back to zero at the top
+// of each outer pass, which is what the reset way through a State is for.
+const state = await load("state.wasm");
+check("reset per pass", state.main(4), 0);
+check("row sums", state.logged, [1, 3, 6, 10]);
+
 if (failures > 0) process.exit(1);
 console.log("ok");

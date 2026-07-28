@@ -28,8 +28,12 @@ function FlowNode({ id, type, data, selected }: NodeProps<FerretNode>) {
   // -- is worked out by the compiler, which is also the thing that reads
   // those port ids back.
   const { title, glyph, badge, inputs, outputs } = describe(type, data);
-  const headerExec = spec.execOut.length === 1 ? spec.execOut[0] : undefined;
-  const bodyExec = headerExec ? [] : spec.execOut;
+  // The flow runs along the header when there is one way in and one way out;
+  // a node with a second of either draws the rest as rows of their own.
+  const headerIn = spec.execIn[0];
+  const headerOut = spec.execOut.length === 1 ? spec.execOut[0] : undefined;
+  const bodyIn = spec.execIn.slice(1);
+  const bodyOut = headerOut ? [] : spec.execOut;
 
   const setPortValue = (port: string, text: string) => {
     const values = { ...((data.values as Record<string, number>) ?? {}) };
@@ -48,18 +52,18 @@ function FlowNode({ id, type, data, selected }: NodeProps<FerretNode>) {
       }
       title={problems?.join("\n")}
     >
-      {spec.execIn && (
+      {headerIn && (
         <Handle
-          id="in"
+          id={headerIn.id}
           type="target"
           position={Position.Left}
           className="handle handle-exec"
           style={{ top: HEADER_MID }}
         />
       )}
-      {headerExec && (
+      {headerOut && (
         <Handle
-          id={headerExec.id}
+          id={headerOut.id}
           type="source"
           position={Position.Right}
           className="handle handle-exec"
@@ -97,9 +101,20 @@ function FlowNode({ id, type, data, selected }: NodeProps<FerretNode>) {
         </div>
       )}
 
-      {bodyExec.length > 0 && (
+      {(bodyIn.length > 0 || bodyOut.length > 0) && (
         <div className="fnode-body fnode-flow">
-          {bodyExec.map((p) => (
+          {bodyIn.map((p) => (
+            <div className="port port-in port-exec" key={p.id}>
+              <Handle
+                id={p.id}
+                type="target"
+                position={Position.Left}
+                className="handle handle-exec"
+              />
+              <span className="port-label">{p.label}</span>
+            </div>
+          ))}
+          {bodyOut.map((p) => (
             <div className="port port-out port-exec" key={p.id}>
               <span className="port-label">{p.label}</span>
               <Handle

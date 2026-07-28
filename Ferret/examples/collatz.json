@@ -18,14 +18,13 @@
     },
     {
       "id": "cur",
-      "type": "counter",
+      "type": "state",
       "position": {
         "x": 1180,
         "y": 0
       },
       "data": {
-        "name": "cur",
-        "mode": "becomes"
+        "name": "cur"
       }
     },
     {
@@ -212,7 +211,7 @@
       "source": "pick",
       "sourceHandle": "out",
       "target": "cur",
-      "targetHandle": "by"
+      "targetHandle": "value"
     },
     {
       "id": "e3",
@@ -303,7 +302,7 @@
       "source": "start",
       "sourceHandle": "var:n",
       "target": "cur",
-      "targetHandle": "from"
+      "targetHandle": "initial"
     }
   ]
 }

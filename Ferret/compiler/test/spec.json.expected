@@ -8,7 +8,7 @@
       "color": "#12b76a",
       "category": "Flow",
       "hint": "Where the flow begins. Its inputs are the exported function's parameters.",
-      "execIn": false,
+      "execIn": [],
       "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
       "inputs": [],
       "outputs": [],
@@ -32,7 +32,7 @@
       "color": "#f79009",
       "category": "Flow",
       "hint": "Return a value and stop.",
-      "execIn": true,
+      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
       "execOut": [],
       "inputs": [ { "id": "value", "label": "result", "kind": "num" } ],
       "outputs": [],
@@ -49,7 +49,7 @@
       "color": "#f04438",
       "category": "Flow",
       "hint": "The only branch there is: pick one of two numbers by a condition. Both are evaluated, which is safe because nothing in an expression has an effect.",
-      "execIn": false,
+      "execIn": [],
       "execOut": [],
       "inputs": [
         { "id": "cond", "label": "if", "kind": "bool" },
@@ -70,7 +70,7 @@
       "color": "#f04438",
       "category": "Flow",
       "hint": "Sends the flow one way or the other. A loop is a Condition with a wire running back into it from the end of the body.",
-      "execIn": true,
+      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
       "execOut": [
         { "id": "true", "label": "true", "kind": "exec" },
         { "id": "false", "label": "false", "kind": "exec" }
@@ -89,26 +89,42 @@
       "glyph": "i",
       "color": "#06aed4",
       "category": "Flow",
-      "hint": "The only node that holds anything. It starts at one value, and every time the flow passes through it, it moves by another. Wire `by` to something other than a constant and it accumulates.",
-      "execIn": true,
+      "hint": "Counts. It starts at one value and, every time the flow passes through it, adds another to what it holds. Wire `by` to something other than a constant and it accumulates.",
+      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
       "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
       "inputs": [
         { "id": "from", "label": "starts at", "kind": "num" },
         { "id": "by", "label": "moves by", "kind": "num" }
       ],
       "outputs": [ { "id": "value", "label": "value", "kind": "num" } ],
-      "data": { "name": "i", "mode": "by", "values": { "from": 0, "by": 1 } },
-      "fields": [
-        { "key": "name", "label": "Name", "kind": "text" },
-        {
-          "key": "mode",
-          "label": "Each pass it",
-          "kind": "select",
-          "options": [
-            [ "by", "moves by the step" ], [ "becomes", "becomes the step" ]
-          ]
-        }
+      "data": { "name": "i", "values": { "from": 0, "by": 1 } },
+      "fields": [ { "key": "name", "label": "Name", "kind": "text" } ],
+      "entry": null,
+      "variants": null,
+      "unique": false
+    },
+    {
+      "type": "state",
+      "title": "State",
+      "glyph": "S",
+      "color": "#15b79e",
+      "category": "Flow",
+      "hint": "Remembers one number. Passing through stores what it is fed, and reading its output anywhere gives back the last thing stored. There is a second way through, `reset`, that puts back what it started with -- which is what a state inside a loop needs and a Counter cannot say.",
+      "execIn": [
+        { "id": "in", "label": "in", "kind": "exec" },
+        { "id": "reset", "label": "reset", "kind": "exec" }
       ],
+      "execOut": [
+        { "id": "next", "label": "next", "kind": "exec" },
+        { "id": "after", "label": "after reset", "kind": "exec" }
+      ],
+      "inputs": [
+        { "id": "initial", "label": "starts at", "kind": "num" },
+        { "id": "value", "label": "stores", "kind": "num" }
+      ],
+      "outputs": [ { "id": "value", "label": "value", "kind": "num" } ],
+      "data": { "name": "s", "values": { "initial": 0 } },
+      "fields": [ { "key": "name", "label": "Name", "kind": "text" } ],
       "entry": null,
       "variants": null,
       "unique": false
@@ -120,7 +136,7 @@
       "color": "#d444f1",
       "category": "Flow",
       "hint": "Counts from the first value to the last, running the body once for each. It is a Counter and a Condition wired into a loop, drawn as one node: the end of the body goes back to it on its own.",
-      "execIn": true,
+      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
       "execOut": [
         { "id": "body", "label": "body", "kind": "exec" },
         { "id": "done", "label": "done", "kind": "exec" }
@@ -143,7 +159,7 @@
       "color": "#0ba5ec",
       "category": "Flow",
       "hint": "Hand a value to the host. In the module this is a call to env.log.",
-      "execIn": true,
+      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
       "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
       "inputs": [ { "id": "value", "label": "value", "kind": "num" } ],
       "outputs": [],
@@ -160,7 +176,7 @@
       "color": "#2e90fa",
       "category": "Operators",
       "hint": "Combine two numbers.",
-      "execIn": false,
+      "execIn": [],
       "execOut": [],
       "inputs": [
         { "id": "a", "label": "A", "kind": "num" },
@@ -206,7 +222,7 @@
       "color": "#2e90fa",
       "category": "Operators",
       "hint": "A built-in that takes one number.",
-      "execIn": false,
+      "execIn": [],
       "execOut": [],
       "inputs": [ { "id": "a", "label": "A", "kind": "num" } ],
       "outputs": [ { "id": "out", "label": "result", "kind": "num" } ],
@@ -252,7 +268,7 @@
       "color": "#7a5af8",
       "category": "Operators",
       "hint": "Compare two numbers and produce true or false.",
-      "execIn": false,
+      "execIn": [],
       "execOut": [],
       "inputs": [
         { "id": "a", "label": "A", "kind": "num" },
@@ -301,7 +317,7 @@
       "color": "#7a5af8",
       "category": "Operators",
       "hint": "Combine true and false. And and Or evaluate both sides.",
-      "execIn": false,
+      "execIn": [],
       "execOut": [],
       "inputs": [
         { "id": "a", "label": "A", "kind": "bool" },
@@ -335,7 +351,7 @@
       "color": "#2e90fa",
       "category": "Operators",
       "hint": "A whole calculation typed as text, instead of a chain of a dozen nodes. The names it uses become its input ports, so it wires up like anything else. min, max, abs, sqrt, floor, ceil, round and random are available.",
-      "execIn": false,
+      "execIn": [],
       "execOut": [],
       "inputs": [],
       "outputs": [ { "id": "out", "label": "result", "kind": "num" } ],
@@ -352,7 +368,7 @@
       "color": "#667085",
       "category": "Values",
       "hint": "One f64.const, for when the same number is wanted in several places. A single use can be typed into the port instead.",
-      "execIn": false,
+      "execIn": [],
       "execOut": [],
       "inputs": [],
       "outputs": [ { "id": "out", "label": "value", "kind": "num" } ],
@@ -369,7 +385,7 @@
       "color": "#ee46bc",
       "category": "Values",
       "hint": "A number in [min, max), drawn from the host. The one impure node: it is drawn once each time the node is reached, and every reader of that node sees the same draw.",
-      "execIn": false,
+      "execIn": [],
       "execOut": [],
       "inputs": [
         { "id": "min", "label": "min", "kind": "num" },
