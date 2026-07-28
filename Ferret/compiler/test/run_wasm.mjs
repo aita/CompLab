@@ -40,6 +40,9 @@ check("sum(0)", sum.main(0), 0);
 check("sum(1)", sum.main(1), 1);
 check("sum(10)", sum.main(10), 55);
 check("sum(100)", sum.main(100), 5050);
+// Past 2^31: the whole-number path is i64, so this is exact rather than
+// wrapped, and past 2^53 it would still be exact where an f64 would not.
+check("sum(100000)", sum.main(100000), 5000050000);
 check("sum logs nothing", sum.logged, []);
 
 const collatz = await load("collatz.wasm");
@@ -70,6 +73,10 @@ check("loop with breakpoints returns", stepped.main(3), 3);
 check("breakpoints report in order", stepped.hits, [
   [0, 0], [1, 1], [0, 1], [1, 2], [0, 2], [1, 3], [0, 3],
 ]);
+
+const typed = await load("typing.wasm");
+check("i64 loop returns", typed.main(), 5);
+check("i64 remainder", typed.logged, [0, 1, 2, 0, 1, 2, 0, 1, 2, 0]);
 
 if (failures > 0) process.exit(1);
 console.log("ok");

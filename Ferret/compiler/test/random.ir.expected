@@ -1,5 +1,5 @@
 fun main() -> f64 {
-  var rnd_value = 0
+  var rnd_value : float = 0
   rnd_value = random(0, 1)
   return ((rnd_value + rnd_value) + random(0, 10))
 }

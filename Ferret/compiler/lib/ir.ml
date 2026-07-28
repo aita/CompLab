@@ -2,18 +2,30 @@
    f64 parameters, f64 locals and structured control flow.  Everything that
    follows this module works on trees, never on the graph. *)
 
-(* Numbers are f64; a condition is an i32 used as a boolean.  Locals carry
-   which one they are, because a shared subexpression of either kind ends up
-   in one. *)
-type vtype = VNum | VBool
+(* A number is an i64 where the graph can show it never needs to be anything
+   else, and an f64 otherwise; a condition is an i32 used as a boolean.  Every
+   local and every expression carries which of the three it is. *)
+type vtype = VInt | VFloat | VBool
+
+let is_num = function VBool -> false | _ -> true
+
+(* The numeric types meet at f64: an integer widens, a float never narrows. *)
+let join a b = if a = b then a else VFloat
+
+let type_name = function
+  | VInt -> "whole number"
+  | VFloat -> "number"
+  | VBool -> "true or false"
 
 type binop = Add | Sub | Mul | Div | Mod | Min | Max
 type unop = Neg | Abs | Sqrt | Floor | Ceil | Round
 type cmpop = Lt | Le | Gt | Ge | Eq | Ne
 
 type expr =
-  | Num of float
+  | Int of int  (* an i64 literal *)
+  | Num of float  (* an f64 literal *)
   | Local of int
+  | Widen of expr  (* i64 -> f64 *)
   | Bin of binop * expr * expr
   | Un of unop * expr
   | Cmp of cmpop * expr * expr
@@ -47,6 +59,20 @@ type func = {
   vars : (string * vtype) list;  (* locals n .. n+m-1, zero initialised *)
   body : block;
 }
+
+(* Both sides of an operator always agree by the time the lowering is done, so
+   a type can be read straight back off the tree. *)
+let rec type_of locals = function
+  | Int _ -> VInt
+  | Num _ | Widen _ | Rand _ -> VFloat
+  | Local i -> locals i
+  | Bin ((Div | Min | Max), _, _) -> VFloat
+  | Bin (_, a, _) -> type_of locals a
+  | Un ((Sqrt | Floor | Ceil | Round), _) -> VFloat
+  | Un (_, e) -> type_of locals e
+  | Cmp _ | And _ | Or _ | Not _ -> VBool
+  | Select (_, a, _) -> type_of locals a
+  | Watch (_, t, _) -> t
 
 let local_name f i =
   let np = List.length f.params in
@@ -83,7 +109,9 @@ let to_string f =
   let b = Buffer.create 256 in
   let pr fmt = Printf.ksprintf (Buffer.add_string b) fmt in
   let rec expr = function
+    | Int n -> string_of_int n
     | Num x -> Printf.sprintf "%g" x
+    | Widen e -> Printf.sprintf "float(%s)" (expr e)
     | Local i -> local_name f i
     | Bin ((Min | Max) as op, l, r) ->
         Printf.sprintf "%s(%s, %s)" (string_of_binop op) (expr l) (expr r)
@@ -99,7 +127,6 @@ let to_string f =
         Printf.sprintf "(if %s then %s else %s)" (expr c) (expr a) (expr b)
     | Rand (lo, hi) -> Printf.sprintf "random(%s, %s)" (expr lo) (expr hi)
     | Watch (i, _, e) -> Printf.sprintf "watch#%d(%s)" i (expr e)
-
   in
   let rec block ind stmts = List.iter (stmt ind) stmts
   and stmt ind s =
@@ -133,7 +160,9 @@ let to_string f =
   pr "fun main(%s) -> f64 {\n" (String.concat ", " f.params);
   List.iter
     (fun (v, t) ->
-      pr "  var %s = %s\n" v (match t with VNum -> "0" | VBool -> "false"))
+      pr "  var %s : %s = %s\n" v
+        (match t with VInt -> "int" | VFloat -> "float" | VBool -> "bool")
+        (match t with VBool -> "false" | _ -> "0"))
     f.vars;
   block 1 f.body;
   pr "}\n";

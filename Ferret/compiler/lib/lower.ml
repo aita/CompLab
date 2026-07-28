@@ -17,22 +17,27 @@
    use doubles the code at every level, and a chain twenty deep would not
    finish. See [share] below for what makes that safe.  It also settles what a
    random node means when it is read twice: the node is the value, so one draw
-   reaches every reader of it. *)
+   reaches every reader of it.
+
+   Numbers are typed as they are lowered.  A literal that is whole is an i64,
+   and so is anything built only out of those; everything else is an f64.  A
+   loop's slot cannot be typed by looking at it once -- its next value reads
+   the slot -- so the whole lowering is its own fixpoint: it starts by
+   assuming every slot is whole, and runs again whenever that turns out to be
+   too narrow.  Assumptions only ever loosen, so it settles. *)
 
 open Ir
-
-let ty_name = function VNum -> "number" | VBool -> "true or false"
 
 type ctx = {
   g : Graph.t;
   slots : (string, int) Hashtbl.t;  (* internal key -> local index *)
   used : (string, unit) Hashtbl.t;  (* display names already taken *)
+  fanout : (string, int) Hashtbl.t;  (* "node\000port" -> how many edges leave *)
   mutable params : string list;
   mutable vars : (string * vtype) list;
   mutable errs : Graph.error list;  (* collected, reported all at once *)
   active : (string, unit) Hashtbl.t;  (* data nodes on the current path *)
   entered : (string, unit) Hashtbl.t;  (* exec nodes already emitted *)
-  fanout : (string, int) Hashtbl.t;  (* "node\000port" -> how many edges leave *)
   (* the group being lowered: what it has already computed, and the
      assignments that have to run before it *)
   mutable shared : (string, int * vtype) Hashtbl.t;
@@ -41,6 +46,8 @@ type ctx = {
   (* Every breakpoint the lowering has planted, in the order the module's
      watch indices run; the editor turns these back into node highlights. *)
   mutable watches : (string * string) list;  (* reversed: node id, label *)
+  slot_ty : (string, vtype) Hashtbl.t;  (* loop slot key -> assumed type *)
+  mutable too_narrow : bool;  (* an assumption did not survive this pass *)
 }
 
 let complain ctx ?node fmt =
@@ -69,13 +76,13 @@ let fresh_display ctx name =
   in
   pick 1
 
-let slot ctx ~key ~display =
+let slot ctx ~key ~display ~ty =
   match Hashtbl.find_opt ctx.slots key with
   | Some i -> i
   | None ->
       let i = Hashtbl.length ctx.slots in
       Hashtbl.replace ctx.slots key i;
-      ctx.vars <- ctx.vars @ [ (fresh_display ctx display, VNum) ];
+      ctx.vars <- ctx.vars @ [ (fresh_display ctx display, ty) ];
       i
 
 (* Plant a breakpoint and hand back the index the module will report it by. *)
@@ -83,8 +90,14 @@ let watch_point ctx ~node ~label =
   ctx.watches <- (node, label) :: ctx.watches;
   List.length ctx.watches - 1
 
+let slot_key (n : Graph.node) name = n.id ^ "\000" ^ name
+
+let assumed ctx key =
+  Option.value (Hashtbl.find_opt ctx.slot_ty key) ~default:VInt
+
 let state_slot ctx (n : Graph.node) name =
-  slot ctx ~key:(n.id ^ "\000" ^ name) ~display:name
+  let key = slot_key n name in
+  slot ctx ~key ~display:name ~ty:(assumed ctx key)
 
 (* A group is one place in the emitted code where a set of expressions is
    evaluated together: a statement, a loop's condition, a loop's whole set of
@@ -101,6 +114,41 @@ let group ctx f =
   ctx.shared <- outer_shared;
   ctx.prelude <- outer_prelude;
   (pre, result)
+
+(* ------------------------------------------------------------- numbers *)
+
+(* An i64 covers this and more exactly; past it a literal stays an f64. *)
+let whole_limit = 4_611_686_018_427_387_904.
+
+let literal x =
+  if Float.is_integer x && Float.abs x < whole_limit then
+    (Int (int_of_float x), VInt)
+  else (Num x, VFloat)
+
+let widen = function
+  | Int n, _ -> (Num (float_of_int n), VFloat)
+  | e, VInt -> (Widen e, VFloat)
+  | e, _ -> (e, VFloat)
+
+let as_float p = fst (widen p)
+
+(* Give two numbers a type they share, which is only ever done by widening. *)
+let unify a b =
+  match (snd a, snd b) with
+  | ta, tb when ta = tb -> (fst a, fst b, ta)
+  | VInt, _ -> (as_float a, fst b, VFloat)
+  | _, VInt -> (fst a, as_float b, VFloat)
+  | _ -> (fst a, fst b, VFloat)
+
+(* Narrowing never happens in a settled pass: reaching it means a loop slot
+   was assumed to be whole and is not, so this pass is about to be thrown
+   away and what it emits does not matter. *)
+let coerce ctx (e, ty) want =
+  if ty = want then e
+  else if ty = VInt then as_float (e, ty)
+  else (
+    ctx.too_narrow <- true;
+    Int 0)
 
 (* ------------------------------------------------------- declared names *)
 
@@ -173,7 +221,7 @@ let after_colon port =
   | Some i -> String.sub port (i + 1) (String.length port - i - 1)
   | None -> port
 
-let untrue = Cmp (Ne, Num 0., Num 0.)
+let untrue = Cmp (Ne, Int 0, Int 0)
 
 let rec value ctx (e : Graph.edge) : expr * vtype =
   let key = e.src ^ "\000" ^ e.src_port in
@@ -183,12 +231,28 @@ let rec value ctx (e : Graph.edge) : expr * vtype =
       let n = Graph.find ctx.g e.src in
       if Hashtbl.mem ctx.active n.id then (
         complain ctx ~node:n.id "this node's value depends on itself";
-        (Num 0., VNum))
+        (Int 0, VInt))
       else (
         Hashtbl.replace ctx.active n.id ();
         let built = value_of ctx n e.src_port in
         Hashtbl.remove ctx.active n.id;
         share ctx ~key ~from:n (watched ctx n built))
+
+and share ctx ~key ~from (expr, ty) =
+  let uses = Option.value (Hashtbl.find_opt ctx.fanout key) ~default:1 in
+  match expr with
+  | Local _ | Num _ | Int _ -> (expr, ty) (* already as cheap as a local read *)
+  | _ when uses < 2 -> (expr, ty)
+  | _ ->
+      ctx.temps <- ctx.temps + 1;
+      let i =
+        slot ctx
+          ~key:(Printf.sprintf "\002%d" ctx.temps)
+          ~display:(from.Graph.id ^ "_value") ~ty
+      in
+      ctx.prelude <- Assign (i, expr) :: ctx.prelude;
+      Hashtbl.replace ctx.shared key (i, ty);
+      (Local i, ty)
 
 (* A breakpoint wraps the value where it is computed, which -- because a node
    feeding several inputs is computed once -- means one hit per evaluation
@@ -203,60 +267,55 @@ and watched ctx (n : Graph.node) (expr, ty) =
     let i = watch_point ctx ~node:n.id ~label:"value" in
     (Watch (i, ty, expr), ty)
 
-and share ctx ~key ~from (expr, ty) =
-  let uses = Option.value (Hashtbl.find_opt ctx.fanout key) ~default:1 in
-  match expr with
-  | Local _ | Num _ -> (expr, ty) (* already as cheap as a local read *)
-  | _ when uses < 2 -> (expr, ty)
-  | _ ->
-      ctx.temps <- ctx.temps + 1;
-      let i =
-        slot ctx
-          ~key:(Printf.sprintf "\002%d" ctx.temps)
-          ~display:(from.Graph.id ^ "_value")
-      in
-      ctx.prelude <- Assign (i, expr) :: ctx.prelude;
-      Hashtbl.replace ctx.shared key (i, ty);
-      (Local i, ty)
-
 and value_of ctx (n : Graph.node) port : expr * vtype =
   let bad fmt = Printf.ksprintf (fun s -> complain ctx ~node:n.id "%s" s) fmt in
   match n.kind with
   | "start" ->
+      (* Whatever the host passes in arrives as an f64. *)
       let name = after_colon port in
       if List.mem name ctx.params then
-        (Local (slot ctx ~key:("\001" ^ name) ~display:name), VNum)
+        (Local (slot ctx ~key:("\001" ^ name) ~display:name ~ty:VFloat), VFloat)
       else (
         bad "the start node has no input called %s" name;
-        (Num 0., VNum))
+        (Int 0, VInt))
   | "while" ->
       (* Reading a loop's state stops the backward walk: the value is a local,
          so the cond and the next-value expressions may name it without that
          being a cycle. *)
       let name = after_colon port in
       if List.mem name (declared_names n "states") then
-        (Local (state_slot ctx n name), VNum)
+        (Local (state_slot ctx n name), assumed ctx (slot_key n name))
       else (
         bad "this loop has no state called %s" name;
-        (Num 0., VNum))
-  | "const" -> (Num (Graph.number_field n "value" ~default:0.), VNum)
+        (Int 0, VInt))
+  | "const" -> literal (Graph.number_field n "value" ~default:0.)
   | "binop" -> (
       let op = Graph.string_field n "op" ~default:"add" in
       match binop_of_string op with
       | None ->
           bad "unknown arithmetic operator %s" op;
-          (Num 0., VNum)
+          (Int 0, VInt)
+      | Some ((Div | Min | Max) as op) ->
+          (* A quotient is not whole even when both ends are, and wasm has no
+             i64 minimum or maximum to reach for. *)
+          let a = number ctx n "a" in
+          let b = number ctx n "b" in
+          (Bin (op, as_float a, as_float b), VFloat)
       | Some op ->
           let a = number ctx n "a" in
           let b = number ctx n "b" in
-          (Bin (op, a, b), VNum))
+          let a, b, ty = unify a b in
+          (Bin (op, a, b), ty))
   | "unop" -> (
       let op = Graph.string_field n "op" ~default:"neg" in
       match unop_of_string op with
       | None ->
           bad "unknown operator %s" op;
-          (Num 0., VNum)
-      | Some op -> (Un (op, number ctx n "a"), VNum))
+          (Int 0, VInt)
+      | Some ((Neg | Abs) as op) ->
+          let a, ty = number ctx n "a" in
+          (Un (op, a), ty)
+      | Some op -> (Un (op, as_float (number ctx n "a")), VFloat))
   | "compare" -> (
       let op = Graph.string_field n "op" ~default:"lt" in
       match cmpop_of_string op with
@@ -266,6 +325,7 @@ and value_of ctx (n : Graph.node) port : expr * vtype =
       | Some op ->
           let a = number ctx n "a" in
           let b = number ctx n "b" in
+          let a, b, _ = unify a b in
           (Cmp (op, a, b), VBool))
   | "logic" -> (
       match Graph.string_field n "op" ~default:"and" with
@@ -285,31 +345,32 @@ and value_of ctx (n : Graph.node) port : expr * vtype =
       let c = condition ctx n "cond" in
       let a = number ctx n "a" in
       let b = number ctx n "b" in
-      (Select (c, a, b), VNum)
+      let a, b, ty = unify a b in
+      (Select (c, a, b), ty)
   | "random" ->
-      let lo = number ctx n "min" in
-      let hi = number ctx n "max" in
-      (Rand (lo, hi), VNum)
+      let lo = as_float (number ctx n "min") in
+      let hi = as_float (number ctx n "max") in
+      (Rand (lo, hi), VFloat)
   | kind ->
       bad "the %s node produces no value" kind;
-      (Num 0., VNum)
+      (Int 0, VInt)
 
 (* An input port takes an edge or, failing that, a number typed into it. *)
-and number ctx (n : Graph.node) port : expr =
+and number ctx (n : Graph.node) port : expr * vtype =
   match Graph.into ctx.g ~node:n.id ~port with
   | None -> (
       match Graph.port_value n port with
-      | Some x -> Num x
+      | Some x -> literal x
       | None ->
           complain ctx ~node:n.id "the %s input is not connected" port;
-          Num 0.)
+          (Int 0, VInt))
   | Some e ->
       let expr, ty = value ctx e in
-      if ty = VNum then expr
+      if is_num ty then (expr, ty)
       else (
         complain ctx ~node:n.id "the %s input wants a number but is given a %s"
-          port (ty_name ty);
-        Num 0.)
+          port (type_name ty);
+        (Int 0, VInt))
 
 and condition ctx (n : Graph.node) port : expr =
   match Graph.into ctx.g ~node:n.id ~port with
@@ -322,7 +383,7 @@ and condition ctx (n : Graph.node) port : expr =
       else (
         complain ctx ~node:n.id
           "the %s input wants a true or false but is given a %s" port
-          (ty_name ty);
+          (type_name ty);
         untrue)
 
 (* ---------------------------------------------------------------- exec *)
@@ -354,8 +415,9 @@ and step ctx (n : Graph.node) : block =
       complain ctx ~node:n.id "the %s node cannot be part of the flow" kind;
       chain ctx n "next"
 
-(* A breakpoint on log or end reports the value it is about to hand over. *)
-and reported ctx (n : Graph.node) v = fst (watched ctx n (v, VNum))
+(* The host takes f64s, so what log and end hand over is widened -- after the
+   breakpoint, which reports the value in the type it was worked out in. *)
+and reported ctx (n : Graph.node) v = as_float (watched ctx n v)
 
 and loop ctx (n : Graph.node) : block =
   check_names ctx n "states" "loop states";
@@ -363,31 +425,41 @@ and loop ctx (n : Graph.node) : block =
   (* The slots come first so that the condition and the next-value
      expressions, which read them, resolve to locals rather than recursing. *)
   let slots = List.map (fun s -> state_slot ctx n s) states in
+  let types = List.map (fun s -> assumed ctx (slot_key n s)) states in
   (* One group per initial value: the group's own assignment writes a state
      slot, which a later initial value is allowed to read. *)
   let inits =
     List.concat
       (List.map2
-         (fun i s ->
+         (fun i (s, want) ->
            let pre, v = group ctx (fun () -> number ctx n ("init:" ^ s)) in
-           pre @ [ Assign (i, v) ])
-         slots states)
+           note_type ctx n s (snd v);
+           pre @ [ Assign (i, coerce ctx v want) ])
+         slots
+         (List.combine states types))
   in
   let watching =
     if Graph.flag n "breakpoint" then
       List.map2
-        (fun name i ->
-          Drop (Watch (watch_point ctx ~node:n.id ~label:name, VNum, Local i)))
-        states slots
+        (fun name (i, ty) ->
+          Drop (Watch (watch_point ctx ~node:n.id ~label:name, ty, Local i)))
+        states
+        (List.combine slots types)
     else []
   in
   let pre_cond, cond = group ctx (fun () -> condition ctx n "cond") in
   let body = chain ctx n "body" in
   (* Every next-value expression reads the state as it was at the top of the
-     iteration, so with more than one slot they land in temporaries before any
-     of them is written back. *)
+     iteration, so they share one group, and with more than one slot they land
+     in temporaries before any of them is written back. *)
   let pre_steps, steps =
-    group ctx (fun () -> List.map (fun s -> number ctx n ("step:" ^ s)) states)
+    group ctx (fun () ->
+        List.map2
+          (fun s want ->
+            let v = number ctx n ("step:" ^ s) in
+            note_type ctx n s (snd v);
+            coerce ctx v want)
+          states types)
   in
   let updates =
     match (slots, steps) with
@@ -395,10 +467,12 @@ and loop ctx (n : Graph.node) : block =
     | [ i ], [ e ] -> [ Assign (i, e) ]
     | _ ->
         let temps =
-          List.map
-            (fun s ->
-              slot ctx ~key:(n.id ^ "\000next\000" ^ s) ~display:(s ^ "_next"))
-            states
+          List.map2
+            (fun s ty ->
+              slot ctx
+                ~key:(n.id ^ "\000next\000" ^ s)
+                ~display:(s ^ "_next") ~ty)
+            states types
         in
         List.map2 (fun t e -> Assign (t, e)) temps steps
         @ List.map2 (fun i t -> Assign (i, Local t)) slots temps
@@ -408,31 +482,34 @@ and loop ctx (n : Graph.node) : block =
   @ [ While (watching @ pre_cond, cond, body @ pre_steps @ updates) ]
   @ rest
 
+(* Loosen the assumption about a slot if what feeds it does not fit. *)
+and note_type ctx (n : Graph.node) name ty =
+  let key = slot_key n name in
+  let want = join (assumed ctx key) ty in
+  if want <> assumed ctx key then (
+    Hashtbl.replace ctx.slot_ty key want;
+    ctx.too_narrow <- true)
+
 (* --------------------------------------------------------------- entry *)
 
-let func_of_graph (g : Graph.t) : func * (string * string) list =
-  let fanout = Hashtbl.create 32 in
-  List.iter
-    (fun (e : Graph.edge) ->
-      let k = e.src ^ "\000" ^ e.src_port in
-      Hashtbl.replace fanout k
-        (1 + Option.value (Hashtbl.find_opt fanout k) ~default:0))
-    g.edges;
+let once (g : Graph.t) fanout slot_ty =
   let ctx =
     {
       g;
       slots = Hashtbl.create 16;
       used = Hashtbl.create 16;
+      fanout;
       params = [];
       vars = [];
       errs = [];
       active = Hashtbl.create 16;
       entered = Hashtbl.create 16;
-      fanout;
       shared = Hashtbl.create 8;
       prelude = [];
       temps = 0;
       watches = [];
+      slot_ty;
+      too_narrow = false;
     }
   in
   let start =
@@ -457,11 +534,35 @@ let func_of_graph (g : Graph.t) : func * (string * string) list =
         (* Parameters take the first local slots, in the order the start node
            lists them, so the wasm signature matches the editor's form. *)
         List.iter
-          (fun p -> ignore (slot ctx ~key:("\001" ^ p) ~display:p))
+          (fun p -> ignore (slot ctx ~key:("\001" ^ p) ~display:p ~ty:VFloat))
           ctx.params;
         ctx.vars <- [];
         Hashtbl.replace ctx.entered start.id ();
         chain ctx start "next"
   in
+  (ctx, { params = ctx.params; vars = ctx.vars; body })
+
+let func_of_graph (g : Graph.t) : func * (string * string) list =
+  let fanout = Hashtbl.create 32 in
+  List.iter
+    (fun (e : Graph.edge) ->
+      let k = e.src ^ "\000" ^ e.src_port in
+      Hashtbl.replace fanout k
+        (1 + Option.value (Hashtbl.find_opt fanout k) ~default:0))
+    g.edges;
+  let slot_ty = Hashtbl.create 16 in
+  (* Every pass that is thrown away has loosened at least one slot, and a slot
+     only loosens once, so this settles well inside the bound. *)
+  let budget =
+    List.fold_left
+      (fun n node -> n + List.length (declared_names node "states"))
+      2
+      (Graph.nodes_of_kind g "while")
+  in
+  let rec attempt left =
+    let ctx, f = once g fanout slot_ty in
+    if ctx.too_narrow && left > 0 then attempt (left - 1) else (ctx, f)
+  in
+  let ctx, f = attempt budget in
   (match ctx.errs with [] -> () | errs -> raise (Graph.Errors (List.rev errs)));
-  ({ params = ctx.params; vars = ctx.vars; body }, List.rev ctx.watches)
+  (f, List.rev ctx.watches)

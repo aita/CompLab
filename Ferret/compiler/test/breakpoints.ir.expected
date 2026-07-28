@@ -1,10 +1,10 @@
 fun main(n) -> f64 {
-  var i = 0
+  var i : int = 0
   i = 0
   loop {
     watch#0(i)
-    exit unless (i < n)
+    exit unless (float(i) < n)
     i = watch#1((i + 1))
   }
-  return i
+  return float(i)
 }

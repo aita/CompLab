@@ -7,6 +7,7 @@ open Ir
 
 type env = {
   names : string array;  (* local index -> $name *)
+  ty : expr -> vtype;
   mutable scratch_next : int;
   b : Buffer.t;
   mutable indent : int;
@@ -32,16 +33,16 @@ let num_literal x =
   if Float.is_integer x && Float.abs x < 1e15 then Printf.sprintf "%.1f" x
   else Printf.sprintf "%.17g" x
 
-let kind = function VNum -> "f64" | VBool -> "i32"
+let kind = function VInt -> "i64" | VFloat -> "f64" | VBool -> "i32"
 
-let binop_name = function
-  | Add -> "f64.add"
-  | Sub -> "f64.sub"
-  | Mul -> "f64.mul"
+let binop_name t = function
+  | Add -> kind t ^ ".add"
+  | Sub -> kind t ^ ".sub"
+  | Mul -> kind t ^ ".mul"
   | Div -> "f64.div"
   | Min -> "f64.min"
   | Max -> "f64.max"
-  | Mod -> assert false
+  | Mod -> "i64.rem_s"
 
 let unop_name = function
   | Neg -> "f64.neg"
@@ -51,18 +52,27 @@ let unop_name = function
   | Ceil -> "f64.ceil"
   | Round -> "f64.nearest"
 
-let cmp_name = function
-  | Lt -> "f64.lt"
-  | Le -> "f64.le"
-  | Gt -> "f64.gt"
-  | Ge -> "f64.ge"
-  | Eq -> "f64.eq"
-  | Ne -> "f64.ne"
+let cmp_name t op =
+  let signed s = if t = VInt then s ^ "_s" else s in
+  kind t ^ "."
+  ^
+  match op with
+  | Lt -> signed "lt"
+  | Le -> signed "le"
+  | Gt -> signed "gt"
+  | Ge -> signed "ge"
+  | Eq -> "eq"
+  | Ne -> "ne"
 
-let rec expr env = function
+let rec expr env e =
+  match e with
+  | Int n -> line env "i64.const %d" n
   | Num x -> line env "f64.const %s" (num_literal x)
   | Local i -> line env "local.get %s" (local env i)
-  | Bin (Mod, l, r) ->
+  | Widen e ->
+      expr env e;
+      line env "f64.convert_i64_s"
+  | Bin (Mod, l, r) when env.ty l = VFloat ->
       let s = take_scratch env 2 in
       expr env l;
       line env "local.set %s" (local env s);
@@ -76,17 +86,35 @@ let rec expr env = function
       line env "local.get %s" (local env (s + 1));
       line env "f64.mul";
       line env "f64.sub"
+  | Un (Neg, e) when env.ty e = VInt ->
+      line env "i64.const 0";
+      expr env e;
+      line env "i64.sub"
+  | Un (Abs, e) when env.ty e = VInt ->
+      let s = take_scratch env 1 in
+      expr env e;
+      line env "local.set %s" (local env s);
+      line env "i64.const 0";
+      line env "local.get %s" (local env s);
+      line env "i64.sub";
+      line env "local.get %s" (local env s);
+      line env "local.get %s" (local env s);
+      line env "i64.const 0";
+      line env "i64.lt_s";
+      line env "select"
   | Bin (op, l, r) ->
+      let t = env.ty l in
       expr env l;
       expr env r;
-      line env "%s" (binop_name op)
+      line env "%s" (binop_name t op)
   | Un (op, e) ->
       expr env e;
       line env "%s" (unop_name op)
   | Cmp (op, l, r) ->
+      let t = env.ty l in
       expr env l;
       expr env r;
-      line env "%s" (cmp_name op)
+      line env "%s" (cmp_name t op)
   | And (l, r) ->
       expr env l;
       expr env r;
@@ -124,6 +152,16 @@ let rec expr env = function
       line env "call $random";
       line env "f64.mul";
       line env "f64.add"
+  | Watch (i, VInt, e) ->
+      let s = take_scratch env 1 in
+      expr env e;
+      line env "local.set %s" (local env s);
+      line env "i32.const %d" i;
+      line env "local.get %s" (local env s);
+      line env "f64.convert_i64_s";
+      line env "call $watch";
+      line env "drop";
+      line env "local.get %s" (local env s)
   | Watch (i, ty, e) ->
       line env "i32.const %d" i;
       expr env e;
@@ -174,16 +212,21 @@ and stmt env = function
       line env "end"
 
 let of_func (f : func) : string =
+  let ty = Ir.type_of (Emit.local_types f) in
   let scratch =
-    List.init (Emit.scratch_of_block f.body) (fun i -> Printf.sprintf "$t%d" i)
+    List.mapi
+      (fun i t -> (Printf.sprintf "$t%d" i, t))
+      (Emit.scratch_of_block ty f.body)
   in
   let names =
     Array.of_list
-      (List.map (fun n -> "$" ^ n) (f.params @ List.map fst f.vars) @ scratch)
+      (List.map (fun n -> "$" ^ n) (f.params @ List.map fst f.vars)
+      @ List.map fst scratch)
   in
   let env =
     {
       names;
+      ty;
       scratch_next = List.length f.params + List.length f.vars;
       b = Buffer.create 512;
       indent = 0;
@@ -203,7 +246,7 @@ let of_func (f : func) : string =
         (if params = "" then "" else params ^ " ");
       nested env (fun () ->
           List.iter (fun (v, t) -> line env "(local $%s %s)" v (kind t)) f.vars;
-          List.iter (fun n -> line env "(local %s f64)" n) scratch;
+          List.iter (fun (n, t) -> line env "(local %s %s)" n (kind t)) scratch;
           block env f.body;
           line env "f64.const 0.0");
       line env ")");

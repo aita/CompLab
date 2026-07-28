@@ -8,7 +8,7 @@
   e: the value input is not connected
 
 # a number where a condition belongs
-  w: the cond input wants a true or false but is given a number
+  w: the cond input wants a true or false but is given a whole number
 
 # a condition where a number belongs
   e: the value input wants a number but is given a true or false

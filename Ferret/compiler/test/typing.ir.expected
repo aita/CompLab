@@ -1,0 +1,9 @@
+fun main() -> f64 {
+  var i : int = 0
+  i = 0
+  while (i < 10) {
+    log float((i % 3))
+    i = (i + 1)
+  }
+  return (float(i) / 2)
+}

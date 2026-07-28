@@ -79,6 +79,37 @@
  (action
   (diff breakpoints.ir.expected breakpoints.ir)))
 
+; Whole numbers stay whole: the loop counter, its test, and the remainder are
+; i64, and a value only widens where it meets an f64 or the host.
+(rule
+ (target typing.ir)
+ (action
+  (with-stdout-to
+   typing.ir
+   (run ../bin/ferretc.exe --emit ir %{dep:typing.json}))))
+
+(rule
+ (target typing.wat)
+ (action
+  (with-stdout-to
+   typing.wat
+   (run ../bin/ferretc.exe --emit wat %{dep:typing.json}))))
+
+(rule
+ (target typing.wasm)
+ (action
+  (run ../bin/ferretc.exe %{dep:typing.json} -o typing.wasm)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff typing.ir.expected typing.ir)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff typing.wat.expected typing.wat)))
+
 (rule
  (target errors.out)
  (action
@@ -106,6 +137,12 @@
 ; has.
 (rule
  (alias runtest)
- (deps run_wasm.mjs sum.wasm collatz.wasm random.wasm breakpoints.wasm)
+ (deps
+  run_wasm.mjs
+  sum.wasm
+  collatz.wasm
+  random.wasm
+  breakpoints.wasm
+  typing.wasm)
  (action
   (run node run_wasm.mjs)))
