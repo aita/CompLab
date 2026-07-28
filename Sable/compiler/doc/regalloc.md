@@ -625,4 +625,4 @@ in
 
 ---
 
-[← 7. 命令選択と制御フロー](selection.md) ／ [目次](index.md) ／ [9. のぞき穴最適化と出力 →](emit.md)
+[← 7. 制御フローグラフと命令選択](selection.md) ／ [目次](index.md) ／ [9. のぞき穴最適化と出力 →](emit.md)

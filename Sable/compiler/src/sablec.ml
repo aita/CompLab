@@ -5,10 +5,12 @@ let register_budget = ref Riscv.max_colors
 let optimizer_rounds = ref 3
 let dump_knf = ref false
 let dump_closure = ref false
+let dump_ir = ref false
 let dump_riscv = ref false
 let dump_regalloc = ref false
 let check_cfg = ref false
 let check_knf = ref false
+let check_ir = ref false
 
 let options =
   [
@@ -20,11 +22,15 @@ let options =
     ("-O", Arg.Set_int optimizer_rounds, "<n>  run the optimizer n times (default 3)");
     ("--dump-knf", Arg.Set dump_knf, "  print the K-normalized program");
     ("--dump-closure", Arg.Set dump_closure, "  print the closure-converted program");
+    ("--dump-ir", Arg.Set dump_ir, "  print the control-flow graph before instruction selection");
     ("--dump-riscv", Arg.Set dump_riscv, "  print the RISC-V code before register allocation");
     ("--dump-regalloc", Arg.Set dump_regalloc, "  report on register allocation");
     ( "--check-knf",
       Arg.Set check_knf,
       "  fail if the normalized program is not in K-normal form" );
+    ( "--check-ir",
+      Arg.Set check_ir,
+      "  fail if the control-flow graph is not well formed" );
     ( "--check-cfg",
       Arg.Set check_cfg,
       "  fail if any function's control-flow graph has a cycle" );
@@ -72,7 +78,15 @@ let compile path =
   if !dump_knf then Dump.knormal stderr 0 normalized;
   let converted = Closure.convert normalized in
   if !dump_closure then Dump.closure_program stderr converted;
-  let functions = Selection.translate converted in
+  let ir = Ir.translate converted in
+  if !check_ir then
+    List.iter
+      (fun f ->
+        try Ir.check f
+        with Ir.Broken msg -> failwith (Printf.sprintf "%s: %s" path msg))
+      ir;
+  if !dump_ir then Dump.ir stderr ir;
+  let functions = Selection.translate ir in
   List.iter
     (fun func ->
       (* The back end reads a cycle-free graph in two places: liveness is done

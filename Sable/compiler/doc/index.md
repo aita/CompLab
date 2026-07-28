@@ -27,14 +27,14 @@ ML ふうの言語を RISC-V（RV64I/M）へコンパイルする処理系の解
 
 | | | |
 |---|---|---|
-| 7 | [命令選択と制御フロー](selection.md) | `selection.ml`・`cfg.ml`・`liveness.ml`。無制限の仮想レジスタの上の制御フローグラフ |
+| 7 | [制御フローグラフと命令選択](selection.md) | `ir.ml`・`selection.ml`・`cfg.ml`・`liveness.ml`。木をグラフにしてから機械に落とす |
 | 8 | [レジスタ割り付け](regalloc.md) | `regalloc.ml`・`bitset.ml`。グラフ彩色と反復融合。この処理系の中心 |
 | 9 | [のぞき穴最適化と出力](emit.md) | `peephole.ml`・`emit.ml`。呼び出し規約と実行時表現も |
 
 ## 読み方
 
 **通して読むなら** 0章から順に。前半は構文木を均していく話、後半は機械の都合が入ってくる
-話で、境目は6章と7章のあいだです。
+話で、境目は7章の中、`ir.ml` と `selection.ml` のあいだです。
 
 **1つだけ読むなら** [8章のレジスタ割り付け](regalloc.md)です。他の章はここに食わせる形を
 作るために存在していて、8章だけが「与えられた資源をどう割り当てるか」という別種の問題を
@@ -47,10 +47,12 @@ ML ふうの言語を RISC-V（RV64I/M）へコンパイルする処理系の解
 ./sable -S doc/sum.sbl                            # 最終アセンブリ
 sablec --dump-knf      -o /dev/null doc/sum.sbl   # K正規形（5章）
 sablec --dump-closure  -o /dev/null doc/sum.sbl   # クロージャ変換後（6章）
+sablec --dump-ir       -o /dev/null doc/sum.sbl   # 機械独立の制御フローグラフ（7章）
 sablec --dump-riscv    -o /dev/null doc/sum.sbl   # 割り付け前（7章）
 sablec --dump-regalloc -o /dev/null doc/sum.sbl   # 割り付けの結果（8章）
 sablec --check-knf     -o /dev/null doc/sum.sbl   # 正規形の検査（5章）
-sablec --check-cfg     -o /dev/null doc/sum.sbl   # 制御フローグラフの検査（7章）
+sablec --check-ir      -o /dev/null doc/sum.sbl   # 制御フローグラフの検査（7章）
+sablec --check-cfg     -o /dev/null doc/sum.sbl   # 閉路がないことの検査（7章）
 dune exec tests/walkthrough.exe                   # 割り付けを1手ずつ（8章 §7）
 ```
 

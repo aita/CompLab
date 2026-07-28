@@ -20,9 +20,11 @@ sablec [options] <file.sbl>
   -O <n>             run the optimizer n times (default 3)
   --dump-knf         print the K-normalized program
   --dump-closure     print the closure-converted program
+  --dump-ir          print the control-flow graph before instruction selection
   --dump-riscv       print the RISC-V code before register allocation
   --dump-regalloc    report rounds, coalesced moves and spills per function
   --check-knf        fail if the normalized program is not in K-normal form
+  --check-ir         fail if the control-flow graph is not well formed
   --check-cfg        fail if any control-flow graph has a cycle
 ```
 
@@ -200,6 +202,7 @@ around a condition, commas where it has spaces.
 | α-conversion | `alpha.ml` | make every binder unique |
 | optimization | `optim.ml` | copy and constant propagation, dead-let elimination |
 | closure conversion | `closure.ml` | lift functions to the top level |
+| control-flow graph | `ir.ml` | the tree into basic blocks, still target-independent |
 | instruction selection | `selection.ml` | RISC-V CFG over unlimited virtual registers |
 | control flow | `cfg.ml` | postorder, reachability, an acyclicity check and block layout |
 | liveness | `liveness.ml` | backwards dataflow; also dead-code elimination |
@@ -211,13 +214,15 @@ around a condition, commas where it has spaces.
 interference itself, a bit per pair. It is the one data-structure choice that
 shows up in the wall clock: see [the write-up](doc/regalloc.md), section 11.
 
-The last five rows sit on `riscv.ml`, which holds the instruction and
-control-flow types, the register file and the calling convention. It is
-deliberately not called `ir.ml`: it knows exactly one target, down to which
-operations take a 12-bit immediate. `liveness.ml` and `regalloc.ml` are the
-parts that do not — they use only uses, definitions, successors and register
-substitution, so retargeting would mean rewriting `riscv.ml`, `emit.ml` and the
-instruction-selection half of `selection.ml`, and leaving the allocator alone.
+There are two control-flow graphs, and the line between them is the line
+between the language and the machine. `ir.ml` holds the first: blocks, values
+and calls, knowing nothing about registers, the calling convention or which
+operations the target has. `riscv.ml` holds the second, down to which
+operations take a 12-bit immediate. `liveness.ml` and `regalloc.ml` sit on the
+second but use only uses, definitions, successors and register substitution, so
+retargeting would mean rewriting `riscv.ml`, `emit.ml` and `selection.ml`, and
+leaving the allocator alone. An SSA form belongs above the line; the ABI
+belongs below it.
 
 ### Representation
 

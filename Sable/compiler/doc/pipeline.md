@@ -73,8 +73,19 @@ $ sablec --dump-closure -o /dev/null doc/sum.sbl
       call sable_sum_18 (fld.7.24)   ← 直接呼び出し
 ```
 
-**命令選択**（[詳説](selection.md)）。無制限の仮想レジスタの上の制御フローグラフになります。
-入口で callee-saved 12本を仮想レジスタへ写し、各 `ret` の直前で書き戻すコードが入ります。
+**制御フローグラフ**（[詳説](selection.md)）。木がブロックになります。ここまでは対象機械を
+何も知りません。
+
+```
+$ sablec --dump-ir -o /dev/null doc/sum.sbl
+  sable_sum_18:
+    t.8.21 <- l.19[0]
+    t.9.22 <- 0
+    if t.8.21 = t.9.22 then .Lthen36 else .Lelse37   ← 枝が2つのブロックに
+```
+
+**命令選択**（[詳説](selection.md)）。同じグラフが RISC-V になります。入口で callee-saved
+12本を仮想レジスタへ写し、各 `ret` の直前で書き戻すコードが入ります。
 
 ```
 $ sablec --dump-riscv -o /dev/null doc/sum.sbl

@@ -1,5 +1,8 @@
-(* Instruction selection: closure-converted code into the RISC-V control-flow
-   graph.
+(* Instruction selection: the control-flow graph into the RISC-V one.
+
+   Ir has already decided what the blocks are and what each of them computes.
+   What is left is everything that depends on the target: which instruction
+   does the job, what fits in an immediate, and the calling convention.
 
    Everything here uses fresh virtual registers, so the code it produces is
    correct but unrunnable; Regalloc turns it into something a processor can
@@ -18,56 +21,47 @@
 
 exception Error of string
 
-type builder = {
-  mutable done_blocks : Riscv.block list; (* finished, in reverse order *)
-  mutable label : Ident.label;
-  mutable pending : Riscv.instr list; (* current block's body, reversed *)
-  mutable open_block : bool;
-}
+type builder = { mutable pending : Riscv.instr list (* reversed *) }
 
-let emit builder instr =
-  if builder.open_block then builder.pending <- instr :: builder.pending
-
-let terminate builder terminator =
-  if builder.open_block then begin
-    builder.done_blocks <-
-      { Riscv.label = builder.label; body = List.rev builder.pending; terminator }
-      :: builder.done_blocks;
-    builder.open_block <- false
-  end
-
-let start_block builder label =
-  builder.label <- label;
-  builder.pending <- [];
-  builder.open_block <- true
-
-(* Where the value of an expression has to end up. *)
-type destination =
-  | Into of Riscv.reg
-  | Return_from_function (* the expression is in tail position *)
+let emit builder instr = builder.pending <- instr :: builder.pending
 
 type context = {
   builder : builder;
-  mutable env : Riscv.reg Ident.Map.t; (* variable -> register holding it *)
-  mutable consts : int Ident.Map.t; (* variables known to hold a constant *)
+  mutable env : Riscv.reg Ident.Map.t; (* value -> register holding it *)
+  mutable consts : int Ident.Map.t; (* values known to hold a constant *)
+  once : (Ident.t, unit) Hashtbl.t; (* values with exactly one definition *)
 }
 
 let reg_of ctx x =
   match Ident.Map.find_opt x ctx.env with
   | Some r -> r
-  | None -> raise (Error (Printf.sprintf "unbound variable `%s` reached code generation" x))
+  | None -> raise (Error (Printf.sprintf "unbound value `%s` reached code generation" x))
+
+(* Give a value a register, or hand back the one it already has.  The two arms
+   of an `if` assign the same value, and both have to write the same place --
+   the day Ir grows phi nodes, this is what a phi would say instead. *)
+let define ctx x =
+  match Ident.Map.find_opt x ctx.env with
+  | Some r -> r
+  | None ->
+    let r = Riscv.fresh_reg () in
+    ctx.env <- Ident.Map.add x r ctx.env;
+    r
+
+(* A value assigned in more than one block is not a constant anywhere, however
+   constant each of the assignments looks: `let x = if c then 1 else 2` writes
+   x twice, and which one reached a later block is exactly what the graph does
+   not say.  Only single-definition values may be remembered. *)
+let remember_const ctx x n =
+  if Hashtbl.mem ctx.once x then ctx.consts <- Ident.Map.add x n ctx.consts
 
 let const_of ctx x = Ident.Map.find_opt x ctx.consts
-let bind ctx x r = ctx.env <- Ident.Map.add x r ctx.env
 
 (* Reading a value known to be zero uses the hard-wired zero register.  That
    costs nothing here and usually leaves the `li` that materialized the zero
    with no readers, so dead-code elimination takes it away along with the
    register it was occupying. *)
 let operand ctx x = if const_of ctx x = Some 0 then Riscv.zero else reg_of ctx x
-
-(* The arms of a comparison that was turned into a value by K-normalization. *)
-let is_boolean_pair a b = (a = 1 && b = 0) || (a = 0 && b = 1)
 
 let binop_of = function
   | Knormal.Add -> Riscv.Add
@@ -109,132 +103,10 @@ let allocate_block ctx bytes =
   emit ctx.builder (Riscv.Move (r, Riscv.a0));
   r
 
-let rec generate ctx dest exp =
-  match exp with
-  | Closure.Let ((x, _), Closure.Int n, body) ->
-    (* Remember the value as well as the register: the uses that can take an
-       immediate will not read the register, and it disappears. *)
-    let r = Riscv.fresh_reg () in
-    emit ctx.builder (Riscv.Li (r, n));
-    bind ctx x r;
-    ctx.consts <- Ident.Map.add x n ctx.consts;
-    generate ctx dest body
-  | Closure.Let ((x, _), value, body) ->
-    let r = Riscv.fresh_reg () in
-    generate ctx (Into r) value;
-    bind ctx x r;
-    generate ctx dest body
-  (* A comparison whose two arms are 1 and 0 is a comparison used as a value.
-     Branching over it costs two blocks and a jump for what `slt` does in one
-     instruction, so it goes to generate_value instead. *)
-  | Closure.If_eq (_, _, Closure.Int a, Closure.Int b)
-  | Closure.If_le (_, _, Closure.Int a, Closure.Int b)
-    when is_boolean_pair a b ->
-    generate_value ctx dest exp
-  | Closure.If_eq (x, y, then_, else_) ->
-    generate_branch ctx dest Riscv.Eq (operand ctx x) (operand ctx y) then_ else_
-  | Closure.If_le (x, y, then_, else_) ->
-    (* x <= y is y >= x. *)
-    generate_branch ctx dest Riscv.Ge (operand ctx y) (operand ctx x) then_ else_
-  | Closure.Let_tuple (xts, tuple, body) ->
-    let base = reg_of ctx tuple in
-    List.iteri
-      (fun i (x, _) ->
-        let r = Riscv.fresh_reg () in
-        emit ctx.builder (Riscv.Load (r, base, i * word));
-        bind ctx x r)
-      xts;
-    generate ctx dest body
-  | Closure.Make_closures (definitions, body) ->
-    (* Allocate every block and bind every name first, then fill them in: a
-       closure may capture itself or a sibling, and neither pointer exists
-       until its block does. *)
-    let blocks =
-      List.map
-        (fun ((x, _), (closure : Closure.closure)) ->
-          let block =
-            allocate_block ctx ((1 + List.length closure.captured) * word)
-          in
-          bind ctx x block;
-          (block, closure))
-        definitions
-    in
-    List.iter
-      (fun (block, (closure : Closure.closure)) ->
-        let code = Riscv.fresh_reg () in
-        emit ctx.builder (Riscv.La (code, closure.entry));
-        emit ctx.builder (Riscv.Store (code, block, 0));
-        List.iteri
-          (fun i v -> emit ctx.builder (Riscv.Store (operand ctx v, block, (i + 1) * word)))
-          closure.captured)
-      blocks;
-    generate ctx dest body
-  | Closure.Call_direct (label, args) -> generate_call ctx dest (Riscv.Direct label) args None
-  | Closure.Call_closure (f, args) ->
-    let closure = reg_of ctx f in
-    let code = Riscv.fresh_reg () in
-    emit ctx.builder (Riscv.Load (code, closure, 0));
-    generate_call ctx dest (Riscv.Indirect code) args (Some closure)
-  | _ -> generate_value ctx dest exp
-
-(* Expressions that simply compute a value into a register. *)
-and generate_value ctx dest exp =
-  let target = match dest with Into r -> r | Return_from_function -> Riscv.fresh_reg () in
-  (match exp with
-   | Closure.Int n -> emit ctx.builder (Riscv.Li (target, n))
-   | Closure.Static label -> emit ctx.builder (Riscv.La (target, label))
-   | Closure.Var x -> emit ctx.builder (Riscv.Move (target, operand ctx x))
-   | Closure.Neg x -> emit ctx.builder (Riscv.Arith (Riscv.Sub, target, Riscv.zero, operand ctx x))
-   | Closure.Field (x, i) -> emit ctx.builder (Riscv.Load (target, reg_of ctx x, i * word))
-   | Closure.Byte (s, i) ->
-     (* The bytes start one word into the block, so the length word is the
-        offset and the index is added to the base. *)
-     let address = Riscv.fresh_reg () in
-     emit ctx.builder (Riscv.Arith (Riscv.Add, address, reg_of ctx s, operand ctx i));
-     emit ctx.builder (Riscv.Load_byte (target, address, word))
-   | Closure.Bin (op, x, y) -> generate_arith ctx target op x y
-   (* Comparisons in value position; see generate. *)
-   | Closure.If_eq (x, y, Closure.Int a, _) -> generate_equality ctx target x y ~negated:(a = 0)
-   | Closure.If_le (x, y, Closure.Int a, _) -> generate_ordering ctx target x y ~negated:(a = 0)
-   | Closure.Tuple xs ->
-     let block = allocate_block ctx (List.length xs * word) in
-     List.iteri
-       (fun i x -> emit ctx.builder (Riscv.Store (operand ctx x, block, i * word)))
-       xs;
-     emit ctx.builder (Riscv.Move (target, block))
-   | Closure.Block (tag, xs) ->
-     let block = allocate_block ctx ((1 + List.length xs) * word) in
-     let tag_reg = Riscv.fresh_reg () in
-     emit ctx.builder (Riscv.Li (tag_reg, tag));
-     emit ctx.builder (Riscv.Store (tag_reg, block, 0));
-     List.iteri
-       (fun i x -> emit ctx.builder (Riscv.Store (operand ctx x, block, (i + 1) * word)))
-       xs;
-     emit ctx.builder (Riscv.Move (target, block))
-   | Closure.Array (size, init) ->
-     emit ctx.builder (Riscv.Move (Riscv.arg_regs.(0), operand ctx size));
-     emit ctx.builder (Riscv.Move (Riscv.arg_regs.(1), operand ctx init));
-     emit ctx.builder
-       (Riscv.Call (Riscv.Direct "sable_make_array", [ Riscv.arg_regs.(0); Riscv.arg_regs.(1) ]));
-     emit ctx.builder (Riscv.Move (target, Riscv.a0))
-   | Closure.Get (arr, idx) ->
-     let address, offset = element_address ctx arr idx in
-     emit ctx.builder (Riscv.Load (target, address, offset))
-   | Closure.Put (arr, idx, v) ->
-     let address, offset = element_address ctx arr idx in
-     emit ctx.builder (Riscv.Store (operand ctx v, address, offset));
-     emit ctx.builder (Riscv.Li (target, 0))
-   | _ -> failwith "Selection: generate_value on a control-flow expression");
-  match dest with
-  | Into _ -> ()
-  | Return_from_function ->
-    emit ctx.builder (Riscv.Move (Riscv.a0, target));
-    terminate ctx.builder (Riscv.Return [ Riscv.a0 ])
-
 (* target <- (x = y) as 0 or 1, or its negation.  The difference of two values
    is zero exactly when they are equal, and `sltu` against zero turns that into
    a boolean without a branch. *)
-and generate_equality ctx target x y ~negated =
+let generate_equality ctx target x y ~negated =
   let rx = operand ctx x and ry = operand ctx y in
   let difference =
     if rx = Riscv.zero then ry
@@ -248,8 +120,14 @@ and generate_equality ctx target x y ~negated =
   if negated then emit ctx.builder (Riscv.Arith (Riscv.Sltu, target, Riscv.zero, difference))
   else emit ctx.builder (Riscv.Arith_imm (Riscv.Sltu, target, difference, 1))
 
+let generate_less_than ctx target a b =
+  match const_of ctx b with
+  | Some n when Riscv.fits_immediate n ->
+    emit ctx.builder (Riscv.Arith_imm (Riscv.Slt, target, operand ctx a, n))
+  | _ -> emit ctx.builder (Riscv.Arith (Riscv.Slt, target, operand ctx a, operand ctx b))
+
 (* target <- (x <= y) as 0 or 1, or its negation, which is (y < x). *)
-and generate_ordering ctx target x y ~negated =
+let generate_ordering ctx target x y ~negated =
   if negated then generate_less_than ctx target y x
   else begin
     let t = Riscv.fresh_reg () in
@@ -257,23 +135,7 @@ and generate_ordering ctx target x y ~negated =
     emit ctx.builder (Riscv.Arith_imm (Riscv.Xor, target, t, 1))
   end
 
-and generate_less_than ctx target a b =
-  match const_of ctx b with
-  | Some n when Riscv.fits_immediate n ->
-    emit ctx.builder (Riscv.Arith_imm (Riscv.Slt, target, operand ctx a, n))
-  | _ -> emit ctx.builder (Riscv.Arith (Riscv.Slt, target, operand ctx a, operand ctx b))
-
-(* Branch away to a call that never returns if the divisor is zero. *)
-and check_divisor ctx divisor =
-  let fine = Ident.fresh_label "nonzero" in
-  let bad = Ident.fresh_label "divzero" in
-  terminate ctx.builder (Riscv.Branch (Riscv.Eq, divisor, Riscv.zero, bad, fine));
-  start_block ctx.builder bad;
-  emit ctx.builder (Riscv.Call (Riscv.Direct "sable_division_by_zero", []));
-  terminate ctx.builder (Riscv.Jump fine);
-  start_block ctx.builder fine
-
-and generate_arith ctx target op x y =
+let generate_arith ctx target op x y =
   let shift src k =
     if k = 0 then emit ctx.builder (Riscv.Move (target, src))
     else emit ctx.builder (Riscv.Arith_imm (Riscv.Sll, target, src, k))
@@ -295,20 +157,10 @@ and generate_arith ctx target op x y =
     shift (operand ctx x) (Option.get (power_of_two n))
   | Knormal.Mul, Some n, _ when power_of_two n <> None ->
     shift (operand ctx y) (Option.get (power_of_two n))
-  | (Knormal.Div | Knormal.Rem), _, divisor ->
-    (* RISC-V does not trap on division by zero, it answers -1, so a program
-       that divides by zero would quietly carry on with a wrong number.  The
-       check is skipped when the divisor is a constant we can see is not
-       zero, which is most of them. *)
-    (match divisor with
-     | Some n when n <> 0 -> ()
-     | _ -> check_divisor ctx (operand ctx y));
-    emit ctx.builder (Riscv.Arith (binop_of op, target, operand ctx x, operand ctx y))
-  | _ ->
-    emit ctx.builder (Riscv.Arith (binop_of op, target, operand ctx x, operand ctx y))
+  | _ -> emit ctx.builder (Riscv.Arith (binop_of op, target, operand ctx x, operand ctx y))
 
 (* The address of an array element, as a base register and a byte offset. *)
-and element_address ctx arr idx =
+let element_address ctx arr idx =
   let base = reg_of ctx arr in
   match const_of ctx idx with
   | Some n when Riscv.fits_immediate (n * word) -> (base, n * word)
@@ -319,57 +171,129 @@ and element_address ctx arr idx =
     emit ctx.builder (Riscv.Arith (Riscv.Add, address, base, scaled));
     (address, 0)
 
-and generate_branch ctx dest cond left right then_ else_ =
-  let then_label = Ident.fresh_label "then" in
-  let else_label = Ident.fresh_label "else" in
-  terminate ctx.builder (Riscv.Branch (cond, left, right, then_label, else_label));
-  match dest with
-  | Return_from_function ->
-    (* Each arm returns on its own; there is nothing to join. *)
-    let saved = ctx.env and saved_consts = ctx.consts in
-    start_block ctx.builder then_label;
-    generate ctx dest then_;
-    ctx.env <- saved;
-    ctx.consts <- saved_consts;
-    start_block ctx.builder else_label;
-    generate ctx dest else_
-  | Into r ->
-    let join_label = Ident.fresh_label "join" in
-    let saved = ctx.env and saved_consts = ctx.consts in
-    start_block ctx.builder then_label;
-    generate ctx (Into r) then_;
-    terminate ctx.builder (Riscv.Jump join_label);
-    ctx.env <- saved;
-    ctx.consts <- saved_consts;
-    start_block ctx.builder else_label;
-    generate ctx (Into r) else_;
-    terminate ctx.builder (Riscv.Jump join_label);
-    (* Nothing an arm bound is in scope after the join, so the environment
-       goes back to what it was. *)
-    ctx.env <- saved;
-    ctx.consts <- saved_consts;
-    start_block ctx.builder join_label
+(* The register the call reads as its callee, and the closure to hand over in
+   t6 if there is one.  A closure's first word is its code pointer. *)
+let resolve_callee ctx = function
+  | Ir.Direct label -> (Riscv.Direct label, None)
+  | Ir.Closure f ->
+    let closure = reg_of ctx f in
+    let code = Riscv.fresh_reg () in
+    emit ctx.builder (Riscv.Load (code, closure, 0));
+    (Riscv.Indirect code, Some closure)
 
-and generate_call ctx dest callee args closure =
-  let arg_regs = pass_arguments ctx args in
-  (match closure with
-   | Some c -> emit ctx.builder (Riscv.Move (Riscv.closure_reg, c))
-   | None -> ());
-  match dest with
-  | Return_from_function -> terminate ctx.builder (Riscv.Tail_call (callee, arg_regs))
-  | Into r ->
+let generate_op ctx target = function
+  | Ir.Int n -> emit ctx.builder (Riscv.Li (target, n))
+  | Ir.Static label -> emit ctx.builder (Riscv.La (target, label))
+  | Ir.Move x -> emit ctx.builder (Riscv.Move (target, operand ctx x))
+  | Ir.Neg x -> emit ctx.builder (Riscv.Arith (Riscv.Sub, target, Riscv.zero, operand ctx x))
+  | Ir.Field (x, i) -> emit ctx.builder (Riscv.Load (target, reg_of ctx x, i * word))
+  | Ir.Byte (s, i) ->
+    (* The bytes start one word into the block, so the length word is the
+       offset and the index is added to the base. *)
+    let address = Riscv.fresh_reg () in
+    emit ctx.builder (Riscv.Arith (Riscv.Add, address, reg_of ctx s, operand ctx i));
+    emit ctx.builder (Riscv.Load_byte (target, address, word))
+  | Ir.Bin (op, x, y) -> generate_arith ctx target op x y
+  | Ir.Cmp (Ir.Eq, x, y, negated) -> generate_equality ctx target x y ~negated
+  | Ir.Cmp (Ir.Le, x, y, negated) -> generate_ordering ctx target x y ~negated
+  | Ir.Tuple xs ->
+    let block = allocate_block ctx (List.length xs * word) in
+    List.iteri (fun i x -> emit ctx.builder (Riscv.Store (operand ctx x, block, i * word))) xs;
+    emit ctx.builder (Riscv.Move (target, block))
+  | Ir.Block (tag, xs) ->
+    let block = allocate_block ctx ((1 + List.length xs) * word) in
+    let tag_reg = Riscv.fresh_reg () in
+    emit ctx.builder (Riscv.Li (tag_reg, tag));
+    emit ctx.builder (Riscv.Store (tag_reg, block, 0));
+    List.iteri
+      (fun i x -> emit ctx.builder (Riscv.Store (operand ctx x, block, (i + 1) * word)))
+      xs;
+    emit ctx.builder (Riscv.Move (target, block))
+  | Ir.Array (size, init) ->
+    emit ctx.builder (Riscv.Move (Riscv.arg_regs.(0), operand ctx size));
+    emit ctx.builder (Riscv.Move (Riscv.arg_regs.(1), operand ctx init));
+    emit ctx.builder
+      (Riscv.Call (Riscv.Direct "sable_make_array", [ Riscv.arg_regs.(0); Riscv.arg_regs.(1) ]));
+    emit ctx.builder (Riscv.Move (target, Riscv.a0))
+  | Ir.Get (arr, idx) ->
+    let address, offset = element_address ctx arr idx in
+    emit ctx.builder (Riscv.Load (target, address, offset))
+  | Ir.Put (arr, idx, v) ->
+    let address, offset = element_address ctx arr idx in
+    emit ctx.builder (Riscv.Store (operand ctx v, address, offset));
+    emit ctx.builder (Riscv.Li (target, 0))
+  | Ir.Call (callee, args) ->
+    let callee, closure = resolve_callee ctx callee in
+    let arg_regs = pass_arguments ctx args in
+    (match closure with
+     | Some c -> emit ctx.builder (Riscv.Move (Riscv.closure_reg, c))
+     | None -> ());
     emit ctx.builder (Riscv.Call (callee, arg_regs));
-    emit ctx.builder (Riscv.Move (r, Riscv.a0))
+    emit ctx.builder (Riscv.Move (target, Riscv.a0))
+
+let generate_instr ctx = function
+  | Ir.Let (x, Ir.Int n) ->
+    (* Remember the value as well as the register: the uses that can take an
+       immediate will not read the register, and it disappears. *)
+    let r = define ctx x in
+    emit ctx.builder (Riscv.Li (r, n));
+    remember_const ctx x n
+  | Ir.Let (x, op) ->
+    let r = define ctx x in
+    generate_op ctx r op
+  | Ir.Closures definitions ->
+    (* Allocate every block and bind every name first, then fill them in: a
+       closure may capture itself or a sibling, and neither pointer exists
+       until its block does. *)
+    let blocks =
+      List.map
+        (fun (x, entry, captured) ->
+          let block = allocate_block ctx ((1 + List.length captured) * word) in
+          ctx.env <- Ident.Map.add x block ctx.env;
+          (block, entry, captured))
+        definitions
+    in
+    List.iter
+      (fun (block, entry, captured) ->
+        let code = Riscv.fresh_reg () in
+        emit ctx.builder (Riscv.La (code, entry));
+        emit ctx.builder (Riscv.Store (code, block, 0));
+        List.iteri
+          (fun i v -> emit ctx.builder (Riscv.Store (operand ctx v, block, (i + 1) * word)))
+          captured)
+      blocks
+
+let generate_terminator ctx = function
+  | Ir.Jump l -> Riscv.Jump l
+  | Ir.Branch (Ir.Eq, x, y, t, f) -> Riscv.Branch (Riscv.Eq, operand ctx x, operand ctx y, t, f)
+  (* x <= y is y >= x. *)
+  | Ir.Branch (Ir.Le, x, y, t, f) -> Riscv.Branch (Riscv.Ge, operand ctx y, operand ctx x, t, f)
+  | Ir.Return x ->
+    emit ctx.builder (Riscv.Move (Riscv.a0, reg_of ctx x));
+    Riscv.Return [ Riscv.a0 ]
+  | Ir.Tail (callee, args) ->
+    let callee, closure = resolve_callee ctx callee in
+    let arg_regs = pass_arguments ctx args in
+    (match closure with
+     | Some c -> emit ctx.builder (Riscv.Move (Riscv.closure_reg, c))
+     | None -> ());
+    Riscv.Tail_call (callee, arg_regs)
 
 (* --------------------------------------------------------------- functions *)
 
-let build_function label args captures body =
-  check_arity ("the function `" ^ label ^ "`") (List.length args);
+let single_definitions (f : Ir.func) =
+  let counts = Hashtbl.create 64 in
+  let seen x = Hashtbl.replace counts x (1 + Option.value ~default:0 (Hashtbl.find_opt counts x)) in
+  List.iter (fun (b : Ir.block) -> List.iter (fun i -> List.iter seen (Ir.defines i)) b.body) f.blocks;
+  let once = Hashtbl.create 64 in
+  Hashtbl.iter (fun x n -> if n = 1 then Hashtbl.replace once x ()) counts;
+  once
+
+let translate_function (f : Ir.func) =
+  check_arity ("the function `" ^ f.label ^ "`") (List.length f.args);
   Riscv.reset_virtuals ();
-  let builder =
-    { done_blocks = []; label; pending = []; open_block = true }
-  in
-  let ctx = { builder; env = Ident.Map.empty; consts = Ident.Map.empty } in
+  let builder = { pending = [] } in
+  let ctx = { builder; env = Ident.Map.empty; consts = Ident.Map.empty; once = single_definitions f } in
   (* Copy the callee-saved registers somewhere the allocator can move them. *)
   let saved =
     Array.to_list !Riscv.callee_saved
@@ -378,21 +302,22 @@ let build_function label args captures body =
            emit builder (Riscv.Move (v, phys));
            (phys, v))
   in
+  List.iteri (fun i x -> emit builder (Riscv.Move (define ctx x, Riscv.arg_regs.(i)))) f.args;
   List.iteri
-    (fun i (x, _) ->
-      let r = Riscv.fresh_reg () in
-      emit builder (Riscv.Move (r, Riscv.arg_regs.(i)));
-      bind ctx x r)
-    args;
-  List.iteri
-    (fun i (x, _) ->
-      let r = Riscv.fresh_reg () in
-      emit builder (Riscv.Load (r, Riscv.closure_reg, (i + 1) * word));
-      bind ctx x r)
-    captures;
-  generate ctx Return_from_function body;
+    (fun i x -> emit builder (Riscv.Load (define ctx x, Riscv.closure_reg, (i + 1) * word)))
+    f.captures;
+  (* The prologue belongs to the entry block, which Ir puts first. *)
+  let blocks =
+    List.map
+      (fun (b : Ir.block) ->
+        List.iter (generate_instr ctx) b.body;
+        let terminator = generate_terminator ctx b.terminator in
+        let body = List.rev builder.pending in
+        builder.pending <- [];
+        { Riscv.label = b.label; body; terminator })
+      f.blocks
+  in
   (* Put the callee-saved registers back on every way out. *)
-  let blocks = List.rev builder.done_blocks in
   List.iter
     (fun (block : Riscv.block) ->
       match block.terminator with
@@ -400,18 +325,6 @@ let build_function label args captures body =
         block.body <- block.body @ List.map (fun (phys, v) -> Riscv.Move (phys, v)) saved
       | _ -> ())
     blocks;
-  {
-    Riscv.name = label;
-    blocks;
-    num_regs = Riscv.virtual_bound ();
-    num_spill_slots = 0;
-  }
+  { Riscv.name = f.label; blocks; num_regs = Riscv.virtual_bound (); num_spill_slots = 0 }
 
-let translate (program : Closure.program) =
-  let functions =
-    List.map
-      (fun (fd : Closure.fundef) ->
-        build_function fd.label fd.args fd.captures fd.body)
-      program.functions
-  in
-  functions @ [ build_function "sable_main" [] [] program.main ]
+let translate functions = List.map translate_function functions
