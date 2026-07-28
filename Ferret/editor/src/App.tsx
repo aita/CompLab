@@ -69,7 +69,8 @@ export default function App() {
   const counter = useRef(1);
   const lastPicked = useRef<string | null>(null);
   const flowRef = useRef<HTMLDivElement>(null);
-  const { screenToFlowPosition, fitView } = useReactFlow();
+  const { screenToFlowPosition, fitView, getNode, setCenter, getZoom } =
+    useReactFlow();
   const measured = useNodesInitialized();
 
   const loadDoc = useCallback(
@@ -146,6 +147,20 @@ export default function App() {
   // Compiling on every edit is what makes the errors feel like a linter; the
   // whole pipeline is well under a millisecond for graphs this size.
   const compiled: CompileResult = useMemo(() => compile(graph), [graph]);
+
+  // The same graph with a breakpoint on everything, which is all stepping is:
+  // the run stops wherever a value is worked out, in the order it happens.
+  const stepwise: CompileResult = useMemo(
+    () =>
+      compile({
+        ...graph,
+        nodes: graph.nodes.map((n) => ({
+          ...n,
+          data: { ...n.data, breakpoint: true },
+        })),
+      }),
+    [graph],
+  );
 
   const problems = useMemo(() => {
     const map = new Map<string, string[]>();
@@ -409,6 +424,26 @@ export default function App() {
     [edges, patchNode, duplicateNode, disconnectNode, deleteNode],
   );
 
+  // Bring a node into view without taking the panel away from what is
+  // running, which is what stepping needs on every stop.
+  const reveal = useCallback(
+    (id: string) => {
+      const n = getNode(id);
+      if (!n) return;
+      const w = n.measured?.width ?? 236;
+      const h = n.measured?.height ?? 96;
+      setCenter(n.position.x + w / 2, n.position.y + h / 2, {
+        zoom: Math.max(getZoom(), 0.75),
+        duration: 250,
+      });
+      setSelected(id);
+      setNodes((current) =>
+        current.map((x) => ({ ...x, selected: x.id === id })),
+      );
+    },
+    [getNode, setCenter, getZoom, setNodes],
+  );
+
   const selectedNode = nodes.find((n) => n.id === selected);
 
   return (
@@ -495,16 +530,21 @@ export default function App() {
                 onEdgesChange={onEdgesChange}
                 onConnect={onConnect}
                 isValidConnection={isValidConnection}
+                onNodeClick={(_, node) => {
+                  // Opening the inspector belongs to the click, not to the
+                  // selection: stepping selects nodes too, and it must not
+                  // take the panel away from the run that is paused.
+                  setSelected(node.id);
+                  setTab("node");
+                }}
                 onSelectionChange={({ nodes: picked }) => {
                   // This fires again on any store update while something is
                   // selected, not only when the selection changes, so react to
-                  // the change alone: switching the panel every time would undo
-                  // the tab the moment you clicked one.
+                  // the change alone.
                   const id = picked[0]?.id ?? null;
                   if (id === lastPicked.current) return;
                   lastPicked.current = id;
                   setSelected(id);
-                  if (id) setTab("node");
                 }}
                 onNodeContextMenu={openNodeMenu}
                 onEdgeContextMenu={(event, edge) => {
@@ -598,6 +638,8 @@ export default function App() {
                 {tab === "run" && (
                   <RunPanel
                     compiled={compiled}
+                    stepwise={stepwise}
+                    onReveal={reveal}
                     onFocusNode={(id) => {
                       setSelected(id);
                       setTab("node");

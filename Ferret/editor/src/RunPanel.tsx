@@ -4,15 +4,24 @@ import { canPause, start } from "./ferret";
 
 interface Props {
   compiled: CompileResult;
+  /** The same program with a breakpoint on every node. */
+  stepwise: CompileResult;
   onFocusNode: (id: string) => void;
+  onReveal: (id: string) => void;
 }
 
-export default function RunPanel({ compiled, onFocusNode }: Props) {
+export default function RunPanel({
+  compiled,
+  stepwise,
+  onFocusNode,
+  onReveal,
+}: Props) {
   const [result, setResult] = useState<RunResult | null>(null);
   const [paused, setPaused] = useState<Paused | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [args, setArgs] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const [stepping, setStepping] = useState(false);
   const run = useRef<Run | null>(null);
 
   if (!compiled.ok) {
@@ -37,20 +46,27 @@ export default function RunPanel({ compiled, onFocusNode }: Props) {
     );
   }
 
-  const where = (watch: number) =>
-    compiled.watches[watch] ?? { node: "?", label: "?" };
+  const where = (watch: number) => {
+    const table = stepping && stepwise.ok ? stepwise.watches : compiled.watches;
+    return table[watch] ?? { node: "?", label: "?" };
+  };
   const watches = compiled.watches;
 
-  const go = async () => {
-    const build = compiled;
+  const go = async (step = false) => {
+    const build = step && stepwise.ok ? stepwise : compiled;
     setBusy(true);
+    setStepping(step);
     setFailure(null);
     setResult(null);
     setPaused(null);
     const active = start(
       build.wasm,
       build.params.map((p) => Number(args[p] ?? 0)),
-      (p) => setPaused(p),
+      (p) => {
+        setPaused(p);
+        const w = build.ok ? build.watches[p.watch] : undefined;
+        if (w) onReveal(w.node);
+      },
     );
     run.current = active;
     try {
@@ -62,6 +78,7 @@ export default function RunPanel({ compiled, onFocusNode }: Props) {
       setPaused(null);
       setBusy(false);
       run.current = null;
+      setStepping(false);
     }
   };
 
@@ -95,9 +112,18 @@ export default function RunPanel({ compiled, onFocusNode }: Props) {
         ))
       )}
 
-      <button className="primary" disabled={busy} onClick={() => go()}>
-        {busy ? "Running…" : "▶ Run"}
-      </button>
+      <div className="run-buttons">
+        <button
+          className="primary"
+          disabled={busy}
+          onClick={() => go(false)}
+        >
+          {busy && !stepping ? "Running…" : "▶ Run"}
+        </button>
+        <button disabled={busy} onClick={() => go(true)} title="Stop at every node">
+          ⏭ Step
+        </button>
+      </div>
 
       {watches.length > 0 && !busy && (
         <p className="muted breakpoint-note">
@@ -125,7 +151,7 @@ export default function RunPanel({ compiled, onFocusNode }: Props) {
           <div className="muted">hit {paused.hit}</div>
           <div className="paused-buttons">
             <button className="primary" onClick={resume}>
-              Continue
+              {stepping ? "Next" : "Continue"}
             </button>
             <button onClick={() => run.current?.stop()}>Stop</button>
           </div>
