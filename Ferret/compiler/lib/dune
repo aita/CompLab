@@ -1,0 +1,3 @@
+(library
+ (name ferret)
+ (libraries yojson))

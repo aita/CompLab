@@ -1,0 +1,28 @@
+# no start node
+  the graph has no start node
+
+# two start nodes
+  s2: there can only be one start node
+
+# an unconnected input
+  e: the value input is not connected
+
+# a number where a condition belongs
+  i: the cond input wants a boolean but is given a number
+
+# a condition where a number belongs
+  e: the value input wants a number but is given a boolean
+
+# a data cycle
+  add: this node's value depends on itself
+
+# two chains running into one node
+  e: two branches run into this node; give each branch its own chain
+
+# an unknown start input
+  s: the start node has no input called m
+
+# not JSON at all
+  the graph is not valid JSON: Line 1, bytes 12-13:
+Unexpected end of input
+

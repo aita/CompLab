@@ -1,0 +1,24 @@
+{
+  "name": "ferret-editor",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "compiler": "cd .. && dune build compiler/web/ferret_js.bc.js --profile release && cp -f _build/default/compiler/web/ferret_js.bc.js editor/public/ferret.js",
+    "dev": "npm run compiler && vite",
+    "build": "npm run compiler && tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@xyflow/react": "^12.8.6",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.0.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.9"
+  }
+}

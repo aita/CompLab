@@ -1,0 +1,56 @@
+(module
+  (import "env" "log" (func $log (param f64)))
+  (func $main (export "main") (param $n f64) (result f64)
+    (local $steps f64)
+    (local $t0a f64)
+    (local $t0b f64)
+    f64.const 0.0
+    local.set $steps
+    block
+      loop
+        local.get $n
+        f64.const 1.0
+        f64.ne
+        i32.eqz
+        br_if 1
+        local.get $n
+        local.set $t0a
+        f64.const 2.0
+        local.set $t0b
+        local.get $t0a
+        local.get $t0a
+        local.get $t0b
+        f64.div
+        f64.trunc
+        local.get $t0b
+        f64.mul
+        f64.sub
+        f64.const 0.0
+        f64.eq
+        if
+          local.get $n
+          f64.const 2.0
+          f64.div
+          local.set $n
+        else
+          f64.const 3.0
+          local.get $n
+          f64.mul
+          f64.const 1.0
+          f64.add
+          local.set $n
+        end
+        local.get $steps
+        f64.const 1.0
+        f64.add
+        local.set $steps
+        local.get $n
+        call $log
+        br 0
+      end
+    end
+    local.get $steps
+    return
+    f64.const 0.0
+  )
+)

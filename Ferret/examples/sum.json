@@ -1,0 +1,43 @@
+{
+  "name": "1 から n までの合計",
+  "nodes": [
+    {"id":"start","type":"start","position":{"x":0,"y":0},"data":{"params":[{"name":"n"}]}},
+    {"id":"init_total","type":"set","position":{"x":320,"y":0},"data":{"name":"total"}},
+    {"id":"zero","type":"const","position":{"x":0,"y":180},"data":{"value":0}},
+    {"id":"init_i","type":"set","position":{"x":640,"y":0},"data":{"name":"i"}},
+    {"id":"one","type":"const","position":{"x":320,"y":180},"data":{"value":1}},
+    {"id":"loop","type":"while","position":{"x":960,"y":0},"data":{}},
+    {"id":"test","type":"compare","position":{"x":960,"y":300},"data":{"op":"le"}},
+    {"id":"get_i","type":"get","position":{"x":640,"y":300},"data":{"name":"i"}},
+    {"id":"acc","type":"set","position":{"x":1280,"y":180},"data":{"name":"total"}},
+    {"id":"sum","type":"binop","position":{"x":1280,"y":430},"data":{"op":"add"}},
+    {"id":"get_total","type":"get","position":{"x":960,"y":560},"data":{"name":"total"}},
+    {"id":"get_i2","type":"get","position":{"x":960,"y":690},"data":{"name":"i"}},
+    {"id":"bump","type":"set","position":{"x":1600,"y":180},"data":{"name":"i"}},
+    {"id":"next_i","type":"binop","position":{"x":1600,"y":430},"data":{"op":"add"}},
+    {"id":"get_i3","type":"get","position":{"x":1280,"y":690},"data":{"name":"i"}},
+    {"id":"step","type":"const","position":{"x":1280,"y":820},"data":{"value":1}},
+    {"id":"done","type":"end","position":{"x":1900,"y":0},"data":{}},
+    {"id":"get_total2","type":"get","position":{"x":1600,"y":60},"data":{"name":"total"}}
+  ],
+  "edges": [
+    {"id":"e1","source":"start","sourceHandle":"next","target":"init_total","targetHandle":"in"},
+    {"id":"e2","source":"zero","sourceHandle":"out","target":"init_total","targetHandle":"value"},
+    {"id":"e3","source":"init_total","sourceHandle":"next","target":"init_i","targetHandle":"in"},
+    {"id":"e4","source":"one","sourceHandle":"out","target":"init_i","targetHandle":"value"},
+    {"id":"e5","source":"init_i","sourceHandle":"next","target":"loop","targetHandle":"in"},
+    {"id":"e6","source":"test","sourceHandle":"out","target":"loop","targetHandle":"cond"},
+    {"id":"e7","source":"get_i","sourceHandle":"out","target":"test","targetHandle":"a"},
+    {"id":"e8","source":"start","sourceHandle":"var:n","target":"test","targetHandle":"b"},
+    {"id":"e9","source":"loop","sourceHandle":"body","target":"acc","targetHandle":"in"},
+    {"id":"e10","source":"sum","sourceHandle":"out","target":"acc","targetHandle":"value"},
+    {"id":"e11","source":"get_total","sourceHandle":"out","target":"sum","targetHandle":"a"},
+    {"id":"e12","source":"get_i2","sourceHandle":"out","target":"sum","targetHandle":"b"},
+    {"id":"e13","source":"acc","sourceHandle":"next","target":"bump","targetHandle":"in"},
+    {"id":"e14","source":"next_i","sourceHandle":"out","target":"bump","targetHandle":"value"},
+    {"id":"e15","source":"get_i3","sourceHandle":"out","target":"next_i","targetHandle":"a"},
+    {"id":"e16","source":"step","sourceHandle":"out","target":"next_i","targetHandle":"b"},
+    {"id":"e17","source":"loop","sourceHandle":"next","target":"done","targetHandle":"in"},
+    {"id":"e18","source":"get_total2","sourceHandle":"out","target":"done","targetHandle":"value"}
+  ]
+}

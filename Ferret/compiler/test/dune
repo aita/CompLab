@@ -1,0 +1,59 @@
+(executable
+ (name errors)
+ (modules errors)
+ (libraries ferret))
+
+(rule
+ (target sum.wasm)
+ (action
+  (run ../bin/ferretc.exe %{dep:../../examples/sum.json} -o sum.wasm)))
+
+(rule
+ (target collatz.wasm)
+ (action
+  (run ../bin/ferretc.exe %{dep:../../examples/collatz.json} -o collatz.wasm)))
+
+(rule
+ (target sum.ir)
+ (action
+  (with-stdout-to
+   sum.ir
+   (run ../bin/ferretc.exe --emit ir %{dep:../../examples/sum.json}))))
+
+(rule
+ (target collatz.wat)
+ (action
+  (with-stdout-to
+   collatz.wat
+   (run ../bin/ferretc.exe --emit wat %{dep:../../examples/collatz.json}))))
+
+(rule
+ (target errors.out)
+ (action
+  (with-stdout-to
+   errors.out
+   (run ./errors.exe))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff sum.ir.expected sum.ir)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff collatz.wat.expected collatz.wat)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff errors.expected errors.out)))
+
+; The modules are only really checked by running them, which needs a
+; WebAssembly engine; node is the one every machine with the editor already
+; has.
+(rule
+ (alias runtest)
+ (deps run_wasm.mjs sum.wasm collatz.wasm)
+ (action
+  (run node run_wasm.mjs)))

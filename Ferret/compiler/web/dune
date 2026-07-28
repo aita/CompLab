@@ -1,0 +1,6 @@
+; The same compiler, compiled to JavaScript so the editor can call it in the
+; browser: no server, and the .wasm the page runs is the one ferretc writes.
+(executable
+ (name ferret_js)
+ (modes js)
+ (libraries ferret js_of_ocaml))

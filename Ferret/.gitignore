@@ -1,0 +1,7 @@
+_build/
+editor/node_modules/
+editor/dist/
+
+# built by `npm run compiler` from compiler/web
+editor/public/ferret.js
+editor/tsconfig.tsbuildinfo
