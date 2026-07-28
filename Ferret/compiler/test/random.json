@@ -1,0 +1,18 @@
+{
+  "nodes": [
+    {"id":"start","type":"start","position":{"x":0,"y":0},"data":{"params":[]}},
+    {"id":"rnd","type":"random","position":{"x":200,"y":0},"data":{"values":{"min":0,"max":1}}},
+    {"id":"twice","type":"binop","position":{"x":400,"y":0},"data":{"op":"add"}},
+    {"id":"span","type":"random","position":{"x":200,"y":200},"data":{"values":{"min":0,"max":10}}},
+    {"id":"total","type":"binop","position":{"x":600,"y":0},"data":{"op":"add"}},
+    {"id":"done","type":"end","position":{"x":800,"y":0},"data":{}}
+  ],
+  "edges": [
+    {"id":"x","source":"start","sourceHandle":"next","target":"done","targetHandle":"in"},
+    {"id":"e1","source":"rnd","sourceHandle":"out","target":"twice","targetHandle":"a"},
+    {"id":"e2","source":"rnd","sourceHandle":"out","target":"twice","targetHandle":"b"},
+    {"id":"e3","source":"twice","sourceHandle":"out","target":"total","targetHandle":"a"},
+    {"id":"e4","source":"span","sourceHandle":"out","target":"total","targetHandle":"b"},
+    {"id":"e5","source":"total","sourceHandle":"out","target":"done","targetHandle":"value"}
+  ]
+}

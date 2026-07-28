@@ -103,6 +103,27 @@ let rec expr env = function
       expr env b;
       expr env c;
       line env "select"
+  | Rand (lo, hi) ->
+      let parked =
+        if Emit.is_atom lo then None else Some (take_scratch env 1)
+      in
+      let low () =
+        match parked with
+        | None -> expr env lo
+        | Some s -> line env "local.get %s" (local env s)
+      in
+      (match parked with
+      | None -> expr env lo
+      | Some s ->
+          expr env lo;
+          line env "local.set %s" (local env s);
+          line env "local.get %s" (local env s));
+      expr env hi;
+      low ();
+      line env "f64.sub";
+      line env "call $random";
+      line env "f64.mul";
+      line env "f64.add"
 
 let nested env f =
   env.indent <- env.indent + 1;
@@ -162,6 +183,7 @@ let of_func (f : func) : string =
   line env "(module";
   nested env (fun () ->
       line env "(import \"env\" \"log\" (func $log (param f64)))";
+      line env "(import \"env\" \"random\" (func $random (result f64)))";
       let params =
         String.concat " "
           (List.map (fun p -> Printf.sprintf "(param $%s f64)" p) f.params)

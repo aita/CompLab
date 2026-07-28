@@ -5,12 +5,19 @@ import { readFileSync } from "node:fs";
 
 let failures = 0;
 
-async function load(file) {
+async function load(file, random = () => 0) {
   const logged = [];
+  let draws = 0;
   const { instance } = await WebAssembly.instantiate(readFileSync(file), {
-    env: { log: (x) => logged.push(x) },
+    env: {
+      log: (x) => logged.push(x),
+      random: () => {
+        draws++;
+        return random();
+      },
+    },
   });
-  return { main: instance.exports.main, logged };
+  return { main: instance.exports.main, logged, draws: () => draws };
 }
 
 function check(what, got, want) {
@@ -43,6 +50,12 @@ check("collatz(7)", traced.main(7), 16);
 check("collatz(7) trace", traced.logged, [
   7, 22, 11, 34, 17, 52, 26, 13, 40, 20, 10, 5, 16, 8, 4, 2,
 ]);
+
+// A fixed source stands in for Math.random, so the arithmetic around the draw
+// is checked rather than the draw itself.
+const dice = await load("random.wasm", () => 0.25);
+check("random(0,1) doubled plus random(0,10)", dice.main(), 3);
+check("one draw per node, not per reader", dice.draws(), 2);
 
 if (failures > 0) process.exit(1);
 console.log("ok");

@@ -15,7 +15,9 @@
    because with no way to name an intermediate value in the graph, feeding one
    output into many places is how you are meant to work: expanding it at every
    use doubles the code at every level, and a chain twenty deep would not
-   finish. See [share] below for what makes that safe. *)
+   finish. See [share] below for what makes that safe.  It also settles what a
+   random node means when it is read twice: the node is the value, so one draw
+   reaches every reader of it. *)
 
 open Ir
 
@@ -263,6 +265,10 @@ and value_of ctx (n : Graph.node) port : expr * vtype =
       let a = number ctx n "a" in
       let b = number ctx n "b" in
       (Select (c, a, b), VNum)
+  | "random" ->
+      let lo = number ctx n "min" in
+      let hi = number ctx n "max" in
+      (Rand (lo, hi), VNum)
   | kind ->
       bad "the %s node produces no value" kind;
       (Num 0., VNum)

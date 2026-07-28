@@ -20,8 +20,11 @@ type expr =
   | And of expr * expr
   | Or of expr * expr
   | Not of expr
-  (* Both arms are evaluated: nothing in an expression can trap or be seen. *)
+  (* Both arms are evaluated.  Nothing in an expression can trap, so the only
+     thing that makes visible is [Rand], which draws once per arm. *)
   | Select of expr * expr * expr
+  (* A number in [min, max), from the host. *)
+  | Rand of expr * expr
 
 type stmt =
   | Assign of int * expr
@@ -89,6 +92,7 @@ let to_string f =
     | Not e -> Printf.sprintf "not %s" (expr e)
     | Select (c, a, b) ->
         Printf.sprintf "(if %s then %s else %s)" (expr c) (expr a) (expr b)
+    | Rand (lo, hi) -> Printf.sprintf "random(%s, %s)" (expr lo) (expr hi)
 
   in
   let rec block ind stmts = List.iter (stmt ind) stmts

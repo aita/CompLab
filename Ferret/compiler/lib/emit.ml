@@ -1,16 +1,23 @@
 (* IR -> a wasm module.
 
-   The module has one import, [env.log], so a flow can report intermediate
-   values, and exports [main] taking the start node's inputs as f64 and
-   returning an f64.  Locals are laid out as parameters, then variables, then
-   a pair of scratch slots for every [%] in the program. *)
+   The module imports [env.log], so a flow can report intermediate values,
+   and [env.random]; it exports [main] taking the start node's inputs as f64
+   and returning an f64.  Locals are laid out as parameters, then variables,
+   then whatever scratch the expressions need. *)
 
 open Ir
 
-(* Every [%] parks both of its operands in scratch locals. *)
+(* An operand that costs nothing to read twice, so it never needs a scratch
+   local to be kept in. *)
+let is_atom = function Num _ | Local _ -> true | _ -> false
+
+(* [%] parks both of its operands; a random parks its low end, which its own
+   range reads a second time. *)
 let rec scratch_of_expr = function
   | Num _ | Local _ -> 0
   | Bin (Mod, l, r) -> 2 + scratch_of_expr l + scratch_of_expr r
+  | Rand (lo, hi) ->
+      (if is_atom lo then 0 else 1) + scratch_of_expr lo + scratch_of_expr hi
   | Bin (_, l, r) | Cmp (_, l, r) | And (l, r) | Or (l, r) ->
       scratch_of_expr l + scratch_of_expr r
   | Select (c, a, b) ->
@@ -26,8 +33,10 @@ and scratch_of_stmt = function
   | While (pre, c, body) ->
       scratch_of_block pre + scratch_of_expr c + scratch_of_block body
 
-let log_index = 0 (* the only import, so it takes function index 0 *)
-let main_index = 1
+(* The imports come first, in the order they are declared. *)
+let log_index = 0
+let random_index = 1
+let main_index = 2
 
 type env = { mutable scratch_next : int }
 
@@ -107,6 +116,29 @@ let rec expr env b = function
       expr env b b';
       expr env b c;
       Wasm.op b Wasm.op_select
+  | Rand (lo, hi) ->
+      (* lo + random() * (hi - lo).  Only lo is read twice, so only lo has to
+         be parked, and not even that when it is already a local or a
+         literal.  The slot is taken before the operands are emitted, so it
+         cannot collide with one they take themselves. *)
+      let parked = if is_atom lo then None else Some (take_scratch env 1) in
+      let low () =
+        match parked with
+        | None -> expr env b lo
+        | Some s -> Wasm.local_get b s
+      in
+      (match parked with
+      | None -> expr env b lo
+      | Some s ->
+          expr env b lo;
+          Wasm.local_set b s;
+          Wasm.local_get b s);
+      expr env b hi;
+      low ();
+      Wasm.op b Wasm.f64_sub;
+      Wasm.call b random_index;
+      Wasm.op b Wasm.f64_mul;
+      Wasm.op b Wasm.f64_add
 
 let rec block env b stmts = List.iter (stmt env b) stmts
 
@@ -163,8 +195,14 @@ let module_of_func (f : func) : string =
     { Wasm.args = List.map (fun _ -> Wasm.F64) f.params; result = Some Wasm.F64 }
   in
   let log_type = { Wasm.args = [ Wasm.F64 ]; result = None } in
-  Wasm.encode ~types:[ log_type; main_type ]
-    ~imports:[ { Wasm.imp_module = "env"; imp_field = "log"; imp_type = 0 } ]
-    ~funcs:[ 1 ]
+  let random_type = { Wasm.args = []; result = Some Wasm.F64 } in
+  Wasm.encode
+    ~types:[ log_type; random_type; main_type ]
+    ~imports:
+      [
+        { Wasm.imp_module = "env"; imp_field = "log"; imp_type = 0 };
+        { Wasm.imp_module = "env"; imp_field = "random"; imp_type = 1 };
+      ]
+    ~funcs:[ 2 ]
     ~exports:[ ("main", main_index) ]
     ~bodies:[ { Wasm.body_locals = locals; body_code = code } ]

@@ -1,5 +1,6 @@
 (module
   (import "env" "log" (func $log (param f64)))
+  (import "env" "random" (func $random (result f64)))
   (func $main (export "main") (param $n f64) (result f64)
     (local $cur f64)
     (local $steps f64)

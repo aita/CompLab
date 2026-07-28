@@ -1,0 +1,38 @@
+{
+  "name": "π by throwing darts",
+  "nodes": [
+    {"id": "start", "type": "start", "position": {"x": 0, "y": 40}, "data": {"params": [{"name": "darts"}]}},
+    {"id": "loop", "type": "for", "position": {"x": 400, "y": 0}, "data": {"name": "dart", "states": [{"name": "inside"}], "values": {"from": 1, "by": 1, "init:inside": 0}}},
+    {"id": "done", "type": "end", "position": {"x": 1420, "y": 0}, "data": {}},
+    {"id": "ratio", "type": "binop", "position": {"x": 760, "y": 340}, "data": {"op": "div"}},
+    {"id": "pi", "type": "binop", "position": {"x": 1060, "y": 340}, "data": {"op": "mul", "values": {"a": 4}}},
+    {"id": "tally", "type": "binop", "position": {"x": 760, "y": 900}, "data": {"op": "add"}},
+    {"id": "hit", "type": "select", "position": {"x": 1060, "y": 900}, "data": {"values": {"a": 1, "b": 0}}},
+    {"id": "near", "type": "compare", "position": {"x": 1060, "y": 1100}, "data": {"op": "lt", "values": {"b": 1}}},
+    {"id": "dist", "type": "binop", "position": {"x": 1060, "y": 1280}, "data": {"op": "add"}},
+    {"id": "xx", "type": "binop", "position": {"x": 760, "y": 1140}, "data": {"op": "mul"}},
+    {"id": "yy", "type": "binop", "position": {"x": 760, "y": 1320}, "data": {"op": "mul"}},
+    {"id": "x", "type": "random", "position": {"x": 400, "y": 1140}, "data": {"values": {"min": -1, "max": 1}}},
+    {"id": "y", "type": "random", "position": {"x": 400, "y": 1320}, "data": {"values": {"min": -1, "max": 1}}}
+  ],
+  "edges": [
+    {"id": "e1", "source": "start", "sourceHandle": "next", "target": "loop", "targetHandle": "in"},
+    {"id": "e2", "source": "loop", "sourceHandle": "next", "target": "done", "targetHandle": "in"},
+    {"id": "e3", "source": "start", "sourceHandle": "var:darts", "target": "loop", "targetHandle": "to"},
+    {"id": "e8", "source": "loop", "sourceHandle": "var:inside", "target": "tally", "targetHandle": "a"},
+    {"id": "e9", "source": "hit", "sourceHandle": "out", "target": "tally", "targetHandle": "b"},
+    {"id": "e10", "source": "tally", "sourceHandle": "out", "target": "loop", "targetHandle": "step:inside"},
+    {"id": "e11", "source": "near", "sourceHandle": "out", "target": "hit", "targetHandle": "cond"},
+    {"id": "e12", "source": "dist", "sourceHandle": "out", "target": "near", "targetHandle": "a"},
+    {"id": "e13", "source": "xx", "sourceHandle": "out", "target": "dist", "targetHandle": "a"},
+    {"id": "e14", "source": "yy", "sourceHandle": "out", "target": "dist", "targetHandle": "b"},
+    {"id": "e15", "source": "x", "sourceHandle": "out", "target": "xx", "targetHandle": "a"},
+    {"id": "e16", "source": "x", "sourceHandle": "out", "target": "xx", "targetHandle": "b"},
+    {"id": "e17", "source": "y", "sourceHandle": "out", "target": "yy", "targetHandle": "a"},
+    {"id": "e18", "source": "y", "sourceHandle": "out", "target": "yy", "targetHandle": "b"},
+    {"id": "e19", "source": "loop", "sourceHandle": "var:inside", "target": "ratio", "targetHandle": "a"},
+    {"id": "e20", "source": "start", "sourceHandle": "var:darts", "target": "ratio", "targetHandle": "b"},
+    {"id": "e21", "source": "ratio", "sourceHandle": "out", "target": "pi", "targetHandle": "b"},
+    {"id": "e22", "source": "pi", "sourceHandle": "out", "target": "done", "targetHandle": "value"}
+  ]
+}

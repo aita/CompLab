@@ -41,6 +41,25 @@
  (action
   (diff sharing.ir.expected sharing.ir)))
 
+; Randomness is the one impure thing in an expression, so pin down how often
+; it is drawn: once per node reached, shared by every reader of that node.
+(rule
+ (target random.ir)
+ (action
+  (with-stdout-to
+   random.ir
+   (run ../bin/ferretc.exe --emit ir %{dep:random.json}))))
+
+(rule
+ (target random.wasm)
+ (action
+  (run ../bin/ferretc.exe %{dep:random.json} -o random.wasm)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff random.ir.expected random.ir)))
+
 (rule
  (target errors.out)
  (action
@@ -68,6 +87,6 @@
 ; has.
 (rule
  (alias runtest)
- (deps run_wasm.mjs sum.wasm collatz.wasm)
+ (deps run_wasm.mjs sum.wasm collatz.wasm random.wasm)
  (action
   (run node run_wasm.mjs)))
