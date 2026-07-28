@@ -108,7 +108,7 @@ function martenml_sum_18 (20 registers, 0 spill slots)
 
 ```
 $ martenmlc --dump-regalloc -o /dev/null examples/sum.mml
-martenml_sum_15: 2 round(s), 41/41 moves coalesced, 1 spill slot(s) [spilled v16]
+martenml_sum_18: 2 round(s), 41/41 moves coalesced, 1 spill slot(s) [spilled v16]
 ```
 
 **のぞき穴最適化とアセンブリ出力**（[詳説](emit.md)）。17命令になりました。

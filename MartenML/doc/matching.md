@@ -250,19 +250,19 @@ RISC-V には `zero` レジスタがあるので、タグ0との比較は `bne t
 出力に出ています。
 
 ```
-.Lthen87:
+.Lthen88:
 	ld t0, 0(t2)
-	bne t0, zero, .Lelse90     ← Dot（タグ0）: 1命令
-.Lthen89:
+	bne t0, zero, .Lelse91     ← Dot（タグ0）: 1命令
+.Lthen90:
 	li a0, -1
 	...
-.Lelse90:
+.Lelse91:
 	ld t1, 0(t2)
 	li t0, 2
-	bne t1, t0, .Lelse92       ← Rect（タグ2）: 2命令
-.Lthen91:
+	bne t1, t0, .Lelse94       ← Rect（タグ2）: 2命令
+.Lthen93:
 	...
-.Lelse92:
+.Lelse94:
 	ld a0, 8(t2)               ← Circle: テストなし
 	...
 	tail martenml_case_20_48
@@ -279,6 +279,7 @@ RISC-V には `zero` レジスタがあるので、タグ0との比較は `bne t
 ```ocaml
 let counts = Array.make (List.length cases) 0 in
 count_leaves counts tree;
+...
 (* Cases reachable from several leaves become local functions. *)
 let join_of = Array.mapi (fun i _ -> if counts.(i) > 1 then Some (Ident.fresh "case") else None) cases in
 ```

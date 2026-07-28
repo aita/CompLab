@@ -99,17 +99,27 @@ martenml_sum_18 (l.19) =
 ブロックが要ります。
 
 ```
-martenml_go_12 (k.13) capturing (go.12 n.11) =   let rec make n =
-  ...                                           let rec go k =
-    call closure go.12 (t.4.15)                   if k = 0 then n else go (k - 1)
-                                                in go
+$ cat go.mml                                  $ martenmlc -inline 0 --dump-closure -o /dev/null go.mml
+let rec make n =                              martenml_go_9 (k.10) capturing (go.9 n.8) =
+  let rec go k =                                ...
+    if k = 0 then n else go (k - 1)               call closure go.9 (t.3.13)
+  in go
+in
+let f = make 3 in print_int (f 5)
 ```
 
 相互再帰なら、互いを捕獲します。
 
 ```
-martenml_even_14 (k.16) capturing (n.13 odd.15) = ...
-martenml_odd_15 (k.20) capturing (even.14) = ...
+$ cat eo.mml                                   $ martenmlc -inline 0 --dump-closure -o /dev/null eo.mml
+let rec make n =                               martenml_even_12 (k.14) capturing (n.11 odd.13) = ...
+  let rec even k = if k = 0 then n             martenml_odd_13 (k.18) capturing (even.12) = ...
+                   else odd (k - 1)
+  and odd k = if k = 0 then 0
+              else even (k - 1) in
+  even
+in
+let f = make 7 in print_int (f 4)
 ```
 
 `even` のブロックには `odd` のブロックのアドレスが、`odd` のブロックには `even` の

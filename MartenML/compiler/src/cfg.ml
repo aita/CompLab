@@ -92,7 +92,7 @@ let block t i = t.blocks.(i)
    for all 42 test files is identical with and without it, because selection
    already emits blocks in the order a trace would pick them.  Following the
    arms greedily instead, without the sole-predecessor rule below, is worse --
-   20 unconditional jumps across those files becomes 26.  What this buys is
+   20 unconditional jumps across those files becomes 28.  What this buys is
    that the fall-through quality stops depending on the order selection happens
    to emit in. *)
 let layout ~preferred t =

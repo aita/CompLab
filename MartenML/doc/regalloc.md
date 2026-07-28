@@ -38,14 +38,14 @@ s0–s11 12本   呼ばれた側が保存する義務を負う
 
 ## 2. 干渉グラフを作る
 
-`sum` の `.Lelse34` ブロックを後ろから辿ってみます（割り付け前のコード）。
+`sum` の `.Lelse37` ブロックを後ろから辿ってみます（割り付け前のコード）。
 
 ```
-.Lelse34:
+.Lelse37:
     ld v16, 8(v12)          ; x
     ld v17, 16(v12)         ; rest
     mv a0, v17
-    call martenml_sum_15(a0)
+    call martenml_sum_18(a0)
     mv v18, a0
     add v19, v16, v18
     mv a0, v19
@@ -198,11 +198,11 @@ simplify も融合も freeze もできなくなることがあります。残っ
 結果を見ると気づくことがあります。
 
 ```
-.Lelse34:
+.Lelse37:
 	ld t0, 8(a0)      ; x
 	sd t0, 0(sp)      ; ← スピル
 	ld a0, 16(a0)     ; rest
-	call martenml_sum_15
+	call martenml_sum_18
 	ld t0, 0(sp)      ; ← 復元
 	add a0, t0, a0
 ```
@@ -368,14 +368,14 @@ walkthrough: 2 round(s), 2/2 moves coalesced, 1 spill slot(s) [spilled v0]
 
 ```
 $ martenmlc --dump-regalloc -o /dev/null examples/sum.mml
-martenml_sum_15: 2 round(s), 41/41 moves coalesced, 1 spill slot(s) [spilled v16]
+martenml_sum_18: 2 round(s), 41/41 moves coalesced, 1 spill slot(s) [spilled v16]
 ```
 
 何も要らない関数だと、全体が畳まれます。
 
 ```
 $ echo 'let rec f a b = a * b + a in print_int (f 2 3)' > /tmp/leaf.mml
-$ ./martenml -S /tmp/leaf.mml
+$ ./martenml -inline 0 -S /tmp/leaf.mml
 martenml_f_5:
 	mul t0, a0, a1
 	add a0, t0, a0
@@ -383,6 +383,9 @@ martenml_f_5:
 ```
 
 割り付け前は16本の仮想レジスタと12本の callee-saved 退避があり、そのすべてが消えています。
+（`-inline 0` を付けているのは関数を残すためです。既定では
+[インライン展開](knormal.md#3-インライン展開--inlineml)が `f` を畳んでしまい、
+プログラム全体が `li a0, 8` と `tail martenml_print_int` の2命令になります。）
 
 ## 8. callee-saved の退避は、スピルそのもの
 
@@ -390,7 +393,7 @@ martenml_f_5:
 直前で書き戻すコードを出します。
 
 ```
-martenml_sum_15:
+martenml_sum_18:
     mv v0, s0
     ...
     mv v11, s11
@@ -418,7 +421,7 @@ martenml_sum_15:
 関数で対照的に現れます。
 
 ```
-martenml_sum_15: 41/41 moves coalesced, 1 spill slot(s) [spilled v16]
+martenml_sum_18: 41/41 moves coalesced, 1 spill slot(s) [spilled v16]
 martenml_main:   30/31 moves coalesced, 3 spill slot(s) [spilled v0 v1 v2]
 ```
 

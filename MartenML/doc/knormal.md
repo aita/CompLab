@@ -99,10 +99,12 @@ K正規形が課す条件は**1つだけ**です。
 
 ```ocaml
 type t =
+  ...
   | Bin of binop * Ident.t * Ident.t      (* `t * t` ではない *)
   | If_eq of Ident.t * Ident.t * t * t
-  | App of Ident.t * Ident.t list
   | Let of (Ident.t * Types.t) * t * t
+  ...
+  | App of Ident.t * Ident.t list
   ...
 ```
 
@@ -327,7 +329,9 @@ external print_int t.7.18
   match Ident.Map.find_opt f env with
   | Some (params, body) when List.length params = List.length args ->
     let substitution =
-      List.fold_left2 (fun m (p, _) a -> Ident.Map.add p a m) Ident.Map.empty params args
+      List.fold_left2
+        (fun m (p, _) a -> Ident.Map.add p a m)
+        Ident.Map.empty params args
     in
     Alpha.rename_exp substitution body
   | _ -> exp)
@@ -420,7 +424,8 @@ external print_int t.7.18
 | `knormal.ml` 273–344行 | `check` — 型が持てない2つの約束。`--check-knf` |
 | `alpha.ml` | 束縛子を一意な名前に。`rename_exp` は環境を取るので §3 が再利用します |
 | `inline.ml` 26–33行 | `size` — 閾値と比べる節点数 |
-| `inline.ml` 41–73行 | `apply` — 呼び出しを本体の複製に置き換える |
+| `inline.ml` 37行 | `self_recursive` — 自分の名前が本体に自由出現するか |
+| `inline.ml` 39–73行 | `apply` — 呼び出しを本体の複製に置き換える |
 | `optim.ml` | `propagate`・`eliminate` を規定回数まわす |
 
 ---

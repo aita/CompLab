@@ -40,11 +40,11 @@ let b = id true in
 ```ocaml
 type t =
   | Unit | Bool | Int | String
-  | Fun of t list * t
+  | List of t
+  | Named of string           (* ユーザ定義のデータ型 *)
+  | Fun of t list * t         (* カリー化しない。引数はまとめて渡す *)
   | Tuple of t list
   | Array of t
-  | List of t
-  | Named of Ident.t          (* ユーザ定義のデータ型 *)
   | Rigid of int              (* シグネチャの 'a。§8 *)
   | Var of var ref
 
@@ -222,6 +222,7 @@ $ ./martenml a.mml
 
 ```ocaml
 | Cmp (op, e1, e2) ->
+  let where = ... in
   let t1 = infer_exp env e1 in
   let t2 = infer_exp env e2 in
   unify_in where t1 t2;
@@ -286,6 +287,7 @@ Only int, bool and unit compare as a single machine word.
 
 ```ocaml
 let check = Annot (Var internal, substitute assignments declared) in
+let check = ... (* 位置情報を付ける *) in
 Let ((Ident.fresh "signature", Types.fresh_var ()), check, rest)
 ```
 
