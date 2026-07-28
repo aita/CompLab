@@ -35,6 +35,15 @@ let node_data n key = member key n.data
 let string_field n key ~default =
   match to_string_opt (node_data n key) with Some s -> s | None -> default
 
+(* A number typed straight into an input port, rather than fed to it by an
+   edge.  The editor writes these under "values", keyed by the port name. *)
+let port_value n port =
+  match member port (node_data n "values") with
+  | `Int i -> Some (float_of_int i)
+  | `Float f -> Some f
+  | `String s -> float_of_string_opt s
+  | _ -> None
+
 let number_field n key ~default =
   match node_data n key with
   | `Int i -> float_of_int i

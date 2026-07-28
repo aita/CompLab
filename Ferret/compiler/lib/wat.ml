@@ -1,5 +1,5 @@
 (* The same instruction stream as Emit, written out as text.  It is what the
-   editor shows in its "wasm" tab: one line per instruction, in the order the
+   editor shows in its Code tab: one line per instruction, in the order the
    bytes are written, so the text and the binary can be read against each
    other. *)
 
@@ -23,14 +23,16 @@ let line env fmt =
 let local env i =
   if i < Array.length env.names then env.names.(i) else Printf.sprintf "$l%d" i
 
-let take_scratch env =
+let take_scratch env n =
   let i = env.scratch_next in
-  env.scratch_next <- i + 2;
+  env.scratch_next <- i + n;
   i
 
 let num_literal x =
   if Float.is_integer x && Float.abs x < 1e15 then Printf.sprintf "%.1f" x
   else Printf.sprintf "%.17g" x
+
+let kind = function VNum -> "f64" | VBool -> "i32"
 
 let binop_name = function
   | Add -> "f64.add"
@@ -61,7 +63,7 @@ let rec expr env = function
   | Num x -> line env "f64.const %s" (num_literal x)
   | Local i -> line env "local.get %s" (local env i)
   | Bin (Mod, l, r) ->
-      let s = take_scratch env in
+      let s = take_scratch env 2 in
       expr env l;
       line env "local.set %s" (local env s);
       expr env r;
@@ -96,6 +98,11 @@ let rec expr env = function
   | Not e ->
       expr env e;
       line env "i32.eqz"
+  | Select (c, a, b) ->
+      expr env a;
+      expr env b;
+      expr env c;
+      line env "select"
 
 let nested env f =
   env.indent <- env.indent + 1;
@@ -136,19 +143,20 @@ and stmt env = function
       line env "end"
 
 let of_func (f : func) : string =
-  let nmods = Emit.count_mods_block f.body in
   let scratch =
-    List.concat
-      (List.init nmods (fun i ->
-           [ Printf.sprintf "$t%da" i; Printf.sprintf "$t%db" i ]))
+    List.init (Emit.scratch_of_block f.body) (fun i -> Printf.sprintf "$t%d" i)
   in
   let names =
     Array.of_list
-      (List.map (fun n -> "$" ^ n) (f.params @ f.vars) @ scratch)
+      (List.map (fun n -> "$" ^ n) (f.params @ List.map fst f.vars) @ scratch)
   in
-  let nparams = List.length f.params in
   let env =
-    { names; scratch_next = nparams + List.length f.vars; b = Buffer.create 512; indent = 0 }
+    {
+      names;
+      scratch_next = List.length f.params + List.length f.vars;
+      b = Buffer.create 512;
+      indent = 0;
+    }
   in
   line env "(module";
   nested env (fun () ->
@@ -160,8 +168,8 @@ let of_func (f : func) : string =
       line env "(func $main (export \"main\") %s(result f64)"
         (if params = "" then "" else params ^ " ");
       nested env (fun () ->
-          List.iter (fun v -> line env "(local $%s f64)" v) f.vars;
-          List.iter (fun s -> line env "(local %s f64)" s) scratch;
+          List.iter (fun (v, t) -> line env "(local $%s %s)" v (kind t)) f.vars;
+          List.iter (fun n -> line env "(local %s f64)" n) scratch;
           block env f.body;
           line env "f64.const 0.0");
       line env ")");

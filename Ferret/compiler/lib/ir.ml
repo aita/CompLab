@@ -2,12 +2,15 @@
    f64 parameters, f64 locals and structured control flow.  Everything that
    follows this module works on trees, never on the graph. *)
 
+(* Numbers are f64; a condition is an i32 used as a boolean.  Locals carry
+   which one they are, because a shared subexpression of either kind ends up
+   in one. *)
+type vtype = VNum | VBool
+
 type binop = Add | Sub | Mul | Div | Mod | Min | Max
 type unop = Neg | Abs | Sqrt | Floor | Ceil | Round
 type cmpop = Lt | Le | Gt | Ge | Eq | Ne
 
-(* [Num] and everything built from it has type f64; comparisons and the
-   logical operators have type i32, used as a boolean. *)
 type expr =
   | Num of float
   | Local of int
@@ -17,6 +20,8 @@ type expr =
   | And of expr * expr
   | Or of expr * expr
   | Not of expr
+  (* Both arms are evaluated: nothing in an expression can trap or be seen. *)
+  | Select of expr * expr * expr
 
 type stmt =
   | Assign of int * expr
@@ -28,14 +33,14 @@ type stmt =
 and block = stmt list
 
 type func = {
-  params : string list;  (* locals 0 .. n-1 *)
-  vars : string list;  (* locals n .. n+m-1, zero initialised *)
+  params : string list;  (* locals 0 .. n-1, all f64 *)
+  vars : (string * vtype) list;  (* locals n .. n+m-1, zero initialised *)
   body : block;
 }
 
 let local_name f i =
   let np = List.length f.params in
-  if i < np then List.nth f.params i else List.nth f.vars (i - np)
+  if i < np then List.nth f.params i else fst (List.nth f.vars (i - np))
 
 let string_of_binop = function
   | Add -> "+"
@@ -80,6 +85,9 @@ let to_string f =
     | And (l, r) -> Printf.sprintf "(%s and %s)" (expr l) (expr r)
     | Or (l, r) -> Printf.sprintf "(%s or %s)" (expr l) (expr r)
     | Not e -> Printf.sprintf "not %s" (expr e)
+    | Select (c, a, b) ->
+        Printf.sprintf "(if %s then %s else %s)" (expr c) (expr a) (expr b)
+
   in
   let rec block ind stmts = List.iter (stmt ind) stmts
   and stmt ind s =
@@ -104,7 +112,10 @@ let to_string f =
         pr "%s}\n" pad
   in
   pr "fun main(%s) -> f64 {\n" (String.concat ", " f.params);
-  List.iter (fun v -> pr "  var %s = 0\n" v) f.vars;
+  List.iter
+    (fun (v, t) ->
+      pr "  var %s = %s\n" v (match t with VNum -> "0" | VBool -> "false"))
+    f.vars;
   block 1 f.body;
   pr "}\n";
   Buffer.contents b

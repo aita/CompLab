@@ -35,12 +35,13 @@ check("collatz(1)", collatz.main(1), 0);
 check("collatz(6)", collatz.main(6), 8);
 check("collatz(27)", collatz.main(27), 111);
 
-// The trace comes from the log node in the loop body, so it also pins down
-// that the import is called once per iteration and in order.
+// The trace comes from the log node in the loop body, which runs before the
+// next values are applied, so it also pins down that the import is called
+// once per iteration and sees the state as it was at the top of it.
 const traced = await load("collatz.wasm");
 check("collatz(7)", traced.main(7), 16);
 check("collatz(7) trace", traced.logged, [
-  22, 11, 34, 17, 52, 26, 13, 40, 20, 10, 5, 16, 8, 4, 2, 1,
+  7, 22, 11, 34, 17, 52, 26, 13, 40, 20, 10, 5, 16, 8, 4, 2,
 ]);
 
 if (failures > 0) process.exit(1);

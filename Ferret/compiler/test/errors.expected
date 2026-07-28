@@ -8,19 +8,31 @@
   e: the value input is not connected
 
 # a number where a condition belongs
-  i: the cond input wants a boolean but is given a number
+  w: the cond input wants a true or false but is given a number
 
 # a condition where a number belongs
-  e: the value input wants a number but is given a boolean
+  e: the value input wants a number but is given a true or false
 
 # a data cycle
   add: this node's value depends on itself
 
 # two chains running into one node
-  e: two branches run into this node; give each branch its own chain
+  e: two chains run into this node; a node belongs to one chain
 
 # an unknown start input
   s: the start node has no input called m
+
+# an unknown loop state
+  w: the init:i input is not connected
+  w: the cond input is not connected
+  w: the step:i input is not connected
+  w: this loop has no state called j
+
+# a loop state declared twice
+  w: i is declared twice
+  w: the init:i input is not connected
+  w: the cond input is not connected
+  w: the step:i input is not connected
 
 # not JSON at all
   the graph is not valid JSON: Line 1, bytes 12-13:

@@ -3,9 +3,9 @@
    Everything is written straight into a Buffer -- there is no relocation
    step, because sizes are known once each part is complete. *)
 
-type valtype = I32 | F64
+type valtype = I32 | I64 | F64
 
-let valtype_byte = function I32 -> 0x7f | F64 -> 0x7c
+let valtype_byte = function I32 -> 0x7f | I64 -> 0x7e | F64 -> 0x7c
 
 type buf = Buffer.t
 
@@ -48,6 +48,7 @@ let local_set b i = u8 b 0x21; uleb b i
 let call b i = u8 b 0x10; uleb b i
 let f64_const b x = u8 b 0x44; f64 b x
 let i32_const b n = u8 b 0x41; sleb b n
+let i64_const b n = u8 b 0x42; sleb b n
 let op b code = u8 b code
 
 let f64_add = 0xa0
@@ -69,9 +70,25 @@ let f64_lt = 0x63
 let f64_gt = 0x64
 let f64_le = 0x65
 let f64_ge = 0x66
+let i64_add = 0x7c
+let i64_sub = 0x7d
+let i64_mul = 0x7e
+let i64_rem_s = 0x81
+let i64_eq = 0x51
+let i64_ne = 0x52
+let i64_lt_s = 0x53
+let i64_gt_s = 0x55
+let i64_le_s = 0x57
+let i64_ge_s = 0x59
+let i64_eqz = 0x50
+let f64_convert_i64_s = 0xb9
 let i32_and = 0x71
 let i32_or = 0x72
 let i32_eqz = 0x45
+let f64_convert_i32_u = 0xb8
+let i32_trunc_f64_u = 0xab
+let op_drop = 0x1a
+let op_select = 0x1b
 let op_block = 0x02
 let op_loop = 0x03
 let op_if = 0x04

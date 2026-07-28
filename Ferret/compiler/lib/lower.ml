@@ -4,38 +4,101 @@
    Exec ports are pushed: the walk starts at the start node and follows the
    exec edges forward, turning each node it meets into a statement.
 
-   Control flow is structured by construction.  An [if] node owns three exec
-   outputs -- then, else and next -- and the branch chains cannot jump back
-   into the outer chain, so the exec edges always form a tree and no
-   post-dominator analysis is needed to rebuild wasm's block structure. *)
+   There is no assignment in the graph language. A value either comes from an
+   edge or from a loop's own state, and the only node that owns state is the
+   loop: it declares named slots, takes an initial value and a next value for
+   each, and offers the current value as an output. So the loop node is the
+   phi, written down. Everything the lowering emits below -- the assignments,
+   the temporaries -- exists only in the IR. *)
 
 open Ir
 
-type ty = TNum | TBool
-
-let ty_name = function TNum -> "number" | TBool -> "boolean"
+let ty_name = function VNum -> "number" | VBool -> "true or false"
 
 type ctx = {
   g : Graph.t;
-  slots : (string, int) Hashtbl.t;  (* name -> local index *)
+  slots : (string, int) Hashtbl.t;  (* internal key -> local index *)
+  used : (string, unit) Hashtbl.t;  (* display names already taken *)
   mutable params : string list;
-  mutable vars : string list;
+  mutable vars : (string * vtype) list;
   mutable errs : Graph.error list;  (* collected, reported all at once *)
   active : (string, unit) Hashtbl.t;  (* data nodes on the current path *)
   entered : (string, unit) Hashtbl.t;  (* exec nodes already emitted *)
 }
 
 let complain ctx ?node fmt =
-  Printf.ksprintf (fun s -> ctx.errs <- Graph.error ?node s :: ctx.errs) fmt
+  Printf.ksprintf
+    (fun s ->
+      let e = Graph.error ?node s in
+      (* A name declared twice asks the same question twice; say it once. *)
+      if not (List.mem e ctx.errs) then ctx.errs <- e :: ctx.errs)
+    fmt
 
-let slot ctx name =
-  match Hashtbl.find_opt ctx.slots name with
+(* Two loops may both call a slot "i"; the graph tells them apart by node id,
+   but the IR dump and the wat need distinct names. *)
+let fresh_display ctx name =
+  let ok c =
+    (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+    || c = '_'
+  in
+  let name = String.map (fun c -> if ok c then c else '_') name in
+  let name = if name = "" then "t" else name in
+  let rec pick n =
+    let candidate = if n = 1 then name else Printf.sprintf "%s_%d" name n in
+    if Hashtbl.mem ctx.used candidate then pick (n + 1)
+    else (
+      Hashtbl.replace ctx.used candidate ();
+      candidate)
+  in
+  pick 1
+
+let slot ctx ~key ~display =
+  match Hashtbl.find_opt ctx.slots key with
   | Some i -> i
   | None ->
       let i = Hashtbl.length ctx.slots in
-      Hashtbl.replace ctx.slots name i;
-      ctx.vars <- ctx.vars @ [ name ];
+      Hashtbl.replace ctx.slots key i;
+      ctx.vars <- ctx.vars @ [ (fresh_display ctx display, VNum) ];
       i
+
+let state_slot ctx (n : Graph.node) name =
+  slot ctx ~key:(n.id ^ "\000" ^ name) ~display:name
+
+(* ------------------------------------------------------- declared names *)
+
+let name_of_entry = function
+  | `String s -> Some s
+  | `Assoc _ as j -> (
+      match Graph.member "name" j with `String s -> Some s | _ -> None)
+  | _ -> None
+
+let declared_names (n : Graph.node) key =
+  match Graph.node_data n key with
+  | `List items ->
+      List.filter_map
+        (fun j -> match name_of_entry j with Some "" | None -> None | s -> s)
+        items
+  | _ -> []
+
+let check_names ctx (n : Graph.node) key what =
+  let items =
+    match Graph.node_data n key with
+    | `List items -> items
+    | `Null -> []
+    | _ ->
+        complain ctx ~node:n.id "the %s of this node are not a list" what;
+        []
+  in
+  let seen = Hashtbl.create 8 in
+  List.iter
+    (fun j ->
+      match name_of_entry j with
+      | Some "" | None -> complain ctx ~node:n.id "one of the %s has no name" what
+      | Some s ->
+          if Hashtbl.mem seen s then
+            complain ctx ~node:n.id "%s is declared twice" s
+          else Hashtbl.replace seen s ())
+    items
 
 (* ---------------------------------------------------------------- data *)
 
@@ -67,97 +130,125 @@ let cmpop_of_string = function
   | "ne" -> Some Ne
   | _ -> None
 
-let rec value ctx (e : Graph.edge) : expr * ty =
+let after_colon port =
+  match String.index_opt port ':' with
+  | Some i -> String.sub port (i + 1) (String.length port - i - 1)
+  | None -> port
+
+let untrue = Cmp (Ne, Num 0., Num 0.)
+
+let rec value ctx (e : Graph.edge) : expr * vtype =
   let n = Graph.find ctx.g e.src in
   if Hashtbl.mem ctx.active n.id then (
     complain ctx ~node:n.id "this node's value depends on itself";
-    (Num 0., TNum))
+    (Num 0., VNum))
   else (
     Hashtbl.replace ctx.active n.id ();
-    let result = value_of ctx n e.src_port in
+    let built = value_of ctx n e.src_port in
     Hashtbl.remove ctx.active n.id;
-    result)
+    built)
 
-and value_of ctx (n : Graph.node) port : expr * ty =
+and value_of ctx (n : Graph.node) port : expr * vtype =
   let bad fmt = Printf.ksprintf (fun s -> complain ctx ~node:n.id "%s" s) fmt in
   match n.kind with
   | "start" ->
-      let name =
-        match String.index_opt port ':' with
-        | Some i -> String.sub port (i + 1) (String.length port - i - 1)
-        | None -> port
-      in
-      if List.mem name ctx.params then (Local (slot ctx name), TNum)
+      let name = after_colon port in
+      if List.mem name ctx.params then
+        (Local (slot ctx ~key:("\001" ^ name) ~display:name), VNum)
       else (
         bad "the start node has no input called %s" name;
-        (Num 0., TNum))
-  | "const" -> (Num (Graph.number_field n "value" ~default:0.), TNum)
-  | "get" ->
-      let name = Graph.string_field n "name" ~default:"" in
-      if name = "" then (
-        bad "this node reads a variable with no name";
-        (Num 0., TNum))
-      else (Local (slot ctx name), TNum)
+        (Num 0., VNum))
+  | "while" ->
+      (* Reading a loop's state stops the backward walk: the value is a local,
+         so the cond and the next-value expressions may name it without that
+         being a cycle. *)
+      let name = after_colon port in
+      if List.mem name (declared_names n "states") then
+        (Local (state_slot ctx n name), VNum)
+      else (
+        bad "this loop has no state called %s" name;
+        (Num 0., VNum))
+  | "const" -> (Num (Graph.number_field n "value" ~default:0.), VNum)
   | "binop" -> (
       let op = Graph.string_field n "op" ~default:"add" in
       match binop_of_string op with
       | None ->
           bad "unknown arithmetic operator %s" op;
-          (Num 0., TNum)
+          (Num 0., VNum)
       | Some op ->
-          let a = num ctx n "a" in
-          let b = num ctx n "b" in
-          (Bin (op, a, b), TNum))
+          let a = number ctx n "a" in
+          let b = number ctx n "b" in
+          (Bin (op, a, b), VNum))
   | "unop" -> (
       let op = Graph.string_field n "op" ~default:"neg" in
       match unop_of_string op with
       | None ->
           bad "unknown operator %s" op;
-          (Num 0., TNum)
-      | Some op -> (Un (op, num ctx n "a"), TNum))
+          (Num 0., VNum)
+      | Some op -> (Un (op, number ctx n "a"), VNum))
   | "compare" -> (
       let op = Graph.string_field n "op" ~default:"lt" in
       match cmpop_of_string op with
       | None ->
           bad "unknown comparison %s" op;
-          (Num 0., TBool)
+          (untrue, VBool)
       | Some op ->
-          let a = num ctx n "a" in
-          let b = num ctx n "b" in
-          (Cmp (op, a, b), TBool))
+          let a = number ctx n "a" in
+          let b = number ctx n "b" in
+          (Cmp (op, a, b), VBool))
   | "logic" -> (
       match Graph.string_field n "op" ~default:"and" with
-      | "not" -> (Not (bool ctx n "a"), TBool)
+      | "not" -> (Not (condition ctx n "a"), VBool)
       | "or" ->
-          let a = bool ctx n "a" in
-          let b = bool ctx n "b" in
-          (Or (a, b), TBool)
+          let a = condition ctx n "a" in
+          let b = condition ctx n "b" in
+          (Or (a, b), VBool)
       | "and" ->
-          let a = bool ctx n "a" in
-          let b = bool ctx n "b" in
-          (And (a, b), TBool)
+          let a = condition ctx n "a" in
+          let b = condition ctx n "b" in
+          (And (a, b), VBool)
       | op ->
           bad "unknown logical operator %s" op;
-          (Num 0., TBool))
+          (untrue, VBool))
+  | "select" ->
+      let c = condition ctx n "cond" in
+      let a = number ctx n "a" in
+      let b = number ctx n "b" in
+      (Select (c, a, b), VNum)
   | kind ->
       bad "the %s node produces no value" kind;
-      (Num 0., TNum)
+      (Num 0., VNum)
 
-and input ctx (n : Graph.node) port ~want : expr =
+(* An input port takes an edge or, failing that, a number typed into it. *)
+and number ctx (n : Graph.node) port : expr =
+  match Graph.into ctx.g ~node:n.id ~port with
+  | None -> (
+      match Graph.port_value n port with
+      | Some x -> Num x
+      | None ->
+          complain ctx ~node:n.id "the %s input is not connected" port;
+          Num 0.)
+  | Some e ->
+      let expr, ty = value ctx e in
+      if ty = VNum then expr
+      else (
+        complain ctx ~node:n.id "the %s input wants a number but is given a %s"
+          port (ty_name ty);
+        Num 0.)
+
+and condition ctx (n : Graph.node) port : expr =
   match Graph.into ctx.g ~node:n.id ~port with
   | None ->
       complain ctx ~node:n.id "the %s input is not connected" port;
-      if want = TBool then Cmp (Ne, Num 0., Num 0.) else Num 0.
+      untrue
   | Some e ->
-      let expr, got = value ctx e in
-      if got <> want then (
-        complain ctx ~node:n.id "the %s input wants a %s but is given a %s" port
-          (ty_name want) (ty_name got);
-        if want = TBool then Cmp (Ne, Num 0., Num 0.) else Num 0.)
-      else expr
-
-and num ctx n port = input ctx n port ~want:TNum
-and bool ctx n port = input ctx n port ~want:TBool
+      let expr, ty = value ctx e in
+      if ty = VBool then expr
+      else (
+        complain ctx ~node:n.id
+          "the %s input wants a true or false but is given a %s" port
+          (ty_name ty);
+        untrue)
 
 (* ---------------------------------------------------------------- exec *)
 
@@ -168,70 +259,64 @@ let rec chain ctx (from : Graph.node) port : block =
       let n = Graph.find ctx.g e.dst in
       if Hashtbl.mem ctx.entered n.id then (
         complain ctx ~node:n.id
-          "two branches run into this node; give each branch its own chain";
+          "two chains run into this node; a node belongs to one chain";
         [])
       else (
         Hashtbl.replace ctx.entered n.id ();
         step ctx n)
 
 and step ctx (n : Graph.node) : block =
-  let rest () = chain ctx n "next" in
   match n.kind with
-  | "set" ->
-      let name = Graph.string_field n "name" ~default:"" in
-      if name = "" then (
-        complain ctx ~node:n.id "this node writes a variable with no name";
-        rest ())
-      else
-        let target = slot ctx name in
-        let v = num ctx n "value" in
-        Assign (target, v) :: rest ()
   | "log" ->
-      let v = num ctx n "value" in
-      Log v :: rest ()
-  | "end" -> [ Ret (num ctx n "value") ]
-  | "if" ->
-      let c = bool ctx n "cond" in
-      let t = chain ctx n "then" in
-      let e = chain ctx n "else" in
-      If (c, t, e) :: rest ()
-  | "while" ->
-      let c = bool ctx n "cond" in
-      let body = chain ctx n "body" in
-      While (c, body) :: rest ()
+      let v = number ctx n "value" in
+      let rest = chain ctx n "next" in
+      Log v :: rest
+  | "end" -> [ Ret (number ctx n "value") ]
+  | "while" -> loop ctx n
   | kind ->
       complain ctx ~node:n.id "the %s node cannot be part of the flow" kind;
-      rest ()
+      chain ctx n "next"
+
+and loop ctx (n : Graph.node) : block =
+  check_names ctx n "states" "loop states";
+  let states = declared_names n "states" in
+  (* The slots come first so that the condition and the next-value
+     expressions, which read them, resolve to locals rather than recursing. *)
+  let slots = List.map (fun s -> state_slot ctx n s) states in
+  let inits =
+    List.map2 (fun i s -> Assign (i, number ctx n ("init:" ^ s))) slots states
+  in
+  let cond = condition ctx n "cond" in
+  let body = chain ctx n "body" in
+  (* Every next-value expression reads the state as it was at the top of the
+     iteration, so with more than one slot they land in temporaries before any
+     of them is written back. *)
+  let steps = List.map (fun s -> number ctx n ("step:" ^ s)) states in
+  let updates =
+    match (slots, steps) with
+    | [], _ | _, [] -> []
+    | [ i ], [ e ] -> [ Assign (i, e) ]
+    | _ ->
+        let temps =
+          List.map
+            (fun s ->
+              slot ctx ~key:(n.id ^ "\000next\000" ^ s) ~display:(s ^ "_next"))
+            states
+        in
+        List.map2 (fun t e -> Assign (t, e)) temps steps
+        @ List.map2 (fun i t -> Assign (i, Local t)) slots temps
+  in
+  let rest = chain ctx n "next" in
+  inits @ [ While (cond, body @ updates) ] @ rest
 
 (* --------------------------------------------------------------- entry *)
-
-let params_of ctx (start : Graph.node) =
-  let name = function
-    | `String s -> Some s
-    | `Assoc _ as j -> (
-        match Graph.member "name" j with `String s -> Some s | _ -> None)
-    | _ -> None
-  in
-  match Graph.node_data start "params" with
-  | `List items ->
-      List.filter_map
-        (fun j ->
-          match name j with
-          | Some "" | None ->
-              complain ctx ~node:start.id "an input of the start node has no name";
-              None
-          | Some s -> Some s)
-        items
-  | `Null -> []
-  | _ ->
-      complain ctx ~node:start.id "the start node's inputs are not a list";
-      []
 
 let func_of_graph (g : Graph.t) : func =
   let ctx =
     {
       g;
       slots = Hashtbl.create 16;
+      used = Hashtbl.create 16;
       params = [];
       vars = [];
       errs = [];
@@ -256,10 +341,13 @@ let func_of_graph (g : Graph.t) : func =
     match start with
     | None -> []
     | Some start ->
-        ctx.params <- params_of ctx start;
+        check_names ctx start "params" "inputs";
+        ctx.params <- declared_names start "params";
         (* Parameters take the first local slots, in the order the start node
            lists them, so the wasm signature matches the editor's form. *)
-        List.iter (fun p -> ignore (slot ctx p)) ctx.params;
+        List.iter
+          (fun p -> ignore (slot ctx ~key:("\001" ^ p) ~display:p))
+          ctx.params;
         ctx.vars <- [];
         Hashtbl.replace ctx.entered start.id ();
         chain ctx start "next"

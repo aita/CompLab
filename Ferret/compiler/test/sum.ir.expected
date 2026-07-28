@@ -1,11 +1,15 @@
 fun main(n) -> f64 {
   var total = 0
   var i = 0
+  var total_next = 0
+  var i_next = 0
   total = 0
   i = 1
   while (i <= n) {
-    total = (total + i)
-    i = (i + 1)
+    total_next = (total + i)
+    i_next = (i + 1)
+    total = total_next
+    i = i_next
   }
   return total
 }

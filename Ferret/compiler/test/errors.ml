@@ -31,11 +31,16 @@ let () =
   case "a number where a condition belongs"
     {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
                    { "id": "c", "type": "const", "data": { "value": 1 } },
-                   { "id": "i", "type": "if", "data": {} } ],
+                   { "id": "w", "type": "while",
+                     "data": { "states": [ { "name": "i" } ] } } ],
         "edges": [ { "source": "s", "sourceHandle": "next",
-                     "target": "i", "targetHandle": "in" },
+                     "target": "w", "targetHandle": "in" },
                    { "source": "c", "sourceHandle": "out",
-                     "target": "i", "targetHandle": "cond" } ] }|};
+                     "target": "w", "targetHandle": "cond" },
+                   { "source": "c", "sourceHandle": "out",
+                     "target": "w", "targetHandle": "init:i" },
+                   { "source": "c", "sourceHandle": "out",
+                     "target": "w", "targetHandle": "step:i" } ] }|};
 
   case "a condition where a number belongs"
     {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
@@ -68,23 +73,23 @@ let () =
 
   case "two chains running into one node"
     {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
+                   { "id": "w", "type": "while", "data": { "states": [] } },
                    { "id": "c", "type": "const", "data": { "value": 1 } },
                    { "id": "cmp", "type": "compare", "data": { "op": "lt" } },
-                   { "id": "i", "type": "if", "data": {} },
                    { "id": "e", "type": "end", "data": {} } ],
         "edges": [ { "source": "s", "sourceHandle": "next",
-                     "target": "i", "targetHandle": "in" },
+                     "target": "w", "targetHandle": "in" },
                    { "source": "c", "sourceHandle": "out",
                      "target": "cmp", "targetHandle": "a" },
                    { "source": "c", "sourceHandle": "out",
                      "target": "cmp", "targetHandle": "b" },
                    { "source": "cmp", "sourceHandle": "out",
-                     "target": "i", "targetHandle": "cond" },
+                     "target": "w", "targetHandle": "cond" },
                    { "source": "c", "sourceHandle": "out",
                      "target": "e", "targetHandle": "value" },
-                   { "source": "i", "sourceHandle": "then",
+                   { "source": "w", "sourceHandle": "body",
                      "target": "e", "targetHandle": "in" },
-                   { "source": "i", "sourceHandle": "else",
+                   { "source": "w", "sourceHandle": "next",
                      "target": "e", "targetHandle": "in" } ] }|};
 
   case "an unknown start input"
@@ -95,5 +100,24 @@ let () =
                      "target": "e", "targetHandle": "in" },
                    { "source": "s", "sourceHandle": "var:m",
                      "target": "e", "targetHandle": "value" } ] }|};
+
+  case "an unknown loop state"
+    {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
+                   { "id": "w", "type": "while",
+                     "data": { "states": [ { "name": "i" } ] } },
+                   { "id": "e", "type": "end", "data": {} } ],
+        "edges": [ { "source": "s", "sourceHandle": "next",
+                     "target": "w", "targetHandle": "in" },
+                   { "source": "w", "sourceHandle": "next",
+                     "target": "e", "targetHandle": "in" },
+                   { "source": "w", "sourceHandle": "var:j",
+                     "target": "e", "targetHandle": "value" } ] }|};
+
+  case "a loop state declared twice"
+    {|{ "nodes": [ { "id": "s", "type": "start", "data": {} },
+                   { "id": "w", "type": "while",
+                     "data": { "states": [ { "name": "i" }, { "name": "i" } ] } } ],
+        "edges": [ { "source": "s", "sourceHandle": "next",
+                     "target": "w", "targetHandle": "in" } ] }|};
 
   case "not JSON at all" {|{ "nodes": [ |}
