@@ -1,3 +1,5 @@
 (func main (result f64)
+  (local result float)
   (log (/ (min (float (+ (* 5 5) 1)) 100) 2))
-  (return (float (select (and (> 5 3) (< 5 10)) 1 0))))
+  (set result (float (select (and (> 5 3) (< 5 10)) 1 0)))
+  (return result))

@@ -10,7 +10,7 @@
    `sourceHandle` / `targetHandle`, so a port drawn here and a port read there
    cannot drift apart. *)
 
-type port_kind = Exec | Num | Bool
+type port_kind = Num | Bool | Text
 
 type port = { id : string; label : string; kind : port_kind }
 
@@ -19,7 +19,6 @@ type field =
   | Number of { key : string; label : string }
   | Text of { key : string; label : string }
   | Select of { key : string; label : string; options : (string * string) list }
-  | Names of { key : string; label : string; item : string }
 
 (* One operator of a family.  [short] is what the palette calls it where the
    full name does not fit; [sign] is what goes in the icon. *)
@@ -32,10 +31,6 @@ type t = {
   color : string;
   category : string;
   hint : string;
-  (* The ways in.  The first is drawn on the header, along the line the flow
-     runs; any others get a row of their own. *)
-  exec_in : port list;
-  exec_out : port list;
   inputs : port list;
   outputs : port list;
   data : (string * Yojson.Safe.t) list;
@@ -47,12 +42,10 @@ type t = {
   unique : bool;
 }
 
-let exec id label = { id; label; kind = Exec }
 let num id label = { id; label; kind = Num }
 let cond id label = { id; label; kind = Bool }
+let text id label = { id; label; kind = Text }
 let op ?short ?sign op name = { op; name; short; sign }
-
-let next = [ exec "next" "next" ]
 
 let blank =
   {
@@ -62,8 +55,6 @@ let blank =
     color = "#667085";
     category = "Values";
     hint = "";
-    exec_in = [];
-    exec_out = [];
     inputs = [];
     outputs = [];
     data = [];
@@ -125,141 +116,16 @@ let catalogue : t list =
   [
     {
       blank with
-      kind = "start";
-      title = "Start";
-      glyph = "▶";
-      color = "#12b76a";
-      category = "Flow";
-      hint =
-        "Where the flow begins. It hands out one thing: when the run started, \
-         in milliseconds, from the host. A graph takes no arguments.";
-      exec_out = next;
-      outputs = [ num "time" "started at" ];
-      unique = true;
-    };
-    {
-      blank with
-      kind = "end";
-      title = "End";
+      kind = "out";
+      title = "Out";
       glyph = "■";
       color = "#f79009";
-      category = "Flow";
-      hint = "Return a value and stop.";
-      exec_in = [ exec "in" "in" ];
-      inputs = [ num "value" "result" ];
-    };
-    {
-      blank with
-      kind = "select";
-      title = "Choose";
-      glyph = "?";
-      color = "#f04438";
-      category = "Flow";
+      category = "Out";
       hint =
-        "The only branch there is: pick one of two numbers by a condition. \
-         Both are evaluated, which is safe because nothing in an expression \
-         has an effect.";
-      inputs = [ cond "cond" "if"; num "a" "then"; num "b" "else" ];
-      outputs = [ num "out" "result" ];
-    };
-    {
-      blank with
-      kind = "condition";
-      title = "Condition";
-      glyph = "Y";
-      color = "#f04438";
-      category = "Flow";
-      hint =
-        "Sends the flow one way or the other. A loop is a Condition with a \
-         wire running back into it from the end of the body.";
-      exec_in = [ exec "in" "in" ];
-      exec_out = [ exec "true" "true"; exec "false" "false" ];
-      inputs = [ cond "cond" "test" ];
-    };
-    {
-      blank with
-      kind = "counter";
-      title = "Counter";
-      glyph = "i";
-      color = "#06aed4";
-      category = "Flow";
-      hint =
-        "Counts. It starts at one value and, every time the flow passes \
-         through it, adds another to what it holds. Wire `by` to something \
-         other than a constant and it accumulates.";
-      exec_in = [ exec "in" "in" ];
-      exec_out = next;
-      inputs = [ num "from" "starts at"; num "by" "moves by" ];
-      outputs = [ num "value" "value" ];
-      data =
-        [
-          ("name", `String "i");
-          ("values", `Assoc [ ("from", `Int 0); ("by", `Int 1) ]);
-        ];
-      fields = [ Text { key = "name"; label = "Name" } ];
-    };
-    {
-      blank with
-      kind = "state";
-      title = "State";
-      glyph = "S";
-      color = "#15b79e";
-      category = "Flow";
-      hint =
-        "Remembers one number. Passing through stores what it is fed, and \
-         reading its output anywhere gives back the last thing stored. There \
-         is a second way through, `reset`, that puts back what it started \
-         with -- which is what a state inside a loop needs and a Counter \
-         cannot say.";
-      exec_in = [ exec "in" "in"; exec "reset" "reset" ];
-      exec_out = [ exec "next" "next"; exec "after" "after reset" ];
-      inputs = [ num "initial" "starts at"; num "value" "stores" ];
-      outputs = [ num "value" "value" ];
-      data =
-        [
-          ("name", `String "s");
-          ("values", `Assoc [ ("initial", `Int 0) ]);
-        ];
-      fields = [ Text { key = "name"; label = "Name" } ];
-    };
-    {
-      blank with
-      kind = "wait";
-      title = "Wait for Event";
-      glyph = "wait";
-      color = "#f63d68";
-      category = "Flow";
-      hint =
-        "Stops until the host has an event, and hands over the number it sent. \
-         The only node that takes time: a loop with one of these in it is an \
-         event loop, and the loop is drawn rather than hidden in the runtime.";
-      exec_in = [ exec "in" "in" ];
-      exec_out = next;
-      outputs = [ num "value" "event" ];
-      data = [ ("name", `String "e") ];
-      fields = [ Text { key = "name"; label = "Name" } ];
-    };
-    {
-      blank with
-      kind = "forloop";
-      title = "For Loop";
-      glyph = "1..n";
-      color = "#d444f1";
-      category = "Flow";
-      hint =
-        "Counts from the first value to the last, running the body once for \
-         each. It is a Counter and a Condition wired into a loop, drawn as one \
-         node: the end of the body goes back to it on its own.";
-      exec_in = [ exec "in" "in" ];
-      exec_out = [ exec "body" "body"; exec "done" "done" ];
-      inputs = [ num "first" "from"; num "last" "to" ];
-      outputs = [ num "index" "index" ];
-      data =
-        [
-          ("name", `String "i");
-          ("values", `Assoc [ ("first", `Int 1); ("last", `Int 10) ]);
-        ];
-      fields = [ Text { key = "name"; label = "Name" } ];
+        "What a cook comes back with. A graph does not have to have one -- \
+         Log and Say are ways out too -- but it can only have one.";
+      inputs = [ num "value" "value" ];
+      unique = true;
     };
     {
       blank with
@@ -267,11 +133,78 @@ let catalogue : t list =
       title = "Log";
       glyph = "✎";
       color = "#0ba5ec";
-      category = "Flow";
-      hint = "Hand a value to the host. In the module this is a call to env.log.";
-      exec_in = [ exec "in" "in" ];
-      exec_out = next;
+      category = "Out";
+      hint =
+        "Hand a number to the host, every cook. In the module this is a call \
+         to env.log.";
       inputs = [ num "value" "value" ];
+    };
+    {
+      blank with
+      kind = "say";
+      title = "Say";
+      glyph = "say";
+      color = "#0ba5ec";
+      category = "Out";
+      hint =
+        "Hand a piece of text to the host, the way Log hands it a number. The \
+         text is a literal: there is no memory in a graph to build one in.";
+      inputs = [ text "text" "text" ];
+    };
+    {
+      blank with
+      kind = "feedback";
+      title = "Feedback";
+      glyph = "↺";
+      color = "#15b79e";
+      category = "Values";
+      hint =
+        "What the last cook left. Reading it gives that; what it is fed is \
+         taken up at the end of this cook, at the same moment as every other \
+         feedback. This is the only way a graph can depend on itself, and the \
+         only way one cook can tell the next anything.";
+      outputs = [ num "out" "held" ];
+      inputs = [ num "value" "next" ];
+      data =
+        [
+          ("name", `String "held");
+          ("holds", `String "number");
+          ("start", `Int 0);
+        ];
+      fields =
+        [
+          Text { key = "name"; label = "Name" };
+          Select
+            {
+              key = "holds";
+              label = "Holds";
+              options = [ ("number", "a number"); ("flag", "a yes or no") ];
+            };
+          Number { key = "start"; label = "Starts at" };
+        ];
+    };
+    {
+      blank with
+      kind = "select";
+      title = "Choose";
+      glyph = "?";
+      color = "#f04438";
+      category = "Operators";
+      hint =
+        "One of two values, by a condition. Both are worked out, which is \
+         safe because nothing in a graph has an effect where it is read.";
+      inputs = [ cond "cond" "if"; num "a" "then"; num "b" "else" ];
+      outputs = [ num "out" "result" ];
+      data = [ ("holds", `String "number") ];
+      fields =
+        [
+          Select
+            {
+              key = "holds";
+              label = "Chooses between";
+              options = [ ("number", "numbers"); ("flag", "yes and no") ];
+            };
+        ];
     };
     {
       blank with
@@ -324,7 +257,7 @@ let catalogue : t list =
       glyph = "&";
       color = "#7a5af8";
       category = "Operators";
-      hint = "Combine true and false. And and Or evaluate both sides.";
+      hint = "Combine true and false. And and Or work out both sides.";
       inputs = [ cond "a" "A"; cond "b" "B" ];
       outputs = [ cond "out" "result" ];
       data = [ ("op", `String "and") ];
@@ -342,12 +275,30 @@ let catalogue : t list =
       hint =
         "A whole calculation typed as text, instead of a chain of a dozen \
          nodes. The names it uses become its input ports, so it wires up like \
-         anything else. min, max, abs, sqrt, floor, ceil, round and random are \
-         available.";
+         anything else. min, max, abs, sqrt, floor, ceil, round and random \
+         are available.";
       outputs = [ num "out" "result" ];
       data = [ ("text", `String "x * x + y * y") ];
       fields = [ Text { key = "text"; label = "Expression" } ];
       entry = Some ("text", "x * x + y * y");
+    };
+    {
+      blank with
+      kind = "input";
+      title = "Input";
+      glyph = "in";
+      color = "#7a5af8";
+      category = "Values";
+      hint =
+        "A number the Run panel asks for before the run starts. It keeps what \
+         it is given, so every cook reads the same value until it is changed.";
+      outputs = [ num "value" "value" ];
+      data = [ ("name", `String "n"); ("value", `Int 10) ];
+      fields =
+        [
+          Text { key = "name"; label = "Name" };
+          Number { key = "value"; label = "Default" };
+        ];
     };
     {
       blank with
@@ -365,6 +316,55 @@ let catalogue : t list =
     };
     {
       blank with
+      kind = "flag";
+      title = "Yes or No";
+      glyph = "T/F";
+      color = "#7a5af8";
+      category = "Values";
+      hint =
+        "A true or false, written down. Everything else that makes one -- a \
+         comparison, an and -- works it out; this is the one that just says it.";
+      outputs = [ cond "out" "value" ];
+      data = [ ("value", `String "yes") ];
+      fields =
+        [
+          Select
+            {
+              key = "value";
+              label = "Value";
+              options = [ ("yes", "yes (true)"); ("no", "no (false)") ];
+            };
+        ];
+    };
+    {
+      blank with
+      kind = "text";
+      title = "Text";
+      glyph = "abc";
+      color = "#0ba5ec";
+      category = "Values";
+      hint =
+        "A piece of text, to be said. It is a literal and stays one -- nothing \
+         in the language takes text apart or puts it together.";
+      outputs = [ text "out" "text" ];
+      data = [ ("text", `String "hello") ];
+      fields = [ Text { key = "text"; label = "Text" } ];
+      entry = Some ("text", "hello");
+    };
+    {
+      blank with
+      kind = "time";
+      title = "Time";
+      glyph = "⏱";
+      color = "#12b76a";
+      category = "Values";
+      hint =
+        "What the host says the time is, in milliseconds, asked afresh every \
+         cook. Two readers of it in one cook see the same moment.";
+      outputs = [ num "out" "now" ];
+    };
+    {
+      blank with
       kind = "random";
       title = "Random";
       glyph = "~";
@@ -372,8 +372,8 @@ let catalogue : t list =
       category = "Values";
       hint =
         "A number in [min, max), drawn from the host. The one impure node: it \
-         is drawn once each time the node is reached, and every reader of that \
-         node sees the same draw.";
+         is drawn once per cook per node, and every reader of that node sees \
+         the same draw.";
       inputs = [ num "min" "min"; num "max" "max" ];
       outputs = [ num "out" "value" ];
       data = [ ("values", `Assoc [ ("min", `Int 0); ("max", `Int 1) ]) ];
@@ -397,12 +397,21 @@ type described = {
   d_badge : string option;
   d_inputs : port list;
   d_outputs : port list;
+  (* What the inspector's form should offer, which a node's own settings can
+     change as much as its ports: what a feedback starts at is a number or a
+     yes-or-no depending on what it holds. *)
+  d_fields : field list;
 }
 
 (* A badge shows a number the way it was typed, not the way an f64 prints. *)
 let show_number v =
   if Float.is_integer v && Float.abs v < 1e16 then Printf.sprintf "%.0f" v
   else Printf.sprintf "%.12g" v
+
+(* A node that works on either sort says which in its own settings, because
+   the ports are drawn before anything is wired to them. *)
+let flagged (n : Graph.node) =
+  Graph.string_field n "holds" ~default:"number" = "flag"
 
 let chosen ops n =
   let id = Graph.string_field n "op" ~default:"" in
@@ -423,19 +432,47 @@ let describe ~kind ~(data : Yojson.Safe.t) : described =
       d_badge = None;
       d_inputs = s.inputs;
       d_outputs = s.outputs;
+      d_fields = s.fields;
     }
   in
   let name_field default = Graph.string_field n "name" ~default in
   match kind with
-  | "counter" ->
-      (* Two of them in a row both saying "Counter" is what makes a loop look
-         like ceremony; the name is the thing that tells them apart. *)
-      { plain with d_title = name_field "Counter" }
-  | "forloop" -> { plain with d_title = "For " ^ name_field "i" }
-  | "state" ->
-      (* Like a counter, what tells two of them apart is the name. *)
-      { plain with d_title = name_field "State" }
-  | "wait" -> { plain with d_title = "Wait for " ^ name_field "e" }
+  | "feedback" ->
+      (* What tells two of them apart is the name; what it holds decides what
+         its ports take. *)
+      let port = if flagged n then cond else num in
+      {
+        plain with
+        d_title = name_field "Feedback";
+        d_badge = (if flagged n then Some "yes/no" else None);
+        d_inputs = [ port "value" "next" ];
+        d_outputs = [ port "out" "held" ];
+        d_fields =
+          (if not (flagged n) then s.fields
+           else
+             List.map
+               (function
+                 | Number { key = "start"; label } ->
+                     Select
+                       {
+                         key = "start";
+                         label;
+                         options = [ ("no", "no (false)"); ("yes", "yes (true)") ];
+                       }
+                 | f -> f)
+               s.fields);
+      }
+  | "select" ->
+      (* Both arms and the answer are the one sort of thing, and which sort is
+         the node's to say: the ports have to be drawn before anything is
+         wired to them. *)
+      let port = if flagged n then cond else num in
+      {
+        plain with
+        d_inputs = [ cond "cond" "if"; port "a" "then"; port "b" "else" ];
+        d_outputs = [ port "out" "result" ];
+      }
+  | "input" -> { plain with d_title = name_field "Input" }
   | "const" ->
       {
         plain with
@@ -474,7 +511,10 @@ let describe ~kind ~(data : Yojson.Safe.t) : described =
 
 (* ---------------------------------------------------------------- JSON *)
 
-let json_of_kind = function Exec -> "exec" | Num -> "num" | Bool -> "bool"
+let json_of_kind = function
+  | Num -> "num"
+  | Bool -> "bool"
+  | Text -> "text"
 
 let json_of_port p : Yojson.Safe.t =
   `Assoc
@@ -500,14 +540,6 @@ let json_of_field : field -> Yojson.Safe.t = function
           ( "options",
             `List (List.map (fun (v, l) -> `List [ `String v; `String l ]) options) );
         ]
-  | Names { key; label; item } ->
-      `Assoc
-        [
-          ("key", `String key);
-          ("label", `String label);
-          ("kind", `String "names");
-          ("itemLabel", `String item);
-        ]
 
 let json_of_op o : Yojson.Safe.t =
   `Assoc
@@ -524,8 +556,6 @@ let json_of_spec s : Yojson.Safe.t =
       ("color", `String s.color);
       ("category", `String s.category);
       ("hint", `String s.hint);
-      ("execIn", json_of_ports s.exec_in);
-      ("execOut", json_of_ports s.exec_out);
       ("inputs", json_of_ports s.inputs);
       ("outputs", json_of_ports s.outputs);
       ("data", `Assoc s.data);
@@ -558,6 +588,7 @@ let json_of_described d : Yojson.Safe.t =
       ("badge", match d.d_badge with Some b -> `String b | None -> `Null);
       ("inputs", json_of_ports d.d_inputs);
       ("outputs", json_of_ports d.d_outputs);
+      ("fields", `List (List.map json_of_field d.d_fields));
     ]
 
 let describe_json ~kind ~data = json_of_described (describe ~kind ~data)

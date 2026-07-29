@@ -11,31 +11,32 @@ let case kind data =
          (fun (p : Ferret.Spec.port) ->
            Printf.sprintf "%s:%s(%s)" p.id p.label
              (match p.kind with
-             | Ferret.Spec.Exec -> "exec"
              | Ferret.Spec.Num -> "num"
-             | Ferret.Spec.Bool -> "bool"))
+             | Ferret.Spec.Bool -> "bool"
+             | Ferret.Spec.Text -> "text"))
          ps)
   in
   Printf.printf "%-9s %s\n" kind data;
   Printf.printf "  %s [%s]%s\n" d.d_title d.d_glyph
     (match d.d_badge with Some b -> " badge " ^ b | None -> "");
   Printf.printf "  in   %s\n" (ports d.d_inputs);
-  Printf.printf "  out  %s\n\n" (ports d.d_outputs)
+  Printf.printf "  out  %s\n" (ports d.d_outputs);
+  Printf.printf "  form %s\n\n"
+    (String.concat ", "
+       (List.map
+          (function
+            | Ferret.Spec.Number { key; _ } -> key ^ ":number"
+            | Ferret.Spec.Text { key; _ } -> key ^ ":text"
+            | Ferret.Spec.Select { key; options; _ } ->
+                key ^ ":" ^ String.concat "|" (List.map fst options))
+          d.d_fields))
 
 let () =
-  (* The start node's inputs are ports to wire from. *)
-  case "start" {|{ "params": [ { "name": "n" }, { "name": "size" } ] }|};
-  case "start" {|{ "params": [] }|};
-
-  (* A counter is told apart by its name. *)
-  case "counter" {|{ "name": "total" }|};
-  case "counter" {|{}|};
-
-  case "forloop" {|{ "name": "row" }|};
-
-  (* A state is told apart by its name too, and has a second way in. *)
-  case "state" {|{ "name": "run" }|};
-  case "state" {|{}|};
+  (* A feedback is told apart by its name, and what it holds decides what its
+     two ports take. *)
+  case "feedback" {|{ "name": "count" }|};
+  case "feedback" {|{ "name": "lit", "holds": "flag" }|};
+  case "feedback" {|{}|};
 
   (* An operator names itself after the operator it is on. *)
   case "binop" {|{ "op": "mul" }|};
@@ -57,5 +58,10 @@ let () =
   (* Halfway through typing: no tree yet, but the ports are still there. *)
   case "expr" {|{ "text": "a * b + " }|};
   case "expr" {|{ "text": "" }|};
+
+  (* The numbers the Run panel asks for, and the two ways out. *)
+  case "input" {|{ "name": "step", "value": 3 }|};
+  case "say" {|{}|};
+  case "out" {|{}|};
 
   case "nonesuch" {|{}|}

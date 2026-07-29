@@ -3,7 +3,6 @@ import {
   Background,
   BackgroundVariant,
   Controls,
-  MarkerType,
   MiniMap,
   ReactFlow,
   addEdge,
@@ -31,9 +30,9 @@ const nodeTypes = Object.fromEntries(SPECS.map((s) => [s.type, FlowNode]));
 const edgeTypes = { wire: Wire };
 const STORAGE_KEY = "ferret.graph";
 
-const EXEC_COLOR = "#94a3b8";
 const NUM_COLOR = "#38bdf8";
 const BOOL_COLOR = "#a78bfa";
+const TEXT_COLOR = "#0ba5ec";
 
 type Tab = "node" | "run" | "code";
 type Menu = { x: number; y: number; title: string; items: MenuItem[] };
@@ -162,6 +161,12 @@ export default function App() {
     [graph],
   );
 
+  // The nodes the user right-clicked a breakpoint onto.
+  const breakpoints = useMemo(
+    () => new Set(nodes.filter((n) => n.data.breakpoint).map((n) => n.id)),
+    [nodes],
+  );
+
   const problems = useMemo(() => {
     const map = new Map<string, string[]>();
     if (!compiled.ok) {
@@ -201,54 +206,48 @@ export default function App() {
 
   const onConnect: OnConnect = useCallback(
     (c) => {
-      const kind = kindOf(c.source, c.sourceHandle ?? null);
-      setEdges((current) => {
-        // A value input takes one connection and an exec output leads one
-        // place, so dropping a new wire on either replaces what was there.
-        // An exec *input* takes as many as it likes: that is how a loop is
-        // closed, with the end of the body running back into a condition.
-        let kept =
-          kind === "exec"
-            ? current.filter(
-                (e) =>
-                  !(e.source === c.source && e.sourceHandle === c.sourceHandle),
-              )
-            : current.filter(
-                (e) =>
-                  !(e.target === c.target && e.targetHandle === c.targetHandle),
-              );
-        return addEdge(c, kept);
-      });
+      setEdges((current) =>
+        // An input port takes one value, so dropping a new wire on one
+        // replaces what was there.  An output may feed as many as it likes:
+        // that is the whole point of a node being worked out once.
+        addEdge(
+          c,
+          current.filter(
+            (e) =>
+              !(e.target === c.target && e.targetHandle === c.targetHandle),
+          ),
+        ),
+      );
     },
-    [kindOf, setEdges],
+    [setEdges],
   );
 
   // While a node is selected, every wire that does not touch it fades, which
-  // is the only way to follow one thread through a loop's feedback.
+  // is the only way to follow one strand through a graph that fans out.
+  const heldBy = useMemo(
+    () => new Set(nodes.filter((n) => n.type === "feedback").map((n) => n.id)),
+    [nodes],
+  );
+
   const styledEdges = useMemo(
     () =>
       edges.map((e) => {
         const kind = kindOf(e.source, e.sourceHandle ?? null);
-        const exec = kind === "exec";
-        const color = exec
-          ? EXEC_COLOR
-          : kind === "bool"
+        const color =
+          kind === "bool"
             ? BOOL_COLOR
-            : NUM_COLOR;
+            : kind === "text"
+              ? TEXT_COLOR
+              : NUM_COLOR;
         const near =
           selected === null || e.source === selected || e.target === selected;
         return {
           ...e,
           type: "wire" as const,
-          data: { color, exec, faded: !near },
-          // Only the thread of execution carries an arrowhead; a value's
-          // direction is already told by which side of a card it leaves.
-          markerEnd: exec
-            ? { type: MarkerType.ArrowClosed, width: 13, height: 13, color }
-            : undefined,
+          data: { color, later: heldBy.has(e.target), faded: !near },
         };
       }),
-    [edges, kindOf, selected],
+    [edges, heldBy, kindOf, selected],
   );
 
   const addNode = useCallback(
@@ -387,18 +386,15 @@ export default function App() {
       const attached = edges.some(
         (e) => e.source === node.id || e.target === node.id,
       );
-      const items: MenuItem[] = [];
-      // A breakpoint on the start node would report what the caller passed in,
-      // which the Run panel already shows.
-      if (node.type !== "start")
-        items.push({
-          label: node.data.breakpoint
-            ? "Remove breakpoint"
-            : "Add breakpoint",
+      const items: MenuItem[] = [
+        {
+          label: node.data.breakpoint ? "Remove breakpoint" : "Add breakpoint",
           onPick: () =>
             patchNode(node.id, { breakpoint: !node.data.breakpoint }),
-        });
-      // There can only be one start node, so it can be neither copied nor cut.
+        },
+      ];
+      // A graph comes back with one value, so there is only ever one Out and
+      // it cannot be copied.
       if (!spec?.unique)
         items.push({ label: "Duplicate", onPick: () => duplicateNode(node.id) });
       if (attached)
@@ -406,13 +402,12 @@ export default function App() {
           label: "Disconnect",
           onPick: () => disconnectNode(node.id),
         });
-      if (!spec?.unique)
-        items.push({
-          label: "Delete",
-          hint: "Del",
-          danger: true,
-          onPick: () => deleteNode(node.id),
-        });
+      items.push({
+        label: "Delete",
+        hint: "Del",
+        danger: true,
+        onPick: () => deleteNode(node.id),
+      });
       setSelected(node.id);
       setMenu({
         x: event.clientX,
@@ -582,12 +577,6 @@ export default function App() {
                 onPaneClick={() => setMenu(null)}
                 onMoveStart={() => setMenu(null)}
                 deleteKeyCode={["Delete", "Backspace"]}
-                onBeforeDelete={async ({ nodes: picked, edges: cut }) => ({
-                  // The start node is the entry point; there is nothing to
-                  // compile without it.
-                  nodes: picked.filter((n) => !SPEC_BY_TYPE[n.type!]?.unique),
-                  edges: cut,
-                })}
                 proOptions={{ hideAttribution: true }}
                 fitView
                 fitViewOptions={{ padding: 0.2 }}
@@ -639,6 +628,7 @@ export default function App() {
                   <RunPanel
                     compiled={compiled}
                     stepwise={stepwise}
+                    breakpoints={breakpoints}
                     onReveal={reveal}
                     onFocusNode={(id) => {
                       setSelected(id);

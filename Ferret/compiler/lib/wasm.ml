@@ -45,6 +45,8 @@ let vec (b : buf) f items =
 
 let local_get b i = u8 b 0x20; uleb b i
 let local_set b i = u8 b 0x21; uleb b i
+let global_get b i = u8 b 0x23; uleb b i
+let global_set b i = u8 b 0x24; uleb b i
 let call b i = u8 b 0x10; uleb b i
 let f64_const b x = u8 b 0x44; f64 b x
 let i32_const b n = u8 b 0x41; sleb b n
@@ -89,41 +91,8 @@ let f64_convert_i32_u = 0xb8
 let i32_trunc_f64_u = 0xab
 let op_drop = 0x1a
 let op_select = 0x1b
-let op_block = 0x02
-let op_loop = 0x03
-let op_if = 0x04
-let op_else = 0x05
 let op_end = 0x0b
-let op_br = 0x0c
-let op_br_if = 0x0d
 let op_return = 0x0f
-let blocktype_void = 0x40
-
-let block b f =
-  op b op_block;
-  u8 b blocktype_void;
-  f ();
-  op b op_end
-
-let loop b f =
-  op b op_loop;
-  u8 b blocktype_void;
-  f ();
-  op b op_end
-
-let if_else b ~then_ ~else_ =
-  op b op_if;
-  u8 b blocktype_void;
-  then_ ();
-  (match else_ with
-  | None -> ()
-  | Some e ->
-      op b op_else;
-      e ());
-  op b op_end
-
-let br b depth = op b op_br; uleb b depth
-let br_if b depth = op b op_br_if; uleb b depth
 
 (* ------------------------------------------------------------- module *)
 
@@ -141,8 +110,13 @@ let section (out : buf) id (contents : buf) =
   uleb out (Buffer.length contents);
   Buffer.add_buffer out contents
 
+(* What an export points at: the module has functions and, since a graph's
+   state has to outlive one call, mutable globals the host can read and set. *)
+type exported = Func of int | Global of int | Memory
+
 let encode ~(types : functype list) ~(imports : import list)
-    ~(funcs : int list) ~(exports : (string * int) list)
+    ~(funcs : int list) ~(globals : (valtype * float) list)
+    ~(exports : (string * exported) list) ~(data : string)
     ~(bodies : funcbody list) : string =
   let out = create () in
   bytes out "\000asm";
@@ -175,13 +149,41 @@ let encode ~(types : functype list) ~(imports : import list)
                uleb b i.imp_type)
              imports));
   section out 3 (sub (fun b -> vec b (fun b t -> uleb b t) funcs));
+  (* The only thing memory is for is the text a graph says: the literals are
+     laid end to end at offset 0 and never written to, so one page is more
+     than a graph will ever ask for. *)
+  if data <> "" then
+    section out 5
+      (sub (fun b ->
+           uleb b 1;
+           u8 b 0x00;
+           uleb b 1));
+  (* Every global is mutable.  A state slot starts at zero and is assigned at
+     the top of main, because what it really starts at can be any expression;
+     an Input starts at the default it was drawn with, which is a constant and
+     so can be the init the format allows. *)
+  if globals <> [] then
+    section out 6
+      (sub (fun b ->
+           vec b
+             (fun b (v, init) ->
+               u8 b (valtype_byte v);
+               u8 b 0x01;
+               (match v with
+               | I32 -> u8 b 0x41; sleb b (int_of_float init)
+               | I64 -> u8 b 0x42; sleb b (int_of_float init)
+               | F64 -> u8 b 0x44; f64 b init);
+               op b op_end)
+             globals));
   section out 7
     (sub (fun b ->
          vec b
-           (fun b (n, idx) ->
+           (fun b (n, what) ->
              name b n;
-             u8 b 0x00;
-             uleb b idx)
+             match what with
+             | Func i -> u8 b 0x00; uleb b i
+             | Memory -> u8 b 0x02; uleb b 0
+             | Global i -> u8 b 0x03; uleb b i)
            exports));
   section out 10
     (sub (fun b ->
@@ -198,4 +200,14 @@ let encode ~(types : functype list) ~(imports : import list)
              uleb b (Buffer.length f);
              Buffer.add_buffer b f)
            bodies));
+  if data <> "" then
+    section out 11
+      (sub (fun b ->
+           uleb b 1;
+           uleb b 0;
+           u8 b 0x41;
+           sleb b 0;
+           op b op_end;
+           uleb b (String.length data);
+           bytes b data));
   Buffer.contents out

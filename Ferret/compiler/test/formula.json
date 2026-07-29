@@ -1,14 +1,6 @@
 {
+  "name": "formula",
   "nodes": [
-    {
-      "id": "start",
-      "type": "start",
-      "position": {
-        "x": 0,
-        "y": 0
-      },
-      "data": {}
-    },
     {
       "id": "n",
       "type": "const",
@@ -36,7 +28,7 @@
       "type": "expr",
       "position": {
         "x": 280,
-        "y": 300
+        "y": 320
       },
       "data": {
         "text": "n > 3 && n < 10"
@@ -47,7 +39,7 @@
       "type": "select",
       "position": {
         "x": 560,
-        "y": 300
+        "y": 320
       },
       "data": {
         "values": {
@@ -66,10 +58,10 @@
       "data": {}
     },
     {
-      "id": "fin",
-      "type": "end",
+      "id": "out",
+      "type": "out",
       "position": {
-        "x": 820,
+        "x": 840,
         "y": 0
       },
       "data": {}
@@ -78,51 +70,37 @@
   "edges": [
     {
       "id": "e1",
-      "source": "start",
-      "sourceHandle": "next",
-      "target": "say",
-      "targetHandle": "in"
-    },
-    {
-      "id": "e2",
       "source": "n",
       "sourceHandle": "out",
       "target": "size",
       "targetHandle": "n"
     },
     {
-      "id": "e3",
+      "id": "e2",
       "source": "n",
       "sourceHandle": "out",
       "target": "band",
       "targetHandle": "n"
     },
     {
-      "id": "e4",
+      "id": "e3",
       "source": "size",
       "sourceHandle": "out",
       "target": "say",
       "targetHandle": "value"
     },
     {
-      "id": "e5",
+      "id": "e4",
       "source": "band",
       "sourceHandle": "out",
       "target": "pick",
       "targetHandle": "cond"
     },
     {
-      "id": "e6",
-      "source": "say",
-      "sourceHandle": "next",
-      "target": "fin",
-      "targetHandle": "in"
-    },
-    {
-      "id": "e7",
+      "id": "e5",
       "source": "pick",
       "sourceHandle": "out",
-      "target": "fin",
+      "target": "out",
       "targetHandle": "value"
     }
   ]

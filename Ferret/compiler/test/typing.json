@@ -1,67 +1,30 @@
 {
+  "name": "typing",
   "nodes": [
     {
-      "id": "start",
-      "type": "start",
-      "position": {
-        "x": 0,
-        "y": 0
-      },
-      "data": {}
-    },
-    {
-      "id": "loop",
-      "type": "condition",
-      "position": {
-        "x": 0,
-        "y": 0
-      },
-      "data": {}
-    },
-    {
-      "id": "show",
-      "type": "log",
-      "position": {
-        "x": 0,
-        "y": 0
-      },
-      "data": {}
-    },
-    {
       "id": "i",
-      "type": "counter",
+      "type": "feedback",
       "position": {
         "x": 0,
         "y": 0
       },
       "data": {
         "name": "i",
-        "values": {
-          "from": 0,
-          "by": 1
-        }
+        "holds": "number",
+        "start": 0
       }
     },
     {
-      "id": "done",
-      "type": "end",
+      "id": "next",
+      "type": "binop",
       "position": {
-        "x": 0,
-        "y": 0
-      },
-      "data": {}
-    },
-    {
-      "id": "more",
-      "type": "compare",
-      "position": {
-        "x": 0,
-        "y": 0
+        "x": 300,
+        "y": 240
       },
       "data": {
-        "op": "lt",
+        "op": "add",
         "values": {
-          "b": 10
+          "b": 1
         }
       }
     },
@@ -69,7 +32,7 @@
       "id": "rem",
       "type": "binop",
       "position": {
-        "x": 0,
+        "x": 300,
         "y": 0
       },
       "data": {
@@ -83,8 +46,8 @@
       "id": "half",
       "type": "binop",
       "position": {
-        "x": 0,
-        "y": 0
+        "x": 600,
+        "y": 120
       },
       "data": {
         "op": "div",
@@ -92,62 +55,45 @@
           "b": 2
         }
       }
+    },
+    {
+      "id": "show",
+      "type": "log",
+      "position": {
+        "x": 900,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "out",
+      "type": "out",
+      "position": {
+        "x": 900,
+        "y": 240
+      },
+      "data": {}
     }
   ],
   "edges": [
     {
-      "id": "x1",
-      "source": "start",
-      "sourceHandle": "next",
-      "target": "loop",
-      "targetHandle": "in"
-    },
-    {
-      "id": "x2",
-      "source": "loop",
-      "sourceHandle": "true",
-      "target": "show",
-      "targetHandle": "in"
-    },
-    {
-      "id": "x3",
-      "source": "show",
-      "sourceHandle": "next",
-      "target": "i",
-      "targetHandle": "in"
-    },
-    {
-      "id": "x4",
-      "source": "i",
-      "sourceHandle": "next",
-      "target": "loop",
-      "targetHandle": "in"
-    },
-    {
-      "id": "x5",
-      "source": "loop",
-      "sourceHandle": "false",
-      "target": "done",
-      "targetHandle": "in"
-    },
-    {
       "id": "e1",
       "source": "i",
-      "sourceHandle": "value",
-      "target": "more",
+      "sourceHandle": "out",
+      "target": "next",
       "targetHandle": "a"
     },
     {
       "id": "e2",
-      "source": "more",
+      "source": "next",
       "sourceHandle": "out",
-      "target": "loop",
-      "targetHandle": "cond"
+      "target": "i",
+      "targetHandle": "value"
     },
     {
       "id": "e3",
       "source": "i",
-      "sourceHandle": "value",
+      "sourceHandle": "out",
       "target": "rem",
       "targetHandle": "a"
     },
@@ -161,7 +107,7 @@
     {
       "id": "e5",
       "source": "i",
-      "sourceHandle": "value",
+      "sourceHandle": "out",
       "target": "half",
       "targetHandle": "a"
     },
@@ -169,7 +115,7 @@
       "id": "e6",
       "source": "half",
       "sourceHandle": "out",
-      "target": "done",
+      "target": "out",
       "targetHandle": "value"
     }
   ]

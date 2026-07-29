@@ -3,207 +3,123 @@
  (modules errors describe)
  (libraries ferret yojson))
 
-(rule
- (target sum.wasm)
- (action
-  (run ../bin/ferretc.exe %{dep:../../examples/sum.json} -o sum.wasm)))
+; Each fixture is dumped as IR and compiled to a module; the IR pins down what
+; a cook does, and running the module is what checks it means it.
 
 (rule
- (target collatz.wasm)
+ (targets sharing.ir sharing.wasm)
+ (deps sharing.json)
  (action
-  (run ../bin/ferretc.exe %{dep:../../examples/collatz.json} -o collatz.wasm)))
+  (progn
+   (with-stdout-to
+    sharing.ir
+    (run ../bin/ferretc.exe --emit ir sharing.json))
+   (run ../bin/ferretc.exe sharing.json -o sharing.wasm))))
 
 (rule
- (target sum.ir)
+ (targets random.ir random.wasm)
+ (deps random.json)
  (action
-  (with-stdout-to
-   sum.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:../../examples/sum.json}))))
+  (progn
+   (with-stdout-to
+    random.ir
+    (run ../bin/ferretc.exe --emit ir random.json))
+   (run ../bin/ferretc.exe random.json -o random.wasm))))
 
 (rule
- (target collatz.wat)
+ (targets typing.ir typing.wat typing.wasm)
+ (deps typing.json)
  (action
-  (with-stdout-to
-   collatz.wat
-   (run ../bin/ferretc.exe --emit wat %{dep:../../examples/collatz.json}))))
-
-; A node feeding two inputs is computed once: without this the emitted code
-; doubles at every level.
-(rule
- (target sharing.ir)
- (action
-  (with-stdout-to
-   sharing.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:sharing.json}))))
+  (progn
+   (with-stdout-to
+    typing.ir
+    (run ../bin/ferretc.exe --emit ir typing.json))
+   (with-stdout-to
+    typing.wat
+    (run ../bin/ferretc.exe --emit wat typing.json))
+   (run ../bin/ferretc.exe typing.json -o typing.wasm))))
 
 (rule
- (alias runtest)
+ (targets breakpoints.ir breakpoints.wasm)
+ (deps breakpoints.json)
  (action
-  (diff sharing.ir.expected sharing.ir)))
-
-; Randomness is the one impure thing in an expression, so pin down how often
-; it is drawn: once per node reached, shared by every reader of that node.
-(rule
- (target random.ir)
- (action
-  (with-stdout-to
-   random.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:random.json}))))
+  (progn
+   (with-stdout-to
+    breakpoints.ir
+    (run ../bin/ferretc.exe --emit ir breakpoints.json))
+   (run ../bin/ferretc.exe breakpoints.json -o breakpoints.wasm))))
 
 (rule
- (target random.wasm)
+ (targets formula.ir formula.wasm)
+ (deps formula.json)
  (action
-  (run ../bin/ferretc.exe %{dep:random.json} -o random.wasm)))
+  (progn
+   (with-stdout-to
+    formula.ir
+    (run ../bin/ferretc.exe --emit ir formula.json))
+   (run ../bin/ferretc.exe formula.json -o formula.wasm))))
 
 (rule
- (alias runtest)
+ (targets time.ir time.wasm)
+ (deps time.json)
  (action
-  (diff random.ir.expected random.ir)))
-
-; A breakpoint on a loop reports its state once an iteration; one on a value
-; node reports that value once each time it is worked out.
-(rule
- (target breakpoints.ir)
- (action
-  (with-stdout-to
-   breakpoints.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:breakpoints.json}))))
+  (progn
+   (with-stdout-to
+    time.ir
+    (run ../bin/ferretc.exe --emit ir time.json))
+   (run ../bin/ferretc.exe time.json -o time.wasm))))
 
 (rule
- (target breakpoints.wasm)
+ (targets count.ir count.wasm)
+ (deps ../../examples/count.json)
  (action
-  (run ../bin/ferretc.exe %{dep:breakpoints.json} -o breakpoints.wasm)))
+  (progn
+   (with-stdout-to
+    count.ir
+    (run ../bin/ferretc.exe --emit ir ../../examples/count.json))
+   (run ../bin/ferretc.exe ../../examples/count.json -o count.wasm))))
 
 (rule
- (alias runtest)
+ (targets wave.ir wave.wasm)
+ (deps ../../examples/wave.json)
  (action
-  (diff breakpoints.ir.expected breakpoints.ir)))
-
-; Whole numbers stay whole: the loop counter, its test, and the remainder are
-; i64, and a value only widens where it meets an f64 or the host.
-(rule
- (target typing.ir)
- (action
-  (with-stdout-to
-   typing.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:typing.json}))))
+  (progn
+   (with-stdout-to
+    wave.ir
+    (run ../bin/ferretc.exe --emit ir ../../examples/wave.json))
+   (run ../bin/ferretc.exe ../../examples/wave.json -o wave.wasm))))
 
 (rule
- (target typing.wat)
+ (targets blink.ir blink.wasm)
+ (deps ../../examples/blink.json)
  (action
-  (with-stdout-to
-   typing.wat
-   (run ../bin/ferretc.exe --emit wat %{dep:typing.json}))))
+  (progn
+   (with-stdout-to
+    blink.ir
+    (run ../bin/ferretc.exe --emit ir ../../examples/blink.json))
+   (run ../bin/ferretc.exe ../../examples/blink.json -o blink.wasm))))
 
 (rule
- (target typing.wasm)
+ (targets bounce.ir bounce.wasm)
+ (deps ../../examples/bounce.json)
  (action
-  (run ../bin/ferretc.exe %{dep:typing.json} -o typing.wasm)))
+  (progn
+   (with-stdout-to
+    bounce.ir
+    (run ../bin/ferretc.exe --emit ir ../../examples/bounce.json))
+   (run ../bin/ferretc.exe ../../examples/bounce.json -o bounce.wasm))))
 
 (rule
- (alias runtest)
+ (targets pi.wasm)
+ (deps ../../examples/pi.json)
  (action
-  (diff typing.ir.expected typing.ir)))
+  (run ../bin/ferretc.exe ../../examples/pi.json -o pi.wasm)))
 
 (rule
- (alias runtest)
+ (targets walk.wasm)
+ (deps ../../examples/walk.json)
  (action
-  (diff typing.wat.expected typing.wat)))
-
-; A typed-in expression parses with the precedence it reads with, and the
-; names it leaves free are the ports it is fed through.
-(rule
- (target formula.ir)
- (action
-  (with-stdout-to
-   formula.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:formula.json}))))
-
-(rule
- (target formula.wasm)
- (action
-  (run ../bin/ferretc.exe %{dep:formula.json} -o formula.wasm)))
-
-(rule
- (alias runtest)
- (action
-  (diff formula.ir.expected formula.ir)))
-
-; A for loop inside a for loop: the inner one starts again on every pass of
-; the outer, and the end of its body falls into the outer one's step.
-(rule
- (target nested.ir)
- (action
-  (with-stdout-to
-   nested.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:../../examples/triangle.json}))))
-
-(rule
- (target nested.wasm)
- (action
-  (run ../bin/ferretc.exe %{dep:../../examples/triangle.json} -o nested.wasm)))
-
-(rule
- (alias runtest)
- (action
-  (diff nested.ir.expected nested.ir)))
-
-; A State reset at the top of a loop body: it starts again on every pass,
-; which is the thing a Counter set up at the entry to the function cannot do.
-(rule
- (target state.ir)
- (action
-  (with-stdout-to
-   state.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:../../examples/rowsums.json}))))
-
-(rule
- (target state.wasm)
- (action
-  (run ../bin/ferretc.exe %{dep:../../examples/rowsums.json} -o state.wasm)))
-
-(rule
- (alias runtest)
- (action
-  (diff state.ir.expected state.ir)))
-
-; The one thing the host hands a graph: the time the run started, asked for
-; once however many times it is read.
-(rule
- (target time.ir)
- (action
-  (with-stdout-to
-   time.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:time.json}))))
-
-(rule
- (target time.wasm)
- (action
-  (run ../bin/ferretc.exe %{dep:time.json} -o time.wasm)))
-
-(rule
- (alias runtest)
- (action
-  (diff time.ir.expected time.ir)))
-
-; An event loop: the program stops in a Wait node until the host has
-; something for it, and the loop around it is drawn rather than hidden.
-(rule
- (target echo.ir)
- (action
-  (with-stdout-to
-   echo.ir
-   (run ../bin/ferretc.exe --emit ir %{dep:../../examples/echo.json}))))
-
-(rule
- (target echo.wasm)
- (action
-  (run ../bin/ferretc.exe %{dep:../../examples/echo.json} -o echo.wasm)))
-
-(rule
- (alias runtest)
- (action
-  (diff echo.ir.expected echo.ir)))
+  (run ../bin/ferretc.exe ../../examples/walk.json -o walk.wasm)))
 
 ; The node catalogue the editor draws from: what the palette offers, what
 ; ports each kind has, and what the inspector puts in its form.
@@ -215,21 +131,11 @@
    (run ../bin/ferretc.exe --emit spec))))
 
 (rule
- (alias runtest)
- (action
-  (diff spec.json.expected spec.json)))
-
-(rule
  (target describe.out)
  (action
   (with-stdout-to
    describe.out
    (run ./describe.exe))))
-
-(rule
- (alias runtest)
- (action
-  (diff describe.expected describe.out)))
 
 (rule
  (target errors.out)
@@ -241,17 +147,21 @@
 (rule
  (alias runtest)
  (action
-  (diff sum.ir.expected sum.ir)))
-
-(rule
- (alias runtest)
- (action
-  (diff collatz.wat.expected collatz.wat)))
-
-(rule
- (alias runtest)
- (action
-  (diff errors.expected errors.out)))
+  (progn
+   (diff sharing.ir.expected sharing.ir)
+   (diff random.ir.expected random.ir)
+   (diff typing.ir.expected typing.ir)
+   (diff typing.wat.expected typing.wat)
+   (diff breakpoints.ir.expected breakpoints.ir)
+   (diff formula.ir.expected formula.ir)
+   (diff time.ir.expected time.ir)
+   (diff count.ir.expected count.ir)
+   (diff wave.ir.expected wave.ir)
+   (diff blink.ir.expected blink.ir)
+   (diff bounce.ir.expected bounce.ir)
+   (diff spec.json.expected spec.json)
+   (diff describe.expected describe.out)
+   (diff errors.expected errors.out))))
 
 ; The modules are only really checked by running them, which needs a
 ; WebAssembly engine; node is the one every machine with the editor already
@@ -260,15 +170,17 @@
  (alias runtest)
  (deps
   run_wasm.mjs
-  sum.wasm
-  collatz.wasm
+  sharing.wasm
   random.wasm
-  breakpoints.wasm
   typing.wasm
+  breakpoints.wasm
   formula.wasm
-  nested.wasm
-  state.wasm
   time.wasm
-  echo.wasm)
+  count.wasm
+  wave.wasm
+  blink.wasm
+  bounce.wasm
+  pi.wasm
+  walk.wasm)
  (action
   (run node run_wasm.mjs)))

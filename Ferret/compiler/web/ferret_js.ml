@@ -41,6 +41,19 @@ let compile (source : Js.js_string Js.t) =
                              ("label", inject (Js.string label));
                            |])
                        out.watches))) );
+          ( "inputs",
+            inject
+              (Js.array
+                 (Array.of_list
+                    (List.map
+                       (fun (export, label, value) ->
+                         obj
+                           [|
+                             ("export", inject (Js.string export));
+                             ("label", inject (Js.string label));
+                             ("value", inject (Js.float value));
+                           |])
+                       out.inputs))) );
           ("errors", inject (Js.array [||]));
         |]
   | Error errs ->

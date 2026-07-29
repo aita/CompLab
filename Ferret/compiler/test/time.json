@@ -1,71 +1,72 @@
 {
+  "name": "time",
   "nodes": [
     {
-      "id": "start",
-      "type": "start",
-      "position": { "x": 0, "y": 0 },
+      "id": "t",
+      "type": "time",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
       "data": {}
     },
     {
       "id": "drift",
       "type": "binop",
-      "position": { "x": 300, "y": 200 },
-      "data": { "op": "sub" }
+      "position": {
+        "x": 300,
+        "y": 120
+      },
+      "data": {
+        "op": "sub"
+      }
     },
     {
-      "id": "say",
+      "id": "show",
       "type": "log",
-      "position": { "x": 300, "y": 0 },
+      "position": {
+        "x": 600,
+        "y": 120
+      },
       "data": {}
     },
     {
-      "id": "fin",
-      "type": "end",
-      "position": { "x": 600, "y": 0 },
+      "id": "out",
+      "type": "out",
+      "position": {
+        "x": 600,
+        "y": 0
+      },
       "data": {}
     }
   ],
   "edges": [
     {
       "id": "e1",
-      "source": "start",
-      "sourceHandle": "next",
-      "target": "say",
-      "targetHandle": "in"
-    },
-    {
-      "id": "e2",
-      "source": "start",
-      "sourceHandle": "time",
+      "source": "t",
+      "sourceHandle": "out",
       "target": "drift",
       "targetHandle": "a"
     },
     {
-      "id": "e3",
-      "source": "start",
-      "sourceHandle": "time",
+      "id": "e2",
+      "source": "t",
+      "sourceHandle": "out",
       "target": "drift",
       "targetHandle": "b"
     },
     {
-      "id": "e4",
+      "id": "e3",
       "source": "drift",
       "sourceHandle": "out",
-      "target": "say",
+      "target": "show",
       "targetHandle": "value"
     },
     {
-      "id": "e5",
-      "source": "say",
-      "sourceHandle": "next",
-      "target": "fin",
-      "targetHandle": "in"
-    },
-    {
-      "id": "e6",
-      "source": "start",
-      "sourceHandle": "time",
-      "target": "fin",
+      "id": "e4",
+      "source": "t",
+      "sourceHandle": "out",
+      "target": "out",
       "targetHandle": "value"
     }
   ]

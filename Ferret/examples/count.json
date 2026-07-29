@@ -1,0 +1,96 @@
+{
+  "name": "Counting",
+  "nodes": [
+    {
+      "id": "step",
+      "type": "input",
+      "position": {
+        "x": 0,
+        "y": 240
+      },
+      "data": {
+        "name": "step",
+        "value": 1
+      }
+    },
+    {
+      "id": "held",
+      "type": "feedback",
+      "position": {
+        "x": 380,
+        "y": 0
+      },
+      "data": {
+        "name": "count",
+        "holds": "number",
+        "start": 0
+      }
+    },
+    {
+      "id": "plus",
+      "type": "binop",
+      "position": {
+        "x": 380,
+        "y": 240
+      },
+      "data": {
+        "op": "add"
+      }
+    },
+    {
+      "id": "show",
+      "type": "log",
+      "position": {
+        "x": 760,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "out",
+      "type": "out",
+      "position": {
+        "x": 760,
+        "y": 180
+      },
+      "data": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "held",
+      "sourceHandle": "out",
+      "target": "plus",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e2",
+      "source": "step",
+      "sourceHandle": "value",
+      "target": "plus",
+      "targetHandle": "b"
+    },
+    {
+      "id": "e3",
+      "source": "plus",
+      "sourceHandle": "out",
+      "target": "held",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e4",
+      "source": "held",
+      "sourceHandle": "out",
+      "target": "show",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e5",
+      "source": "held",
+      "sourceHandle": "out",
+      "target": "out",
+      "targetHandle": "value"
+    }
+  ]
+}

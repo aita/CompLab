@@ -1,0 +1,242 @@
+{
+  "name": "Bounce",
+  "nodes": [
+    {
+      "id": "x",
+      "type": "feedback",
+      "position": {
+        "x": 0,
+        "y": 0
+      },
+      "data": {
+        "name": "x",
+        "holds": "number",
+        "start": 0
+      }
+    },
+    {
+      "id": "dir",
+      "type": "feedback",
+      "position": {
+        "x": 0,
+        "y": 200
+      },
+      "data": {
+        "name": "rising",
+        "holds": "flag",
+        "start": "yes"
+      }
+    },
+    {
+      "id": "step",
+      "type": "select",
+      "position": {
+        "x": 360,
+        "y": 200
+      },
+      "data": {
+        "values": {
+          "a": 1,
+          "b": -1
+        }
+      }
+    },
+    {
+      "id": "next",
+      "type": "binop",
+      "position": {
+        "x": 700,
+        "y": 60
+      },
+      "data": {
+        "op": "add"
+      }
+    },
+    {
+      "id": "top",
+      "type": "compare",
+      "position": {
+        "x": 700,
+        "y": 320
+      },
+      "data": {
+        "op": "ge",
+        "values": {
+          "b": 10
+        }
+      }
+    },
+    {
+      "id": "bottom",
+      "type": "compare",
+      "position": {
+        "x": 700,
+        "y": 480
+      },
+      "data": {
+        "op": "le",
+        "values": {
+          "b": 0
+        }
+      }
+    },
+    {
+      "id": "turn",
+      "type": "logic",
+      "position": {
+        "x": 1040,
+        "y": 400
+      },
+      "data": {
+        "op": "or"
+      }
+    },
+    {
+      "id": "flip",
+      "type": "logic",
+      "position": {
+        "x": 1360,
+        "y": 480
+      },
+      "data": {
+        "op": "not"
+      }
+    },
+    {
+      "id": "keep",
+      "type": "select",
+      "position": {
+        "x": 1700,
+        "y": 400
+      },
+      "data": {
+        "holds": "flag"
+      }
+    },
+    {
+      "id": "show",
+      "type": "log",
+      "position": {
+        "x": 1040,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "out",
+      "type": "out",
+      "position": {
+        "x": 1040,
+        "y": 140
+      },
+      "data": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "dir",
+      "sourceHandle": "out",
+      "target": "step",
+      "targetHandle": "cond"
+    },
+    {
+      "id": "e2",
+      "source": "x",
+      "sourceHandle": "out",
+      "target": "next",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e3",
+      "source": "step",
+      "sourceHandle": "out",
+      "target": "next",
+      "targetHandle": "b"
+    },
+    {
+      "id": "e4",
+      "source": "next",
+      "sourceHandle": "out",
+      "target": "x",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e5",
+      "source": "next",
+      "sourceHandle": "out",
+      "target": "top",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e6",
+      "source": "next",
+      "sourceHandle": "out",
+      "target": "bottom",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e7",
+      "source": "top",
+      "sourceHandle": "out",
+      "target": "turn",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e8",
+      "source": "bottom",
+      "sourceHandle": "out",
+      "target": "turn",
+      "targetHandle": "b"
+    },
+    {
+      "id": "e9",
+      "source": "dir",
+      "sourceHandle": "out",
+      "target": "flip",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e10",
+      "source": "turn",
+      "sourceHandle": "out",
+      "target": "keep",
+      "targetHandle": "cond"
+    },
+    {
+      "id": "e11",
+      "source": "flip",
+      "sourceHandle": "out",
+      "target": "keep",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e12",
+      "source": "dir",
+      "sourceHandle": "out",
+      "target": "keep",
+      "targetHandle": "b"
+    },
+    {
+      "id": "e13",
+      "source": "keep",
+      "sourceHandle": "out",
+      "target": "dir",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e14",
+      "source": "next",
+      "sourceHandle": "out",
+      "target": "show",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e15",
+      "source": "next",
+      "sourceHandle": "out",
+      "target": "out",
+      "targetHandle": "value"
+    }
+  ]
+}

@@ -1,10 +1,8 @@
+(global i int)
 (func main (result f64)
-  (local i int)
-  (set i 0)
-  (loop $1
-    (if (watch 0 (< i 3))
-      (then
-        (set i (watch 1 (+ i 1)))
-        (br $1))
-      (else
-        (return (float i))))))
+  (local result float)
+  (local i_next int)
+  (set result (float i))
+  (set i_next (watch 1 (watch 0 (+ i 1))))
+  (set i i_next)
+  (return result))

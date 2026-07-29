@@ -1,19 +1,23 @@
 // Instantiates the modules the rules above compiled and checks what they
 // compute.  Run by `dune test`; the .wasm files sit next to this script in
 // the build directory.
+//
+// One call to main is one cook of the graph, so a program that gets anywhere
+// is one that is cooked more than once.
 import { readFileSync } from "node:fs";
 
 let failures = 0;
 
-// A fixed clock, so a program that reads the start node's time is as
-// repeatable as any other.
+// A fixed clock, so a graph that reads the time is as repeatable as any other.
 const CLOCK = 1_700_000_000_000;
 
-async function load(file, random = () => 0, events = []) {
+async function load(file, random = () => 0) {
   const logged = [];
+  const said = [];
   const hits = [];
   let draws = 0;
-  const { instance } = await WebAssembly.instantiate(readFileSync(file), {
+  let instance;
+  ({ instance } = await WebAssembly.instantiate(readFileSync(file), {
     env: {
       log: (x) => logged.push(x),
       random: () => {
@@ -25,12 +29,26 @@ async function load(file, random = () => 0, events = []) {
         return v;
       },
       now: () => CLOCK,
-      // The host side of an event loop, with the queue written out in
-      // advance: node has nothing to wait for.
-      wait: () => (events.length > 0 ? events.shift() : 0),
+      say: (ptr, len) =>
+        said.push(
+          new TextDecoder().decode(
+            new Uint8Array(instance.exports.memory.buffer, ptr, len),
+          ),
+        ),
     },
-  });
-  return { main: instance.exports.main, logged, hits, draws: () => draws };
+  }));
+  const cook = instance.exports.main;
+  return {
+    cook,
+    // What the graph comes back with over n cooks, which is how a dataflow
+    // program gets anywhere at all.
+    cooks: (n) => Array.from({ length: n }, () => cook()),
+    exports: instance.exports,
+    logged,
+    said,
+    hits,
+    draws: () => draws,
+  };
 }
 
 function check(what, got, want) {
@@ -43,68 +61,75 @@ function check(what, got, want) {
   }
 }
 
-const sum = await load("sum.wasm");
-check("sum of 1 to 100", sum.main(), 5050);
-check("sum logs nothing", sum.logged, []);
+// A node feeding two inputs is worked out once: (2+2) then that doubled.
+const sharing = await load("sharing.wasm");
+check("shared once", sharing.cook(), 8);
 
-// The trace comes from the log node in the loop body, which runs before the
-// next values are applied, so it also pins down that the import is called
-// once per iteration and sees the state as it was at the top of it.
-const collatz = await load("collatz.wasm");
-check("collatz from 27", collatz.main(), 111);
-check("collatz trace starts", collatz.logged.slice(0, 8), [
-  27, 82, 41, 124, 62, 31, 94, 47,
-]);
-check("collatz trace ends", collatz.logged.slice(-4), [16, 8, 4, 2]);
-
-// A fixed source stands in for Math.random, so the arithmetic around the draw
-// is checked rather than the draw itself.
+// A random node is one draw a cook, however many readers it has -- two edges
+// leaving it, or one edge into a formula that names it twice -- and two nodes
+// are two draws.
 const dice = await load("random.wasm", () => 0.25);
-check("random(0,1) doubled plus random(0,10)", dice.main(), 3);
-check("one draw per node, not per reader", dice.draws(), 2);
+check("one draw per node", dice.cook(), 0.5 + 2.5 * 2.5);
+check("two nodes, two draws", dice.draws(), 2);
+dice.cook();
+check("a cook draws afresh", dice.draws(), 4);
 
-// Watch 0 is the loop's slot at the top of each iteration, watch 1 is the
-// value the increment works out; the last iteration checks the condition and
-// leaves, so the loop reports once more than the increment does.
-const stepped = await load("breakpoints.wasm");
-check("loop with breakpoints returns", stepped.main(), 3);
-check("breakpoints report in order", stepped.hits, [
-  [0, 1], [1, 1], [0, 1], [1, 2], [0, 1], [1, 3], [0, 0],
-]);
-
+// Whole numbers stay whole: the feedback, its step and the remainder are i64,
+// and a value only widens where it meets an f64 or the host.
 const typed = await load("typing.wasm");
-check("i64 loop returns", typed.main(), 5);
-check("i64 remainder", typed.logged, [0, 1, 2, 0, 1, 2, 0, 1, 2, 0]);
+check("halves of 0, 1, 2, 3", typed.cooks(4), [0, 0.5, 1, 1.5]);
+check("i64 remainder", typed.logged, [0, 1, 2, 0]);
+
+// Two breakpoints: one on the sum, one on the feedback it feeds.  A feedback
+// reports the new value it takes, not the one it hands out, so the pair says
+// the same number -- and says it once per cook, in lowering order.
+const stepped = await load("breakpoints.wasm");
+stepped.cooks(3);
+check("reported in order", stepped.hits, [
+  [0, 1], [1, 1], [0, 2], [1, 2], [0, 3], [1, 3],
+]);
 
 // min(n*n+1, 100)/2 logged, and n>3 && n<10 returned as 1 or 0: precedence,
 // a call, and the two connectives, all from one line of text.
 const formula = await load("formula.wasm");
-check("in the band", formula.main(), 1);
+check("in the band", formula.cook(), 1);
 check("the expression logged", formula.logged, [13]);
 
-// Rows of a multiplication triangle: the inner loop counts up to the outer
-// one's index, which only works if it starts again on every outer pass.
-const nested = await load("nested.wasm");
-check("nested loops", nested.main(), 0);
-check("triangle", nested.logged, [1, 2, 4, 3, 6, 9, 4, 8, 12, 16]);
-
-// Row sums of the triangle: the running total is put back to zero at the top
-// of each outer pass, which is what the reset way through a State is for.
-const state = await load("state.wasm");
-check("reset per pass", state.main(), 0);
-check("row sums", state.logged, [1, 3, 6, 10, 15]);
-
-// The start node hands out whatever the host says the time is, once: two
-// readers of it see the same moment.
+// The host's clock, read twice in one cook: the same moment both times.
 const clock = await load("time.wasm");
-check("the start node's time", clock.main(), CLOCK);
+check("the time", clock.cook(), CLOCK);
 check("one moment, read twice", clock.logged, [0]);
 
-// Three events and then a zero to leave on: the loop reads one at a time and
-// the count comes back at the end.
-const echo = await load("echo.wasm", () => 0, [7, 8, 9, 0]);
-check("events seen", echo.main(), 3);
-check("events echoed", echo.logged, [7, 8, 9]);
+// Counting is what a feedback is for: each cook hands back what it held and
+// leaves one more behind.
+const count = await load("count.wasm");
+check("counts up", count.cooks(5), [0, 1, 2, 3, 4]);
+check("and logs the same", count.logged, [0, 1, 2, 3, 4]);
+check("the state is readable", count.exports.state_count.value, 5);
+
+// A phase that wraps, worked out once and read by both the out and the log.
+const wave = await load("wave.wasm");
+check("quarter steps, wrapped at 4", wave.cooks(6), [0, 0.25, 0.5, 0.75, 1, 1.25]);
+
+// A yes-or-no that flips every cook, and a piece of text said every cook.
+const blink = await load("blink.wasm");
+blink.cooks(4);
+check("flips", blink.logged, [0, 1, 0, 1]);
+check("says its piece each cook", blink.said, ["blink", "blink", "blink", "blink"]);
+
+// The one impure node moved once a cook, from a fixed draw.
+const walk = await load("walk.wasm", () => 0.75);
+check("walks", walk.cooks(3), [0, 0.5, 1]);
+
+// Two feedbacks reading each other: the position turns around at either end
+// because the direction it reads is the one the last cook left.
+const bounce = await load("bounce.wasm");
+check("up to 10 and back", bounce.cooks(13).slice(7), [8, 9, 10, 9, 8, 7]);
+
+// Both draws land inside the circle, so the estimate is 4 from the first cook
+// on -- what is being checked is that it accumulates at all.
+const pi = await load("pi.wasm", () => 0.5);
+check("four quarters", pi.cooks(3), [4, 4, 4]);
 
 if (failures > 0) process.exit(1);
 console.log("ok");

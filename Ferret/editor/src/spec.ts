@@ -11,7 +11,7 @@
 
 import { rawDescribe, rawSpecs } from "./ferret";
 
-export type PortKind = "exec" | "num" | "bool";
+export type PortKind = "num" | "bool" | "text";
 
 export interface Port {
   id: string;
@@ -22,8 +22,7 @@ export interface Port {
 export type Field =
   | { key: string; label: string; kind: "number" }
   | { key: string; label: string; kind: "text" }
-  | { key: string; label: string; kind: "select"; options: [string, string][] }
-  | { key: string; label: string; kind: "names"; itemLabel: string };
+  | { key: string; label: string; kind: "select"; options: [string, string][] };
 
 /** One operator of a family, as the palette offers it. */
 export interface Op {
@@ -45,9 +44,6 @@ export interface Spec {
   color: string;
   category: string;
   hint: string;
-  /** The ways in.  The first runs along the header; any others get a row. */
-  execIn: Port[];
-  execOut: Port[];
   /** The ports of the kind, before one node's own settings are read. */
   inputs: Port[];
   outputs: Port[];
@@ -67,6 +63,8 @@ export interface Described {
   badge: string | null;
   inputs: Port[];
   outputs: Port[];
+  /** The inspector's form for this node, which its own settings can change. */
+  fields: Field[];
 }
 
 const catalogue: { categories: string[]; nodes: Spec[] } = (() => {
@@ -100,6 +98,7 @@ export function describe(type: string, data: NodeData): Described {
         badge: null,
         inputs: spec?.inputs ?? [],
         outputs: spec?.outputs ?? [],
+        fields: spec?.fields ?? [],
       };
   if (described.size > 400) described.clear();
   described.set(key, answer);
@@ -122,6 +121,6 @@ export function portKind(
   const spec = SPEC_BY_TYPE[type];
   if (!spec) return undefined;
   const node = describe(type, data);
-  const all = [...spec.execIn, ...spec.execOut, ...node.inputs, ...node.outputs];
+  const all = [...node.inputs, ...node.outputs];
   return all.find((p) => p.id === handle)?.kind;
 }

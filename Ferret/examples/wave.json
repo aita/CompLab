@@ -1,0 +1,114 @@
+{
+  "name": "Wave",
+  "nodes": [
+    {
+      "id": "rate",
+      "type": "input",
+      "position": {
+        "x": 0,
+        "y": 300
+      },
+      "data": {
+        "name": "rate",
+        "value": 0.25
+      }
+    },
+    {
+      "id": "phase",
+      "type": "feedback",
+      "position": {
+        "x": 380,
+        "y": 0
+      },
+      "data": {
+        "name": "phase",
+        "holds": "number",
+        "start": 0
+      }
+    },
+    {
+      "id": "next",
+      "type": "expr",
+      "position": {
+        "x": 380,
+        "y": 300
+      },
+      "data": {
+        "text": "phase + rate"
+      }
+    },
+    {
+      "id": "wrap",
+      "type": "expr",
+      "position": {
+        "x": 760,
+        "y": 300
+      },
+      "data": {
+        "text": "phase % 4"
+      }
+    },
+    {
+      "id": "out",
+      "type": "out",
+      "position": {
+        "x": 1100,
+        "y": 0
+      },
+      "data": {}
+    },
+    {
+      "id": "show",
+      "type": "log",
+      "position": {
+        "x": 1100,
+        "y": 180
+      },
+      "data": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "phase",
+      "sourceHandle": "out",
+      "target": "next",
+      "targetHandle": "phase"
+    },
+    {
+      "id": "e2",
+      "source": "rate",
+      "sourceHandle": "value",
+      "target": "next",
+      "targetHandle": "rate"
+    },
+    {
+      "id": "e3",
+      "source": "next",
+      "sourceHandle": "out",
+      "target": "phase",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e4",
+      "source": "phase",
+      "sourceHandle": "out",
+      "target": "wrap",
+      "targetHandle": "phase"
+    },
+    {
+      "id": "e5",
+      "source": "wrap",
+      "sourceHandle": "out",
+      "target": "out",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e6",
+      "source": "wrap",
+      "sourceHandle": "out",
+      "target": "show",
+      "targetHandle": "value"
+    }
+  ]
+}

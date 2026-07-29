@@ -1,0 +1,109 @@
+{
+  "name": "Blink",
+  "nodes": [
+    {
+      "id": "on",
+      "type": "feedback",
+      "position": {
+        "x": 380,
+        "y": 0
+      },
+      "data": {
+        "name": "on",
+        "holds": "flag",
+        "start": 0
+      }
+    },
+    {
+      "id": "flip",
+      "type": "logic",
+      "position": {
+        "x": 380,
+        "y": 240
+      },
+      "data": {
+        "op": "not"
+      }
+    },
+    {
+      "id": "pick",
+      "type": "select",
+      "position": {
+        "x": 760,
+        "y": 120
+      },
+      "data": {
+        "values": {
+          "a": 1,
+          "b": 0
+        }
+      }
+    },
+    {
+      "id": "show",
+      "type": "log",
+      "position": {
+        "x": 1100,
+        "y": 120
+      },
+      "data": {}
+    },
+    {
+      "id": "word",
+      "type": "text",
+      "position": {
+        "x": 760,
+        "y": 340
+      },
+      "data": {
+        "text": "blink"
+      }
+    },
+    {
+      "id": "say",
+      "type": "say",
+      "position": {
+        "x": 1100,
+        "y": 340
+      },
+      "data": {}
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "on",
+      "sourceHandle": "out",
+      "target": "flip",
+      "targetHandle": "a"
+    },
+    {
+      "id": "e2",
+      "source": "flip",
+      "sourceHandle": "out",
+      "target": "on",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e3",
+      "source": "on",
+      "sourceHandle": "out",
+      "target": "pick",
+      "targetHandle": "cond"
+    },
+    {
+      "id": "e4",
+      "source": "pick",
+      "sourceHandle": "out",
+      "target": "show",
+      "targetHandle": "value"
+    },
+    {
+      "id": "e5",
+      "source": "word",
+      "sourceHandle": "out",
+      "target": "say",
+      "targetHandle": "text"
+    }
+  ]
+}

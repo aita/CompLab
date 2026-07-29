@@ -1,0 +1,85 @@
+{
+  "name": "Monte Carlo",
+  "nodes": [
+    {
+      "id": "x",
+      "type": "random",
+      "position": { "x": 0, "y": 0 },
+      "data": { "values": { "min": -1, "max": 1 } }
+    },
+    {
+      "id": "y",
+      "type": "random",
+      "position": { "x": 0, "y": 200 },
+      "data": { "values": { "min": -1, "max": 1 } }
+    },
+    {
+      "id": "inside",
+      "type": "expr",
+      "position": { "x": 360, "y": 80 },
+      "data": { "text": "x * x + y * y < 1" }
+    },
+    {
+      "id": "one",
+      "type": "select",
+      "position": { "x": 700, "y": 80 },
+      "data": { "holds": "number", "values": { "a": 1, "b": 0 } }
+    },
+    {
+      "id": "hits",
+      "type": "feedback",
+      "position": { "x": 700, "y": 320 },
+      "data": { "name": "hits", "holds": "number", "start": 0 }
+    },
+    {
+      "id": "tries",
+      "type": "feedback",
+      "position": { "x": 700, "y": 520 },
+      "data": { "name": "tries", "holds": "number", "start": 0 }
+    },
+    {
+      "id": "hit",
+      "type": "binop",
+      "position": { "x": 1040, "y": 320 },
+      "data": { "op": "add" }
+    },
+    {
+      "id": "try",
+      "type": "binop",
+      "position": { "x": 1040, "y": 520 },
+      "data": { "op": "add", "values": { "b": 1 } }
+    },
+    {
+      "id": "estimate",
+      "type": "expr",
+      "position": { "x": 1400, "y": 400 },
+      "data": { "text": "4 * hits / max(tries, 1)" }
+    },
+    {
+      "id": "show",
+      "type": "log",
+      "position": { "x": 1760, "y": 320 },
+      "data": {}
+    },
+    {
+      "id": "out",
+      "type": "out",
+      "position": { "x": 1760, "y": 460 },
+      "data": {}
+    }
+  ],
+  "edges": [
+    { "id": "e1", "source": "x", "sourceHandle": "out", "target": "inside", "targetHandle": "x" },
+    { "id": "e2", "source": "y", "sourceHandle": "out", "target": "inside", "targetHandle": "y" },
+    { "id": "e3", "source": "inside", "sourceHandle": "out", "target": "one", "targetHandle": "cond" },
+    { "id": "e4", "source": "hits", "sourceHandle": "out", "target": "hit", "targetHandle": "a" },
+    { "id": "e5", "source": "one", "sourceHandle": "out", "target": "hit", "targetHandle": "b" },
+    { "id": "e6", "source": "hit", "sourceHandle": "out", "target": "hits", "targetHandle": "value" },
+    { "id": "e7", "source": "tries", "sourceHandle": "out", "target": "try", "targetHandle": "a" },
+    { "id": "e8", "source": "try", "sourceHandle": "out", "target": "tries", "targetHandle": "value" },
+    { "id": "e9", "source": "hit", "sourceHandle": "out", "target": "estimate", "targetHandle": "hits" },
+    { "id": "e10", "source": "try", "sourceHandle": "out", "target": "estimate", "targetHandle": "tries" },
+    { "id": "e11", "source": "estimate", "sourceHandle": "out", "target": "show", "targetHandle": "value" },
+    { "id": "e12", "source": "estimate", "sourceHandle": "out", "target": "out", "targetHandle": "value" }
+  ]
+}

@@ -1,113 +1,65 @@
 {
+  "name": "breakpoints",
   "nodes": [
     {
-      "id": "start",
-      "type": "start",
-      "position": {
-        "x": 0,
-        "y": 0
-      },
-      "data": {}
-    },
-    {
-      "id": "loop",
-      "type": "condition",
-      "position": {
-        "x": 0,
-        "y": 0
-      },
-      "data": {
-        "breakpoint": true
-      }
-    },
-    {
       "id": "i",
-      "type": "counter",
+      "type": "feedback",
       "position": {
         "x": 0,
         "y": 0
       },
       "data": {
         "name": "i",
+        "holds": "number",
+        "start": 0,
+        "breakpoint": true
+      }
+    },
+    {
+      "id": "next",
+      "type": "binop",
+      "position": {
+        "x": 300,
+        "y": 240
+      },
+      "data": {
+        "op": "add",
         "values": {
-          "from": 0,
-          "by": 1
+          "b": 1
         },
         "breakpoint": true
       }
     },
     {
-      "id": "done",
-      "type": "end",
+      "id": "out",
+      "type": "out",
       "position": {
-        "x": 0,
+        "x": 600,
         "y": 0
       },
       "data": {}
-    },
-    {
-      "id": "more",
-      "type": "compare",
-      "position": {
-        "x": 0,
-        "y": 0
-      },
-      "data": {
-        "op": "lt",
-        "values": {
-          "b": 3
-        }
-      }
     }
   ],
   "edges": [
     {
-      "id": "x1",
-      "source": "start",
-      "sourceHandle": "next",
-      "target": "loop",
-      "targetHandle": "in"
-    },
-    {
-      "id": "x2",
-      "source": "loop",
-      "sourceHandle": "true",
-      "target": "i",
-      "targetHandle": "in"
-    },
-    {
-      "id": "x3",
-      "source": "i",
-      "sourceHandle": "next",
-      "target": "loop",
-      "targetHandle": "in"
-    },
-    {
-      "id": "x4",
-      "source": "loop",
-      "sourceHandle": "false",
-      "target": "done",
-      "targetHandle": "in"
-    },
-    {
       "id": "e1",
       "source": "i",
-      "sourceHandle": "value",
-      "target": "more",
+      "sourceHandle": "out",
+      "target": "next",
       "targetHandle": "a"
     },
     {
-      "id": "e3",
-      "source": "more",
+      "id": "e2",
+      "source": "next",
       "sourceHandle": "out",
-      "target": "loop",
-      "targetHandle": "cond"
+      "target": "i",
+      "targetHandle": "value"
     },
     {
-      "id": "e4",
+      "id": "e3",
       "source": "i",
-      "sourceHandle": "value",
-      "target": "done",
+      "sourceHandle": "out",
+      "target": "out",
       "targetHandle": "value"
     }
   ]

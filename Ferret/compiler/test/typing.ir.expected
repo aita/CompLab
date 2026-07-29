@@ -1,11 +1,9 @@
+(global i int)
 (func main (result f64)
-  (local i int)
-  (set i 0)
-  (loop $1
-    (if (< i 10)
-      (then
-        (log (float (% i 3)))
-        (set i (+ i 1))
-        (br $1))
-      (else
-        (return (/ (float i) 2))))))
+  (local result float)
+  (local i_next int)
+  (log (float (% i 3)))
+  (set result (/ (float i) 2))
+  (set i_next (+ i 1))
+  (set i i_next)
+  (return result))

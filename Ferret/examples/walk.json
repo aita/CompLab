@@ -1,34 +1,39 @@
 {
-  "name": "sharing",
+  "name": "Random walk",
   "nodes": [
     {
-      "id": "n",
-      "type": "const",
+      "id": "here",
+      "type": "feedback",
       "position": {
-        "x": 0,
+        "x": 380,
         "y": 0
       },
       "data": {
-        "value": 2
+        "name": "here",
+        "holds": "number",
+        "start": 0
       }
     },
     {
-      "id": "b0",
-      "type": "binop",
+      "id": "step",
+      "type": "random",
       "position": {
-        "x": 300,
-        "y": 0
+        "x": 380,
+        "y": 240
       },
       "data": {
-        "op": "add"
+        "values": {
+          "min": -1,
+          "max": 1
+        }
       }
     },
     {
-      "id": "b1",
+      "id": "moved",
       "type": "binop",
       "position": {
-        "x": 600,
-        "y": 0
+        "x": 760,
+        "y": 120
       },
       "data": {
         "op": "add"
@@ -38,7 +43,7 @@
       "id": "out",
       "type": "out",
       "position": {
-        "x": 900,
+        "x": 1100,
         "y": 0
       },
       "data": {}
@@ -47,35 +52,28 @@
   "edges": [
     {
       "id": "e1",
-      "source": "n",
+      "source": "here",
       "sourceHandle": "out",
-      "target": "b0",
+      "target": "moved",
       "targetHandle": "a"
     },
     {
       "id": "e2",
-      "source": "n",
+      "source": "step",
       "sourceHandle": "out",
-      "target": "b0",
+      "target": "moved",
       "targetHandle": "b"
     },
     {
       "id": "e3",
-      "source": "b0",
+      "source": "moved",
       "sourceHandle": "out",
-      "target": "b1",
-      "targetHandle": "a"
+      "target": "here",
+      "targetHandle": "value"
     },
     {
       "id": "e4",
-      "source": "b0",
-      "sourceHandle": "out",
-      "target": "b1",
-      "targetHandle": "b"
-    },
-    {
-      "id": "e5",
-      "source": "b1",
+      "source": "here",
       "sourceHandle": "out",
       "target": "out",
       "targetHandle": "value"

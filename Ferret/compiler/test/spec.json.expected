@@ -1,17 +1,15 @@
 {
-  "categories": [ "Flow", "Operators", "Values" ],
+  "categories": [ "Out", "Values", "Operators" ],
   "nodes": [
     {
-      "type": "start",
-      "title": "Start",
-      "glyph": "▶",
-      "color": "#12b76a",
-      "category": "Flow",
-      "hint": "Where the flow begins. It hands out one thing: when the run started, in milliseconds, from the host. A graph takes no arguments.",
-      "execIn": [],
-      "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
-      "inputs": [],
-      "outputs": [ { "id": "time", "label": "started at", "kind": "num" } ],
+      "type": "out",
+      "title": "Out",
+      "glyph": "■",
+      "color": "#f79009",
+      "category": "Out",
+      "hint": "What a cook comes back with. A graph does not have to have one -- Log and Say are ways out too -- but it can only have one.",
+      "inputs": [ { "id": "value", "label": "value", "kind": "num" } ],
+      "outputs": [],
       "data": {},
       "fields": [],
       "entry": null,
@@ -19,18 +17,55 @@
       "unique": true
     },
     {
-      "type": "end",
-      "title": "End",
-      "glyph": "■",
-      "color": "#f79009",
-      "category": "Flow",
-      "hint": "Return a value and stop.",
-      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
-      "execOut": [],
-      "inputs": [ { "id": "value", "label": "result", "kind": "num" } ],
+      "type": "log",
+      "title": "Log",
+      "glyph": "✎",
+      "color": "#0ba5ec",
+      "category": "Out",
+      "hint": "Hand a number to the host, every cook. In the module this is a call to env.log.",
+      "inputs": [ { "id": "value", "label": "value", "kind": "num" } ],
       "outputs": [],
       "data": {},
       "fields": [],
+      "entry": null,
+      "variants": null,
+      "unique": false
+    },
+    {
+      "type": "say",
+      "title": "Say",
+      "glyph": "say",
+      "color": "#0ba5ec",
+      "category": "Out",
+      "hint": "Hand a piece of text to the host, the way Log hands it a number. The text is a literal: there is no memory in a graph to build one in.",
+      "inputs": [ { "id": "text", "label": "text", "kind": "text" } ],
+      "outputs": [],
+      "data": {},
+      "fields": [],
+      "entry": null,
+      "variants": null,
+      "unique": false
+    },
+    {
+      "type": "feedback",
+      "title": "Feedback",
+      "glyph": "↺",
+      "color": "#15b79e",
+      "category": "Values",
+      "hint": "What the last cook left. Reading it gives that; what it is fed is taken up at the end of this cook, at the same moment as every other feedback. This is the only way a graph can depend on itself, and the only way one cook can tell the next anything.",
+      "inputs": [ { "id": "value", "label": "next", "kind": "num" } ],
+      "outputs": [ { "id": "out", "label": "held", "kind": "num" } ],
+      "data": { "name": "held", "holds": "number", "start": 0 },
+      "fields": [
+        { "key": "name", "label": "Name", "kind": "text" },
+        {
+          "key": "holds",
+          "label": "Holds",
+          "kind": "select",
+          "options": [ [ "number", "a number" ], [ "flag", "a yes or no" ] ]
+        },
+        { "key": "start", "label": "Starts at", "kind": "number" }
+      ],
       "entry": null,
       "variants": null,
       "unique": false
@@ -40,141 +75,23 @@
       "title": "Choose",
       "glyph": "?",
       "color": "#f04438",
-      "category": "Flow",
-      "hint": "The only branch there is: pick one of two numbers by a condition. Both are evaluated, which is safe because nothing in an expression has an effect.",
-      "execIn": [],
-      "execOut": [],
+      "category": "Operators",
+      "hint": "One of two values, by a condition. Both are worked out, which is safe because nothing in a graph has an effect where it is read.",
       "inputs": [
         { "id": "cond", "label": "if", "kind": "bool" },
         { "id": "a", "label": "then", "kind": "num" },
         { "id": "b", "label": "else", "kind": "num" }
       ],
       "outputs": [ { "id": "out", "label": "result", "kind": "num" } ],
-      "data": {},
-      "fields": [],
-      "entry": null,
-      "variants": null,
-      "unique": false
-    },
-    {
-      "type": "condition",
-      "title": "Condition",
-      "glyph": "Y",
-      "color": "#f04438",
-      "category": "Flow",
-      "hint": "Sends the flow one way or the other. A loop is a Condition with a wire running back into it from the end of the body.",
-      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
-      "execOut": [
-        { "id": "true", "label": "true", "kind": "exec" },
-        { "id": "false", "label": "false", "kind": "exec" }
+      "data": { "holds": "number" },
+      "fields": [
+        {
+          "key": "holds",
+          "label": "Chooses between",
+          "kind": "select",
+          "options": [ [ "number", "numbers" ], [ "flag", "yes and no" ] ]
+        }
       ],
-      "inputs": [ { "id": "cond", "label": "test", "kind": "bool" } ],
-      "outputs": [],
-      "data": {},
-      "fields": [],
-      "entry": null,
-      "variants": null,
-      "unique": false
-    },
-    {
-      "type": "counter",
-      "title": "Counter",
-      "glyph": "i",
-      "color": "#06aed4",
-      "category": "Flow",
-      "hint": "Counts. It starts at one value and, every time the flow passes through it, adds another to what it holds. Wire `by` to something other than a constant and it accumulates.",
-      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
-      "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
-      "inputs": [
-        { "id": "from", "label": "starts at", "kind": "num" },
-        { "id": "by", "label": "moves by", "kind": "num" }
-      ],
-      "outputs": [ { "id": "value", "label": "value", "kind": "num" } ],
-      "data": { "name": "i", "values": { "from": 0, "by": 1 } },
-      "fields": [ { "key": "name", "label": "Name", "kind": "text" } ],
-      "entry": null,
-      "variants": null,
-      "unique": false
-    },
-    {
-      "type": "state",
-      "title": "State",
-      "glyph": "S",
-      "color": "#15b79e",
-      "category": "Flow",
-      "hint": "Remembers one number. Passing through stores what it is fed, and reading its output anywhere gives back the last thing stored. There is a second way through, `reset`, that puts back what it started with -- which is what a state inside a loop needs and a Counter cannot say.",
-      "execIn": [
-        { "id": "in", "label": "in", "kind": "exec" },
-        { "id": "reset", "label": "reset", "kind": "exec" }
-      ],
-      "execOut": [
-        { "id": "next", "label": "next", "kind": "exec" },
-        { "id": "after", "label": "after reset", "kind": "exec" }
-      ],
-      "inputs": [
-        { "id": "initial", "label": "starts at", "kind": "num" },
-        { "id": "value", "label": "stores", "kind": "num" }
-      ],
-      "outputs": [ { "id": "value", "label": "value", "kind": "num" } ],
-      "data": { "name": "s", "values": { "initial": 0 } },
-      "fields": [ { "key": "name", "label": "Name", "kind": "text" } ],
-      "entry": null,
-      "variants": null,
-      "unique": false
-    },
-    {
-      "type": "wait",
-      "title": "Wait for Event",
-      "glyph": "wait",
-      "color": "#f63d68",
-      "category": "Flow",
-      "hint": "Stops until the host has an event, and hands over the number it sent. The only node that takes time: a loop with one of these in it is an event loop, and the loop is drawn rather than hidden in the runtime.",
-      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
-      "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
-      "inputs": [],
-      "outputs": [ { "id": "value", "label": "event", "kind": "num" } ],
-      "data": { "name": "e" },
-      "fields": [ { "key": "name", "label": "Name", "kind": "text" } ],
-      "entry": null,
-      "variants": null,
-      "unique": false
-    },
-    {
-      "type": "forloop",
-      "title": "For Loop",
-      "glyph": "1..n",
-      "color": "#d444f1",
-      "category": "Flow",
-      "hint": "Counts from the first value to the last, running the body once for each. It is a Counter and a Condition wired into a loop, drawn as one node: the end of the body goes back to it on its own.",
-      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
-      "execOut": [
-        { "id": "body", "label": "body", "kind": "exec" },
-        { "id": "done", "label": "done", "kind": "exec" }
-      ],
-      "inputs": [
-        { "id": "first", "label": "from", "kind": "num" },
-        { "id": "last", "label": "to", "kind": "num" }
-      ],
-      "outputs": [ { "id": "index", "label": "index", "kind": "num" } ],
-      "data": { "name": "i", "values": { "first": 1, "last": 10 } },
-      "fields": [ { "key": "name", "label": "Name", "kind": "text" } ],
-      "entry": null,
-      "variants": null,
-      "unique": false
-    },
-    {
-      "type": "log",
-      "title": "Log",
-      "glyph": "✎",
-      "color": "#0ba5ec",
-      "category": "Flow",
-      "hint": "Hand a value to the host. In the module this is a call to env.log.",
-      "execIn": [ { "id": "in", "label": "in", "kind": "exec" } ],
-      "execOut": [ { "id": "next", "label": "next", "kind": "exec" } ],
-      "inputs": [ { "id": "value", "label": "value", "kind": "num" } ],
-      "outputs": [],
-      "data": {},
-      "fields": [],
       "entry": null,
       "variants": null,
       "unique": false
@@ -186,8 +103,6 @@
       "color": "#2e90fa",
       "category": "Operators",
       "hint": "Combine two numbers.",
-      "execIn": [],
-      "execOut": [],
       "inputs": [
         { "id": "a", "label": "A", "kind": "num" },
         { "id": "b", "label": "B", "kind": "num" }
@@ -232,8 +147,6 @@
       "color": "#2e90fa",
       "category": "Operators",
       "hint": "A built-in that takes one number.",
-      "execIn": [],
-      "execOut": [],
       "inputs": [ { "id": "a", "label": "A", "kind": "num" } ],
       "outputs": [ { "id": "out", "label": "result", "kind": "num" } ],
       "data": { "op": "abs" },
@@ -278,8 +191,6 @@
       "color": "#7a5af8",
       "category": "Operators",
       "hint": "Compare two numbers and produce true or false.",
-      "execIn": [],
-      "execOut": [],
       "inputs": [
         { "id": "a", "label": "A", "kind": "num" },
         { "id": "b", "label": "B", "kind": "num" }
@@ -326,9 +237,7 @@
       "glyph": "&",
       "color": "#7a5af8",
       "category": "Operators",
-      "hint": "Combine true and false. And and Or evaluate both sides.",
-      "execIn": [],
-      "execOut": [],
+      "hint": "Combine true and false. And and Or work out both sides.",
       "inputs": [
         { "id": "a", "label": "A", "kind": "bool" },
         { "id": "b", "label": "B", "kind": "bool" }
@@ -361,13 +270,29 @@
       "color": "#2e90fa",
       "category": "Operators",
       "hint": "A whole calculation typed as text, instead of a chain of a dozen nodes. The names it uses become its input ports, so it wires up like anything else. min, max, abs, sqrt, floor, ceil, round and random are available.",
-      "execIn": [],
-      "execOut": [],
       "inputs": [],
       "outputs": [ { "id": "out", "label": "result", "kind": "num" } ],
       "data": { "text": "x * x + y * y" },
       "fields": [ { "key": "text", "label": "Expression", "kind": "text" } ],
       "entry": { "key": "text", "placeholder": "x * x + y * y" },
+      "variants": null,
+      "unique": false
+    },
+    {
+      "type": "input",
+      "title": "Input",
+      "glyph": "in",
+      "color": "#7a5af8",
+      "category": "Values",
+      "hint": "A number the Run panel asks for before the run starts. It keeps what it is given, so every cook reads the same value until it is changed.",
+      "inputs": [],
+      "outputs": [ { "id": "value", "label": "value", "kind": "num" } ],
+      "data": { "name": "n", "value": 10 },
+      "fields": [
+        { "key": "name", "label": "Name", "kind": "text" },
+        { "key": "value", "label": "Default", "kind": "number" }
+      ],
+      "entry": null,
       "variants": null,
       "unique": false
     },
@@ -378,12 +303,62 @@
       "color": "#667085",
       "category": "Values",
       "hint": "One f64.const, for when the same number is wanted in several places. A single use can be typed into the port instead.",
-      "execIn": [],
-      "execOut": [],
       "inputs": [],
       "outputs": [ { "id": "out", "label": "value", "kind": "num" } ],
       "data": { "value": 0 },
       "fields": [ { "key": "value", "label": "Value", "kind": "number" } ],
+      "entry": null,
+      "variants": null,
+      "unique": false
+    },
+    {
+      "type": "flag",
+      "title": "Yes or No",
+      "glyph": "T/F",
+      "color": "#7a5af8",
+      "category": "Values",
+      "hint": "A true or false, written down. Everything else that makes one -- a comparison, an and -- works it out; this is the one that just says it.",
+      "inputs": [],
+      "outputs": [ { "id": "out", "label": "value", "kind": "bool" } ],
+      "data": { "value": "yes" },
+      "fields": [
+        {
+          "key": "value",
+          "label": "Value",
+          "kind": "select",
+          "options": [ [ "yes", "yes (true)" ], [ "no", "no (false)" ] ]
+        }
+      ],
+      "entry": null,
+      "variants": null,
+      "unique": false
+    },
+    {
+      "type": "text",
+      "title": "Text",
+      "glyph": "abc",
+      "color": "#0ba5ec",
+      "category": "Values",
+      "hint": "A piece of text, to be said. It is a literal and stays one -- nothing in the language takes text apart or puts it together.",
+      "inputs": [],
+      "outputs": [ { "id": "out", "label": "text", "kind": "text" } ],
+      "data": { "text": "hello" },
+      "fields": [ { "key": "text", "label": "Text", "kind": "text" } ],
+      "entry": { "key": "text", "placeholder": "hello" },
+      "variants": null,
+      "unique": false
+    },
+    {
+      "type": "time",
+      "title": "Time",
+      "glyph": "⏱",
+      "color": "#12b76a",
+      "category": "Values",
+      "hint": "What the host says the time is, in milliseconds, asked afresh every cook. Two readers of it in one cook see the same moment.",
+      "inputs": [],
+      "outputs": [ { "id": "out", "label": "now", "kind": "num" } ],
+      "data": {},
+      "fields": [],
       "entry": null,
       "variants": null,
       "unique": false
@@ -394,9 +369,7 @@
       "glyph": "~",
       "color": "#ee46bc",
       "category": "Values",
-      "hint": "A number in [min, max), drawn from the host. The one impure node: it is drawn once each time the node is reached, and every reader of that node sees the same draw.",
-      "execIn": [],
-      "execOut": [],
+      "hint": "A number in [min, max), drawn from the host. The one impure node: it is drawn once per cook per node, and every reader of that node sees the same draw.",
       "inputs": [
         { "id": "min", "label": "min", "kind": "num" },
         { "id": "max", "label": "max", "kind": "num" }

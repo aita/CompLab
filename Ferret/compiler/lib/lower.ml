@@ -1,14 +1,16 @@
 (* Graph -> IR.
-   Data ports are pulled on demand: asking for the value of an input port
-   walks backwards through the data edges and builds an expression tree.
-   Exec ports are pushed: the walk starts at the start node and follows the
-   exec edges forward, turning each node it meets into a statement.
 
-   A Counter is the only node that holds anything: it starts at one value and
-   moves by another every time execution passes through it.  A Condition only
-   branches.  So a loop is drawn rather than declared -- a wire runs from the
-   end of the body back into the Condition -- and the exec edges form a real
-   graph.  Recovering wasm's block structure from it is [structure] below.
+   The graph is a dataflow network and there is nothing to walk forwards: the
+   sinks -- Out, Log, Say -- are what a cook is for, and everything else is
+   evaluated because one of them asked for it.  Asking for the value of an
+   input port walks backwards along the data edges and builds an expression
+   tree, so the evaluation order falls out of what depends on what rather than
+   being drawn.
+
+   A Feedback is the only node that holds anything, and it holds it between
+   cooks: reading it gives what the last cook left, and the new value it is
+   fed is taken up at the end of this one.  Every feedback takes its new value
+   at the same moment, which is what lets two of them read each other.
 
    A node whose output feeds several inputs is computed once, into a local,
    because with no way to name an intermediate value in the graph, feeding one
@@ -20,24 +22,31 @@
 
    Numbers are typed as they are lowered.  A literal that is whole is an i64,
    and so is anything built only out of those; everything else is an f64.  A
-   counter cannot be typed by looking at it once -- its step reads the counter
-   -- so the whole lowering is its own fixpoint: it starts by assuming every
-   counter is whole, and runs again whenever that turns out to be too narrow.
-   Assumptions only ever loosen, so it settles. *)
+   feedback cannot be typed by looking at it once -- its new value reads the
+   feedback -- so the whole lowering is its own fixpoint: it starts by
+   assuming every one is whole, and runs again whenever that turns out to be
+   too narrow.  Assumptions only ever loosen, so it settles. *)
 
 open Ir
 
 type ctx = {
   g : Graph.t;
-  slots : (string, int) Hashtbl.t;  (* internal key -> local index *)
+  (* What the graph holds outlives one call, so it lives in globals; the
+     temporaries a single expression needs are locals of the function being
+     lowered, and start again for each of them. *)
+  gslots : (string, int) Hashtbl.t;  (* internal key -> global index *)
+  mutable globals : (string * vtype * float) list;
   used : (string, unit) Hashtbl.t;  (* display names already taken *)
   fanout : (string, int) Hashtbl.t;  (* "node\000port" -> how many edges leave *)
   (* The one thing the host gives a graph, and only if it is asked for. *)
   mutable wants_time : bool;
-  mutable vars : (string * vtype) list;
+  (* The numbers the Run panel asks for: export name, label, default. *)
+  mutable inputs : (string * string * float) list;
+  (* Every piece of text the graph says, in the order it is laid out. *)
+  mutable strings : string list;
+  mutable vars : (string * vtype) list;  (* the current function's locals *)
   mutable errs : Graph.error list;  (* collected, reported all at once *)
   active : (string, unit) Hashtbl.t;  (* data nodes on the current path *)
-  entered : (string, unit) Hashtbl.t;  (* exec nodes already emitted *)
   (* the group being lowered: what it has already computed, and the
      assignments that have to run before it *)
   mutable shared : (string, int * vtype) Hashtbl.t;
@@ -46,7 +55,7 @@ type ctx = {
   (* Every breakpoint the lowering has planted, in the order the module's
      watch indices run; the editor turns these back into node highlights. *)
   mutable watches : (string * string) list;  (* reversed: node id, label *)
-  slot_ty : (string, vtype) Hashtbl.t;  (* loop slot key -> assumed type *)
+  slot_ty : (string, vtype) Hashtbl.t;  (* feedback key -> assumed type *)
   mutable too_narrow : bool;  (* an assumption did not survive this pass *)
 }
 
@@ -76,14 +85,22 @@ let fresh_display ctx name =
   in
   pick 1
 
-let slot ctx ~key ~display ~ty =
-  match Hashtbl.find_opt ctx.slots key with
+(* A global: the graph's own state, which every way into the graph shares. *)
+let global ctx ~key ~display ~ty ?(init = 0.) () =
+  match Hashtbl.find_opt ctx.gslots key with
   | Some i -> i
   | None ->
-      let i = Hashtbl.length ctx.slots in
-      Hashtbl.replace ctx.slots key i;
-      ctx.vars <- ctx.vars @ [ (fresh_display ctx display, ty) ];
+      let i = Hashtbl.length ctx.gslots in
+      Hashtbl.replace ctx.gslots key i;
+      ctx.globals <- ctx.globals @ [ (fresh_display ctx display, ty, init) ];
       i
+
+(* A local of the cook: a value that is wanted twice, or a feedback's new
+   value while the others are still being worked out. *)
+let local ctx ~display ~ty =
+  let i = List.length ctx.vars in
+  ctx.vars <- ctx.vars @ [ (fresh_display ctx display, ty) ];
+  i
 
 (* Plant a breakpoint and hand back the index the module will report it by. *)
 let watch_point ctx ~node ~label =
@@ -92,20 +109,56 @@ let watch_point ctx ~node ~label =
 
 let slot_key (n : Graph.node) = n.id
 
+(* A node that works on either sort of value says which in its own settings:
+   a Feedback because its slot has to be one or the other, a Choose because
+   its ports are drawn before anything is wired to them.  A yes-or-no is not a
+   number that has not settled yet, so this is said rather than worked out. *)
+let flagged (n : Graph.node) =
+  Graph.string_field n "holds" ~default:"number" = "flag"
+
+let declared (n : Graph.node) =
+  if n.kind = "feedback" && flagged n then Some VBool else None
+
 let assumed ctx key =
   Option.value (Hashtbl.find_opt ctx.slot_ty key) ~default:VInt
 
-(* Every counter owns one local, named after the node so two counters called
-   the same thing in the editor still come out apart. *)
+let holds ctx (n : Graph.node) =
+  match declared n with Some t -> t | None -> assumed ctx (slot_key n)
+
+(* An Input is a global the host writes before the run, so the graph only ever
+   reads it and every way in sees the same number.  Asking for it is the point
+   of the node, so the panel is told about it whether or not anything reads
+   it: a node put down and not yet wired up still shows a box. *)
+let input_slot ctx (n : Graph.node) =
+  let name = Graph.string_field n "name" ~default:"n" in
+  let init = Graph.number_field n "value" ~default:0. in
+  let i = global ctx ~key:("\003" ^ n.id) ~display:name ~ty:VFloat ~init () in
+  let export =
+    Ir.global_export (let v, _, _ = List.nth ctx.globals i in v)
+  in
+  if not (List.exists (fun (e, _, _) -> e = export) ctx.inputs) then
+    ctx.inputs <-
+      ctx.inputs @ [ (export, name, init) ];
+  i
+
+let display_of (n : Graph.node) = Graph.string_field n "name" ~default:"held"
+
+(* Every feedback owns one global, named after the node so two called the same
+   thing in the editor still come out apart.  What it starts at is a number
+   typed into the node, which is what lets it be the global's own initial
+   value: there is no first cook that runs anything the others do not. *)
 let state_slot ctx (n : Graph.node) =
   let key = slot_key n in
-  slot ctx ~key
-    ~display:(Graph.string_field n "name" ~default:"i")
-    ~ty:(assumed ctx key)
+  let start =
+    if declared n = Some VBool then
+      if Graph.string_field n "start" ~default:"no" = "yes" then 1. else 0.
+    else Graph.number_field n "start" ~default:0.
+  in
+  global ctx ~key ~display:(display_of n) ~ty:(holds ctx n) ~init:start ()
 
 (* A group is one place in the emitted code where a set of expressions is
-   evaluated together: a statement, a loop's condition, a loop's whole set of
-   next values.  Sharing is scoped to a group, and the assignments it hoists
+   evaluated together: one sink, or the whole set of new values the feedbacks
+   take.  Sharing is scoped to a group, and the assignments it hoists
    run at the head of it -- which is only sound because a group never writes a
    local that its own expressions read.  Between groups nothing is shared, so
    a value read on either side of an update is read twice, as it must be. *)
@@ -144,15 +197,19 @@ let unify a b =
   | _, VInt -> (fst a, as_float b, VFloat)
   | _ -> (fst a, fst b, VFloat)
 
-(* Narrowing never happens in a settled pass: reaching it means a loop slot
-   was assumed to be whole and is not, so this pass is about to be thrown
+(* Narrowing never happens in a settled pass: reaching it means a feedback
+   slot was assumed to be whole and is not, so this pass is about to be thrown
    away and what it emits does not matter. *)
 let coerce ctx (e, ty) want =
   if ty = want then e
-  else if ty = VInt then as_float (e, ty)
-  else (
+  else if ty = VInt && want = VFloat then as_float (e, ty)
+  else if is_num ty && is_num want then (
     ctx.too_narrow <- true;
     Int 0)
+  else
+    (* A yes-or-no and a number never meet: the complaint is made where the
+       mismatch is seen, and this pass is thrown away either way. *)
+    e
 
 (* ---------------------------------------------------------------- data *)
 
@@ -221,16 +278,19 @@ let rec value ctx (e : Graph.edge) : expr * vtype =
 
 and share ctx ~key ~from (expr, ty) =
   let uses = Option.value (Hashtbl.find_opt ctx.fanout key) ~default:1 in
+  (* A node that asks the host something is its answer: one draw, one reading
+     of the clock, and every reader sees that one.  It is worked out into a
+     local however few edges leave it, because the edge count is not the whole
+     story -- a formula that names it twice leaves one edge and reads it
+     twice. *)
+  let impure = List.mem from.Graph.kind [ "random"; "time" ] in
   match expr with
-  | Local _ | Num _ | Int _ -> (expr, ty) (* already as cheap as a local read *)
-  | _ when uses < 2 -> (expr, ty)
+  (* already as cheap as the read that would replace it *)
+  | Local _ | Global _ | Num _ | Int _ -> (expr, ty)
+  | _ when uses < 2 && not impure -> (expr, ty)
   | _ ->
       ctx.temps <- ctx.temps + 1;
-      let i =
-        slot ctx
-          ~key:(Printf.sprintf "\002%d" ctx.temps)
-          ~display:(from.Graph.id ^ "_value") ~ty
-      in
+      let i = local ctx ~display:(from.Graph.id ^ "_value") ~ty in
       ctx.prelude <- Assign (i, expr) :: ctx.prelude;
       Hashtbl.replace ctx.shared key (i, ty);
       (Local i, ty)
@@ -239,13 +299,9 @@ and share ctx ~key ~from (expr, ty) =
    feeding several inputs is computed once -- means one hit per evaluation
    rather than one per reader. *)
 and watched ctx (n : Graph.node) (expr, ty) =
-  (* A loop reports its whole state once per iteration, from the top of the
-     loop, rather than every time a slot is read; the start node has nothing
-     to report that its caller does not already know. *)
-  if
-    n.kind = "counter" || n.kind = "state" || n.kind = "wait" || n.kind = "start"
-    || not (Graph.flag n "breakpoint")
-  then (expr, ty)
+  (* A feedback reports the new value it takes, at the end of the cook, rather
+     than every time what it holds is read. *)
+  if n.kind = "feedback" || not (Graph.flag n "breakpoint") then (expr, ty)
   else
     let i = watch_point ctx ~node:n.id ~label:"value" in
     (Watch (i, ty, expr), ty)
@@ -255,19 +311,22 @@ and watched ctx (n : Graph.node) (expr, ty) =
 and value_of ctx (n : Graph.node) : expr * vtype =
   let bad fmt = Printf.ksprintf (fun s -> complain ctx ~node:n.id "%s" s) fmt in
   match n.kind with
-  | "start" ->
-      (* The start node hands out one thing: when the run began.  It is asked
-         for once and kept in a local, so every reader of it sees the same
-         moment -- the same rule that makes one Random node one draw. *)
-      ctx.wants_time <- true;
-      (Local (slot ctx ~key:"\001time" ~display:"time" ~ty:VFloat), VFloat)
-  | "counter" | "forloop" | "state" | "wait" ->
-      (* Reading what a counter holds stops the backward walk: the value is a
-         local, so the step may name the counter itself without that being a
-         cycle.  A for loop's index and a state's contents are the same
-         thing. *)
-      (Local (state_slot ctx n), assumed ctx (slot_key n))
+  | "time" ->
+      (* What the host says the time is.  Asked for afresh in every cook, but
+         once within one: the same rule that makes one Random node one draw. *)
+      (Now, VFloat)
+  | "input" -> (Global (input_slot ctx n), VFloat)
+  | "feedback" ->
+      (* Reading a feedback stops the backward walk: what comes out is what
+         the last cook left, so the value it is fed may name the feedback
+         itself without that being a cycle.  This is the only way a graph can
+         depend on itself. *)
+      (Global (state_slot ctx n), holds ctx n)
   | "const" -> literal (Graph.number_field n "value" ~default:0.)
+  | "flag" ->
+      if Graph.string_field n "value" ~default:"yes" = "yes" then
+        (Cmp (Eq, Int 0, Int 0), VBool)
+      else (untrue, VBool)
   | "binop" -> (
       let op = Graph.string_field n "op" ~default:"add" in
       match binop_of_string op with
@@ -330,11 +389,18 @@ and value_of ctx (n : Graph.node) : expr * vtype =
           (Int 0, VInt)
       | Ok e -> formula ctx n e)
   | "select" ->
+      (* Both arms are the sort of thing the node says it chooses between, and
+         so is what comes out. *)
       let c = condition ctx n "cond" in
-      let a = number ctx n "a" in
-      let b = number ctx n "b" in
-      let a, b, ty = unify a b in
-      (Select (c, a, b), ty)
+      if flagged n then
+        let a = condition ctx n "a" in
+        let b = condition ctx n "b" in
+        (Select (c, a, b), VBool)
+      else
+        let a = number ctx n "a" in
+        let b = number ctx n "b" in
+        let a, b, ty = unify a b in
+        (Select (c, a, b), ty)
   | "random" ->
       let lo = as_float (number ctx n "min") in
       let hi = as_float (number ctx n "max") in
@@ -445,13 +511,16 @@ and condition ctx (n : Graph.node) port : expr =
         untrue)
 
 
-(* ---------------------------------------------------------------- exec *)
+(* --------------------------------------------------------------- sinks *)
 
-(* The host takes f64s, so what log and end hand over is widened -- after the
+(* The host takes f64s, so what a sink hands over is widened -- after the
    breakpoint, which reports the value in the type it was worked out in. *)
 let reported ctx (n : Graph.node) v = as_float (watched ctx n v)
 
-(* Loosen the assumption about a counter if what feeds it does not fit. *)
+(* What a feedback is fed decides how wide its slot has to be: a whole number
+   stays whole until something hands it a fraction.  Noticing that here is
+   what makes the next pass necessary, and there is no next pass once the
+   width has stopped moving. *)
 let note_type ctx (n : Graph.node) (e, ty) =
   let key = slot_key n in
   let want = join (assumed ctx key) ty in
@@ -460,295 +529,45 @@ let note_type ctx (n : Graph.node) (e, ty) =
     ctx.too_narrow <- true);
   (e, ty)
 
-let exec_kinds =
-  [ "log"; "end"; "condition"; "counter"; "forloop"; "state"; "wait" ]
-
-(* The nodes that own a local, and the port each one starts from. *)
-let holds_state (n : Graph.node) = List.mem n.kind [ "counter"; "state" ]
-let start_port (n : Graph.node) = if n.kind = "state" then "initial" else "from"
-
-(* A for loop is three places rather than one: the setup it is entered at, the
-   test it comes back to, and the step the body falls into.  So a vertex of
-   the control-flow graph is a node and the door it was entered by. *)
-let vertex_for ctx ~dst ~port =
-  let n = Graph.find ctx.g dst in
-  match (n.kind, port) with
-  | "forloop", "in" -> dst ^ "#init"
-  | "state", "reset" -> dst ^ "#reset"
-  | _ -> dst
-
-(* A way out that was left unwired is a vertex of its own rather than a
-   missing successor, so that a node with two exits keeps two of them however
-   little is drawn: which pin is dangling is the whole question, and a list
-   with a hole in it cannot say. *)
-let gap ~node ~port = node ^ "#gap:" ^ port
-let is_gap part = String.starts_with ~prefix:"gap:" part
-
-let node_of v =
-  match String.index_opt v '#' with Some i -> String.sub v 0 i | None -> v
-
-let part_of v =
-  match String.index_opt v '#' with
-  | Some i -> String.sub v (i + 1) (String.length v - i - 1)
-  | None -> ""
-
-(* A breakpoint on a node that carries no value of its own -- a counter, a
-   condition -- reports what it works out as it passes through. *)
+(* A text port leads to a Text node and nothing else, so it is read here
+   rather than built as an expression: with no memory to work in, a piece of
+   text is a literal or it does not exist. *)
+let text_of ctx (n : Graph.node) port =
+  match Graph.into ctx.g ~node:n.id ~port with
+  | None ->
+      complain ctx ~node:n.id "the %s input is not connected" port;
+      0
+  | Some e -> (
+      let src = Graph.find ctx.g e.src in
+      match src.kind with
+      | "text" ->
+          let text = Graph.string_field src "text" ~default:"" in
+          let rec index i = function
+            | [] ->
+                ctx.strings <- ctx.strings @ [ text ];
+                i
+            | x :: _ when x = text -> i
+            | _ :: rest -> index (i + 1) rest
+          in
+          index 0 ctx.strings
+      | kind ->
+          complain ctx ~node:src.id "a %s node does not make text" kind;
+          0)
 
 let watched_as ctx (n : Graph.node) label (expr, ty) =
   if not (Graph.flag n "breakpoint") then (expr, ty)
   else (Watch (watch_point ctx ~node:n.id ~label, ty, expr), ty)
 
-(* What each vertex does, before it hands control on. *)
-let rec statements ctx v : block =
-  let n = Graph.find ctx.g (node_of v) in
-  match (n.kind, part_of v) with
-  | _, part when is_gap part -> []
-  | "forloop", "init" ->
-      let i = state_slot ctx n in
-      let want = assumed ctx (slot_key n) in
-      let pre, e = group ctx (fun () -> note_type ctx n (number ctx n "first")) in
-      pre @ [ Assign (i, coerce ctx e want) ]
-  | "forloop", "step" ->
-      let i = state_slot ctx n in
-      let want = assumed ctx (slot_key n) in
-      let a, b, ty = unify (Local i, want) (Int 1, VInt) in
-      ignore (note_type ctx n (Bin (Add, a, b), ty));
-      [ Assign (i, coerce ctx (Bin (Add, a, b), ty) want) ]
-  | "forloop", _ -> []
-  | "state", "reset" ->
-      (* Coming in this way puts back what it started with, which is what a
-         state inside a loop needs and a counter cannot say. *)
-      let i = state_slot ctx n in
-      let want = assumed ctx (slot_key n) in
-      let pre, e = group ctx (fun () -> note_type ctx n (number ctx n "initial")) in
-      pre @ [ Assign (i, coerce ctx e want) ]
-  | _ -> statements_of ctx n
+(* The nodes a cook is for.  Everything else in the graph is only there
+   because one of these asks for it: nothing is evaluated that nothing wants,
+   which is the whole of the evaluation order. *)
+let sink_kinds = [ "out"; "log"; "say" ]
 
-and statements_of ctx (n : Graph.node) : block =
-  match n.kind with
-  | "log" ->
-      let pre, v = group ctx (fun () -> reported ctx n (number ctx n "value")) in
-      pre @ [ Log v ]
-  | "end" ->
-      let pre, v = group ctx (fun () -> reported ctx n (number ctx n "value")) in
-      pre @ [ Ret v ]
-  | "condition" -> []
-  | "forloop" -> []
-  | "counter" ->
-      (* Passing through moves it: the step is added to what it holds. *)
-      if Graph.string_field n "mode" ~default:"by" = "becomes" then
-        complain ctx ~node:n.id
-          "a Counter adds its step to what it holds; a State node is the one \
-           that takes a value outright";
-      let i = state_slot ctx n in
-      let want = assumed ctx (slot_key n) in
-      let pre, v =
-        group ctx (fun () ->
-            let step = number ctx n "by" in
-            let a, b, ty = unify (Local i, want) step in
-            note_type ctx n (Bin (Add, a, b), ty))
-      in
-      let e, ty = watched_as ctx n "value" v in
-      pre @ [ Assign (i, coerce ctx (e, ty) want) ]
-  | "wait" ->
-      (* Nothing else in the language takes time.  Passing through stops the
-         program until the host has an event for it, and what comes back is
-         kept the way a state's contents are, so the rest of the graph reads
-         it as an ordinary value. *)
-      let i = state_slot ctx n in
-      let want = assumed ctx (slot_key n) in
-      let e, ty = watched_as ctx n "event" (note_type ctx n (Wait, VFloat)) in
-      [ Assign (i, coerce ctx (e, ty) want) ]
-  | "state" ->
-      (* Passing through stores what it is fed, and nothing else does: this is
-         the whole of assignment in the language. *)
-      let i = state_slot ctx n in
-      let want = assumed ctx (slot_key n) in
-      let pre, v =
-        group ctx (fun () -> note_type ctx n (number ctx n "value"))
-      in
-      let e, ty = watched_as ctx n "value" v in
-      pre @ [ Assign (i, coerce ctx (e, ty) want) ]
-  | kind ->
-      complain ctx ~node:n.id "the %s node cannot be part of the flow" kind;
-      []
+(* In the order the graph lists them, so that what a cook does is settled by
+   the file rather than by where the nodes happen to sit. *)
+let sinks (g : Graph.t) = List.filter (fun n -> List.mem n.Graph.kind sink_kinds) g.nodes
 
-(* The successors of a vertex, in the order its ports are drawn. *)
-let exec_succs ctx v =
-  let n = Graph.find ctx.g (node_of v) in
-  let out port =
-    match Graph.out_of ctx.g ~node:n.id ~port with
-    | Some e -> [ vertex_for ctx ~dst:e.dst ~port:e.dst_port ]
-    | None -> []
-  in
-  let way port =
-    match Graph.out_of ctx.g ~node:n.id ~port with
-    | Some e -> vertex_for ctx ~dst:e.dst ~port:e.dst_port
-    | None -> gap ~node:n.id ~port
-  in
-  match (n.kind, part_of v) with
-  | _, part when is_gap part -> []
-  | "forloop", "init" -> [ n.id ]
-  | "forloop", "step" -> [ n.id ]
-  | "forloop", _ -> [ way "body"; way "done" ]
-  (* Storing and resetting are two ways through one node, and each carries on
-     somewhere of its own: the reset usually leads into the loop that the
-     store sits inside. *)
-  | "state", "reset" -> out "after"
-  | "condition", _ -> [ way "true"; way "false" ]
-  | "end", _ -> []
-  | _ -> out "next"
-
-(* ------------------------------------------------- structure recovery *)
-
-(* Turn the control-flow graph back into blocks and loops.  Every node is
-   written out exactly once: at the dominator that owns it if only one path
-   reaches it, and otherwise inside a block that both paths can branch to.
-   This is the standard reducible-CFG shape -- a loop header becomes a [loop],
-   a node two branches join at becomes a [block] wrapped round everything that
-   branches to it, and everything else is written where it is reached. *)
-type frame = { at : string; label : Ir.label }
-
-let structure ctx (g : Cfg.t) =
-  let next_label = ref 0 in
-  let fresh () =
-    incr next_label;
-    !next_label
-  in
-  let node id = Graph.find ctx.g (node_of id) in
-  let dom_children =
-    let t = Hashtbl.create 32 in
-    Array.iter
-      (fun n ->
-        match Hashtbl.find_opt g.idom n with
-        | Some d when d <> n ->
-            Hashtbl.replace t d (n :: Option.value (Hashtbl.find_opt t d) ~default:[])
-        | _ -> ())
-      g.order;
-    t
-  in
-  let rec do_tree frames n : block =
-    if Cfg.is_header g n then
-      let l = fresh () in
-      [ Loop (l, within ({ at = n; label = l } :: frames) n) ]
-    else within frames n
-  and within frames n : block =
-    (* The joins this node owns, outermost last, so that a branch to one lands
-       just before its code. *)
-    let joins =
-      Option.value (Hashtbl.find_opt dom_children n) ~default:[]
-      |> List.filter (Cfg.is_join g)
-      |> List.sort (fun a b -> compare (Cfg.rank g b) (Cfg.rank g a))
-    in
-    let rec wrap frames = function
-      | [] -> code frames n
-      | m :: rest ->
-          let l = fresh () in
-          Block (l, wrap ({ at = m; label = l } :: frames) rest)
-          :: do_tree frames m
-    in
-    wrap frames joins
-  and code frames n : block =
-    let stmts = statements ctx n in
-    let go target =
-      match List.find_opt (fun f -> f.at = target) frames with
-      | Some f -> [ Br f.label ]
-      | None -> do_tree frames target
-    in
-    match ((node n).kind, part_of n, Cfg.successors g n) with
-    | "condition", _, [ t; f ] ->
-        let pre, c =
-          group ctx (fun () ->
-              fst
-                (watched_as ctx (node n) "test"
-                   (condition ctx (node n) "cond", VBool)))
-        in
-        stmts @ pre @ [ If (c, go t, go f) ]
-    | "forloop", "", [ body; after ] ->
-        (* index <= last, worked out afresh at the top of every pass *)
-        let m = node n in
-        let i = state_slot ctx m in
-        let want = assumed ctx (slot_key m) in
-        let pre, c =
-          group ctx (fun () ->
-              let a, b, _ = unify (Local i, want) (number ctx m "last") in
-              fst (watched_as ctx m "index" (Cmp (Le, a, b), VBool)))
-        in
-        stmts @ pre @ [ If (c, go body, go after) ]
-    (* Reaching a pin that was never wired.  Inside a loop body this would
-       have been closed back to the step; anywhere else there is nothing it
-       could sensibly mean. *)
-    | _, part, [] when is_gap part ->
-        complain ctx ~node:(node_of n)
-          "both ways out of this node have to go somewhere";
-        stmts
-    | _, _, [ s ] -> stmts @ go s
-    | _, _, _ -> stmts
-  in
-  do_tree [] g.entry
-
-(* A branch to the end of the block you are already at the end of does
-   nothing, and both arms of an if that joins immediately after it end that
-   way.  Dropping those is what makes a plain if/else read like one. *)
-let rec settle l = function
-  | [ Br m ] when m = l -> []
-  | [ If (c, t, e) ] -> [ If (c, settle l t, settle l e) ]
-  | s :: rest -> s :: settle l rest
-  | [] -> []
-
-let rec tidy_block b = List.map tidy b
-
-and tidy = function
-  | Block (l, body) -> Block (l, settle l (tidy_block body))
-  | Loop (l, body) -> Loop (l, tidy_block body)
-  | If (c, t, e) -> If (c, tidy_block t, tidy_block e)
-  | s -> s
-
-(* Which slots a slot's starting value reads.  The walk stops at one, because
-   that is where the backward walk stops when the value is built for real. *)
-let start_reads ctx (n : Graph.node) =
-  let seen = Hashtbl.create 8 in
-  let found = ref [] in
-  let rec walk node port =
-    match Graph.into ctx.g ~node ~port with
-    | None -> ()
-    | Some e ->
-        let src = Graph.find ctx.g e.src in
-        if holds_state src then found := src.id :: !found
-        else if not (Hashtbl.mem seen src.id) then (
-          Hashtbl.replace seen src.id ();
-          List.iter
-            (fun (edge : Graph.edge) ->
-              if edge.dst = src.id then walk src.id edge.dst_port)
-            ctx.g.edges)
-  in
-  walk n.id (start_port n);
-  !found
-
-let ordered_slots ctx counters =
-  let done_ = Hashtbl.create 16 and busy = Hashtbl.create 16 in
-  let out = ref [] in
-  let by_id = List.map (fun (n : Graph.node) -> (n.id, n)) counters in
-  let rec visit (n : Graph.node) =
-    if not (Hashtbl.mem done_ n.id) then
-      if Hashtbl.mem busy n.id then
-        complain ctx ~node:n.id
-          "these starting values depend on each other"
-      else (
-        Hashtbl.replace busy n.id ();
-        List.iter
-          (fun id ->
-            match List.assoc_opt id by_id with
-            | Some m when m.Graph.id <> n.id -> visit m
-            | _ -> ())
-          (start_reads ctx n);
-        Hashtbl.remove busy n.id;
-        Hashtbl.replace done_ n.id ();
-        out := n :: !out)
-  in
-  List.iter visit counters;
-  List.rev !out
+let feedbacks (g : Graph.t) = Graph.nodes_of_kind g "feedback"
 
 (* --------------------------------------------------------------- entry *)
 
@@ -763,14 +582,16 @@ let once (g : Graph.t) slot_ty =
   let ctx =
     {
       g;
-      slots = Hashtbl.create 16;
+      gslots = Hashtbl.create 16;
+      globals = [];
       used = Hashtbl.create 16;
       fanout;
       wants_time = false;
+      inputs = [];
+      strings = [];
       vars = [];
       errs = [];
       active = Hashtbl.create 16;
-      entered = Hashtbl.create 16;
       shared = Hashtbl.create 8;
       prelude = [];
       temps = 0;
@@ -779,117 +600,113 @@ let once (g : Graph.t) slot_ty =
       too_narrow = false;
     }
   in
-  let start =
-    match Graph.nodes_of_kind g "start" with
-    | [ s ] -> Some s
-    | [] ->
-        complain ctx "the graph has no start node";
-        None
-    | _ :: rest ->
-        List.iter
-          (fun (n : Graph.node) ->
-            complain ctx ~node:n.id "there can only be one start node")
-          rest;
-        None
-  in
-  let body =
-    match start with
-    | None -> []
-    | Some start ->
-        ctx.vars <- [];
-        (* Every slot is set up before anything runs, whichever loop it later
-           turns out to sit inside.  One starting value may read another, so
-           they go in an order that respects that rather than in whatever
-           order the file happens to list them: moving a node in the editor
-           must not change what a program means. *)
-        let slots = ordered_slots ctx (List.filter holds_state g.nodes) in
-        let starts =
-          List.concat_map
-            (fun n ->
-              let i = state_slot ctx n in
-              let want = assumed ctx (slot_key n) in
-              let pre, v = group ctx (fun () -> number ctx n (start_port n)) in
-              ignore (note_type ctx n v);
-              pre @ [ Assign (i, coerce ctx v want) ])
-            slots
-        in
-        (match Graph.out_of g ~node:start.id ~port:"next" with
-        | None -> starts
-        | Some e ->
-            let succs = Hashtbl.create 32 in
-            let rec walk v =
-              if not (Hashtbl.mem succs v) then (
-                let n = Graph.find g (node_of v) in
-                if not (List.mem n.kind exec_kinds) then
-                  complain ctx ~node:(node_of v)
-                    "the %s node cannot be part of the flow" n.kind;
-                let ss = exec_succs ctx v in
-                Hashtbl.replace succs v ss;
-                List.iter walk ss)
-            in
-            let entry = vertex_for ctx ~dst:e.dst ~port:e.dst_port in
-            walk entry;
-            (* A for loop's body returns to it when the chain runs out, the
-               way a Blueprint macro does: whatever the body reaches that
-               leads nowhere goes back to the step. *)
-            List.iter
-              (fun (l : Graph.node) ->
-                match Graph.out_of g ~node:l.id ~port:"body" with
-                | None -> ()
-                | Some b ->
-                    let seen = Hashtbl.create 16 in
-                    let rec close v =
-                      (* Coming back round to the loop itself is the end of
-                         the walk, not another leaf to tie down. *)
-                      if node_of v <> l.id && not (Hashtbl.mem seen v) then (
-                        Hashtbl.replace seen v ();
-                        let n = Graph.find g (node_of v) in
-                        match Hashtbl.find_opt succs v with
-                        | Some [] when n.kind <> "end" ->
-                            Hashtbl.replace succs v [ l.id ^ "#step" ]
-                        | Some [ _; after ] when n.kind = "forloop" ->
-                            (* Another loop's body is that loop's own affair;
-                               only what comes after it belongs to this one. *)
-                            close after
-                        | Some ss -> List.iter close ss
-                        | None -> ())
-                    in
-                    close (vertex_for ctx ~dst:b.dst ~port:b.dst_port);
-                    if not (Hashtbl.mem succs (l.id ^ "#step")) then
-                      Hashtbl.replace succs (l.id ^ "#step") [ l.id ])
-              (Graph.nodes_of_kind g "forloop");
-            let cfg = Cfg.build ~entry ~succs in
-            (match Cfg.irreducible cfg with
-            | [] -> ()
-            | (u, h) :: _ ->
-                complain ctx ~node:h
-                  "this loop has two ways in, which cannot be written with \
-                   wasm's blocks; route both through one condition (the wire \
-                   from %s closes it)"
-                  u);
-            starts @ tidy_block (structure ctx cfg))
-  in
-  (* Asking the host for the time is the first thing the module does, and only
-     if something reads it. *)
-  let body =
-    if ctx.wants_time then
-      Assign (Hashtbl.find ctx.slots "\001time", Now) :: body
-    else body
-  in
-  (ctx, { vars = ctx.vars; body })
+  (* Before anything is lowered, so that the panel asks for every Input in the
+     graph rather than only the ones something happens to read, and so that a
+     feedback has its slot even if this cook does not read it. *)
+  List.iter
+    (fun n -> ignore (input_slot ctx n))
+    (List.sort
+       (fun (a : Graph.node) b ->
+         compare
+           (Graph.string_field a "name" ~default:"")
+           (Graph.string_field b "name" ~default:""))
+       (Graph.nodes_of_kind g "input"));
+  List.iter (fun n -> ignore (state_slot ctx n)) (feedbacks g);
 
-let func_of_graph (g : Graph.t) : func * (string * string) list =
-  let slot_ty = Hashtbl.create 16 in
-  (* Every pass that is thrown away has loosened at least one counter, and a
-     counter only loosens once, so this settles well inside the bound. *)
-  let budget =
-    List.length (List.filter (fun n -> holds_state n || n.Graph.kind = "forloop") g.nodes)
-    + 2
+  (* The whole cook is one group: a node is worked out once and every sink
+     reads the same answer, which is what makes a Random node one draw a cook
+     rather than one draw a reader.  The hoisted values come out first, which
+     is sound because nothing in a cook writes what a cook reads -- the
+     feedbacks take their new values at the end. *)
+  (* A kind the catalogue has never heard of is a graph saved by an older
+     Ferret or a hand-written one with a typo.  Either way it is better said
+     than passed over: a node nothing reads would otherwise vanish quietly. *)
+  List.iter
+    (fun (n : Graph.node) ->
+      if Spec.find n.kind = None then
+        complain ctx ~node:n.id "there is no %s node in this language" n.kind)
+    g.nodes;
+  if sinks g = [] && feedbacks g = [] then
+    complain ctx "the graph has nothing to work out: there is no Out, Log or Say";
+  let out = ref None in
+  let pre, (sunk, held) =
+    group ctx (fun () ->
+        let sunk =
+          List.concat_map
+            (fun (n : Graph.node) ->
+              match n.kind with
+              | "log" -> [ Log (reported ctx n (number ctx n "value")) ]
+              | "say" -> [ Say (text_of ctx n "text") ]
+              | _ -> (
+                  match !out with
+                  | Some _ ->
+                      complain ctx ~node:n.id "there can only be one out node";
+                      []
+                  | None ->
+                      (* Worked out in its place among the sinks, but handed
+                         back at the very end, after the feedbacks have moved
+                         on -- so it waits in a local. *)
+                      let v = reported ctx n (number ctx n "value") in
+                      let i = local ctx ~display:"result" ~ty:VFloat in
+                      out := Some i;
+                      [ Assign (i, v) ]))
+            (sinks g)
+        in
+        (* Every feedback takes its new value at the end of the cook, and they
+           all take it at once: the new values go into locals first, so that
+           one feedback reading another reads what it held rather than what it
+           is about to hold. *)
+        let held =
+          List.map
+            (fun (n : Graph.node) ->
+              let want = holds ctx n in
+              let v =
+                (* A feedback that says it holds a yes-or-no is taken at its
+                   word; one that holds a number has its width worked out. *)
+                if want = VBool then (condition ctx n "value", VBool)
+                else note_type ctx n (number ctx n "value")
+              in
+              let e, ty = watched_as ctx n "value" v in
+              let tmp = local ctx ~display:(display_of n ^ "_next") ~ty:want in
+              (Assign (tmp, coerce ctx (e, ty) want), (n, tmp)))
+            (List.filter
+               (fun (n : Graph.node) ->
+                 Graph.into g ~node:n.id ~port:"value" <> None)
+               (feedbacks g))
+        in
+        (sunk, held))
   in
+  let work = List.map fst held in
+  let commit =
+    List.map (fun (_, (n, tmp)) -> Store (state_slot ctx n, Local tmp)) held
+  in
+  let back =
+    match !out with Some i -> Ret (Local i) | None -> Ret (Num 0.)
+  in
+  let body = pre @ sunk @ work @ commit @ [ back ] in
+  ( ctx,
+    {
+      globals = ctx.globals;
+      strings = ctx.strings;
+      funcs = [ { name = "main"; vars = ctx.vars; body } ];
+    } )
+
+type built = {
+  m : modul;
+  watches : (string * string) list;
+  (* export name, label, default -- what the Run panel asks for *)
+  inputs : (string * string * float) list;
+}
+
+let module_of_graph (g : Graph.t) : built =
+  let slot_ty = Hashtbl.create 16 in
+  (* Every pass that is thrown away has loosened at least one feedback, and a
+     feedback only loosens once, so this settles well inside the bound. *)
+  let budget = List.length (Graph.nodes_of_kind g "feedback") + 2 in
   let rec attempt left =
     let ctx, f = once g slot_ty in
     if ctx.too_narrow && left > 0 then attempt (left - 1) else (ctx, f)
   in
   let ctx, f = attempt budget in
   (match ctx.errs with [] -> () | errs -> raise (Graph.Errors (List.rev errs)));
-  (f, List.rev ctx.watches)
+  { m = f; watches = List.rev ctx.watches; inputs = ctx.inputs }

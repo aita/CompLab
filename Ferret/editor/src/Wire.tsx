@@ -7,7 +7,8 @@ import {
 
 export interface WireData {
   color: string;
-  exec: boolean;
+  /** Feeds a Feedback: what goes along it is not read until the next cook. */
+  later: boolean;
   /** Dimmed because it does not touch the selected node. */
   faded: boolean;
   [key: string]: unknown;
@@ -27,10 +28,10 @@ interface Ends {
   targetPosition: Position;
 }
 
-// A wire that runs backwards closes a loop, and when the nodes it joins are
-// side by side it would come back along the very line they sit on -- a
-// straight stroke through the row, which is the one shape a loop must not
-// look like.  Those take a route of their own: out to the right, up and over
+// A wire that runs backwards feeds something to the left of what made it,
+// and when the nodes it joins are side by side it would come back along the
+// very line they sit on -- a straight stroke through the row, which is the
+// one shape a wire that doubles back must not have.  Those take a route of their own: out to the right, up and over
 // at a height of their own, then down into the target from the left.  Both
 // ends still leave and arrive horizontally, so it reads as one stroke.
 function route(e: Ends): string {
@@ -71,10 +72,9 @@ export default function Wire({
   targetX,
   targetY,
   targetPosition,
-  markerEnd,
   data,
 }: EdgeProps) {
-  const { color, exec, faded } = (data ?? {}) as WireData;
+  const { color, later, faded } = (data ?? {}) as WireData;
   const path = route({
     sourceX,
     sourceY,
@@ -85,12 +85,16 @@ export default function Wire({
   });
   return (
     <g className={"wire" + (faded ? " is-faded" : "")}>
-      <path className="wire-casing" d={path} strokeWidth={exec ? 8 : 6} />
+      <path className="wire-casing" d={path} strokeWidth={6} />
       <BaseEdge
         id={id}
         path={path}
-        markerEnd={markerEnd}
-        style={{ stroke: color, strokeWidth: exec ? 2.5 : 2 }}
+        style={{
+          stroke: color,
+          strokeWidth: 2,
+          // The one wire in a graph that crosses from this cook to the next.
+          strokeDasharray: later ? "7 5" : undefined,
+        }}
       />
     </g>
   );

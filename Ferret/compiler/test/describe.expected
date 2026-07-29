@@ -1,110 +1,126 @@
-start     { "params": [ { "name": "n" }, { "name": "size" } ] }
-  Start [▶]
-  in   
-  out  time:started at(num)
+feedback  { "name": "count" }
+  count [↺]
+  in   value:next(num)
+  out  out:held(num)
+  form name:text, holds:number|flag, start:number
 
-start     { "params": [] }
-  Start [▶]
-  in   
-  out  time:started at(num)
+feedback  { "name": "lit", "holds": "flag" }
+  lit [↺] badge yes/no
+  in   value:next(bool)
+  out  out:held(bool)
+  form name:text, holds:number|flag, start:no|yes
 
-counter   { "name": "total" }
-  total [i]
-  in   from:starts at(num), by:moves by(num)
-  out  value:value(num)
-
-counter   {}
-  Counter [i]
-  in   from:starts at(num), by:moves by(num)
-  out  value:value(num)
-
-forloop   { "name": "row" }
-  For row [1..n]
-  in   first:from(num), last:to(num)
-  out  index:index(num)
-
-state     { "name": "run" }
-  run [S]
-  in   initial:starts at(num), value:stores(num)
-  out  value:value(num)
-
-state     {}
-  State [S]
-  in   initial:starts at(num), value:stores(num)
-  out  value:value(num)
+feedback  {}
+  Feedback [↺]
+  in   value:next(num)
+  out  out:held(num)
+  form name:text, holds:number|flag, start:number
 
 binop     { "op": "mul" }
   Multiply [×]
   in   a:A(num), b:B(num)
   out  out:result(num)
+  form op:add|sub|mul|div|mod|min|max
 
 unop      { "op": "sqrt" }
   Square root [sqrt]
   in   a:A(num)
   out  out:result(num)
+  form op:neg|abs|sqrt|floor|ceil|round
 
 compare   { "op": "ge" }
   At least [≥]
   in   a:A(num), b:B(num)
   out  out:result(bool)
+  form op:lt|le|gt|ge|eq|ne
 
 logic     { "op": "not" }
   Not [not]
   in   a:A(bool)
   out  out:result(bool)
+  form op:and|or|not
 
 logic     { "op": "or" }
   Or [or]
   in   a:A(bool), b:B(bool)
   out  out:result(bool)
+  form op:and|or|not
 
 binop     { "op": "wat" }
   Arithmetic [+]
   in   a:A(num), b:B(num)
   out  out:result(num)
+  form op:add|sub|mul|div|mod|min|max
 
 const     { "value": 12 }
   Constant [#] badge 12
   in   
   out  out:value(num)
+  form value:number
 
 const     { "value": 0.25 }
   Constant [#] badge 0.25
   in   
   out  out:value(num)
+  form value:number
 
 expr      { "text": "x * x + y * y" }
   Expression [()]
   in   x:x(num), y:y(num)
   out  out:result(num)
+  form text:text
 
 expr      { "text": "min(w, 2) + sqrt(w)" }
   Expression [()]
   in   w:w(num)
   out  out:result(num)
+  form text:text
 
 expr      { "text": "a > b && a < 10" }
   Expression [()]
   in   a:a(num), b:b(num)
   out  out:result(bool)
+  form text:text
 
 expr      { "text": "!(a == b)" }
   Expression [()]
   in   a:a(num), b:b(num)
   out  out:result(bool)
+  form text:text
 
 expr      { "text": "a * b + " }
   Expression [()]
   in   a:a(num), b:b(num)
   out  out:result(num)
+  form text:text
 
 expr      { "text": "" }
   Expression [()]
   in   
   out  out:result(num)
+  form text:text
+
+input     { "name": "step", "value": 3 }
+  step [in]
+  in   
+  out  value:value(num)
+  form name:text, value:number
+
+say       {}
+  Say [say]
+  in   text:text(text)
+  out  
+  form 
+
+out       {}
+  Out [■]
+  in   value:value(num)
+  out  
+  form 
 
 nonesuch  {}
   nonesuch [?]
   in   
   out  
+  form 
 

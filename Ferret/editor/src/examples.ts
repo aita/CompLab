@@ -1,10 +1,10 @@
 // The editor loads the very same files ferretc takes on the command line.
-import sum from "../../examples/sum.json";
-import collatz from "../../examples/collatz.json";
-import montecarlo from "../../examples/montecarlo.json";
-import triangle from "../../examples/triangle.json";
-import rowsums from "../../examples/rowsums.json";
-import echo from "../../examples/echo.json";
+import count from "../../examples/count.json";
+import wave from "../../examples/wave.json";
+import bounce from "../../examples/bounce.json";
+import blink from "../../examples/blink.json";
+import walk from "../../examples/walk.json";
+import pi from "../../examples/pi.json";
 
 export interface Example {
   key: string;
@@ -12,41 +12,61 @@ export interface Example {
   graph: { name?: string; nodes: unknown[]; edges: unknown[] };
 }
 
-/** What File > New starts you with: the two ends of a flow, already wired. */
+/** What File > New starts you with: a feedback counting, and a way out. */
 export function blank(): Example["graph"] & { name: string } {
   return {
     name: "Untitled",
     nodes: [
       {
-        id: "start",
-        type: "start",
+        id: "held",
+        type: "feedback",
         position: { x: 0, y: 0 },
-        data: {},
+        data: { name: "count", holds: "number", start: 0 },
       },
       {
-        id: "end",
-        type: "end",
-        position: { x: 400, y: 0 },
-        data: { values: { value: 0 } },
+        id: "plus",
+        type: "binop",
+        position: { x: 380, y: 200 },
+        data: { op: "add", values: { b: 1 } },
+      },
+      {
+        id: "out",
+        type: "out",
+        position: { x: 760, y: 0 },
+        data: {},
       },
     ],
     edges: [
       {
-        id: "start-end",
-        source: "start",
-        sourceHandle: "next",
-        target: "end",
-        targetHandle: "in",
+        id: "held-plus",
+        source: "held",
+        sourceHandle: "out",
+        target: "plus",
+        targetHandle: "a",
+      },
+      {
+        id: "plus-held",
+        source: "plus",
+        sourceHandle: "out",
+        target: "held",
+        targetHandle: "value",
+      },
+      {
+        id: "held-out",
+        source: "held",
+        sourceHandle: "out",
+        target: "out",
+        targetHandle: "value",
       },
     ],
   };
 }
 
 export const EXAMPLES: Example[] = [
-  { key: "sum", name: sum.name, graph: sum },
-  { key: "collatz", name: collatz.name, graph: collatz },
-  { key: "montecarlo", name: montecarlo.name, graph: montecarlo },
-  { key: "triangle", name: triangle.name, graph: triangle },
-  { key: "rowsums", name: rowsums.name, graph: rowsums },
-  { key: "echo", name: echo.name, graph: echo },
+  { key: "count", name: count.name, graph: count },
+  { key: "wave", name: wave.name, graph: wave },
+  { key: "bounce", name: bounce.name, graph: bounce },
+  { key: "blink", name: blink.name, graph: blink },
+  { key: "walk", name: walk.name, graph: walk },
+  { key: "pi", name: pi.name, graph: pi },
 ];

@@ -1,4 +1,6 @@
-import { SPEC_BY_TYPE, describe, type NodeData } from "./spec";
+import { useContext } from "react";
+import { SPEC_BY_TYPE, describe, portValue, type NodeData } from "./spec";
+import { ConnectedContext, portKey } from "./errors";
 import type { FerretNode } from "./FlowNode";
 
 interface Props {
@@ -14,13 +16,14 @@ export default function Inspector({
   onChange,
   onDelete,
 }: Props) {
+  const connected = useContext(ConnectedContext);
   if (!node) {
     return (
       <div className="panel-empty">
         Pick a node to configure it here.
         <br />
-        The start node's inputs and a loop's state slots are edited from this
-        panel; everything else can be set on the card itself.
+        What a Feedback holds, and what an Input asks for, are set from this
+        panel; a number wired to nothing can be typed into the card itself.
       </div>
     );
   }
@@ -28,6 +31,19 @@ export default function Inspector({
   const data = node.data;
   const shown = describe(node.type!, data);
   const set = (patch: NodeData) => onChange(node.id, patch);
+
+  // An input with nothing wired into it is a number to give, and the card's
+  // own box is small and easy to miss -- an Expression's inputs are named by
+  // whatever its text left free, so this is where you go looking for them.
+  const open = shown.inputs.filter(
+    (p) => p.kind === "num" && !connected.has(portKey(node.id, p.id)),
+  );
+  const setPortValue = (port: string, text: string) => {
+    const values = { ...((data.values as Record<string, number>) ?? {}) };
+    if (text === "") delete values[port];
+    else values[port] = Number(text);
+    set({ values });
+  };
 
   return (
     <div className="inspector">
@@ -53,47 +69,7 @@ export default function Inspector({
         </ul>
       )}
 
-      {spec.fields.map((field) => {
-        if (field.kind === "names") {
-          const items = (data[field.key] as { name: string }[] | undefined) ?? [];
-          return (
-            <div className="field" key={field.key}>
-              <label>{field.label}</label>
-              {items.map((item, i) => (
-                <div className="param-row" key={i}>
-                  <input
-                    value={item.name}
-                    onChange={(e) =>
-                      set({
-                        [field.key]: items.map((q, j) =>
-                          j === i ? { name: e.target.value } : q,
-                        ),
-                      })
-                    }
-                  />
-                  <button
-                    onClick={() =>
-                      set({ [field.key]: items.filter((_, j) => j !== i) })
-                    }
-                    title={`Remove this ${field.itemLabel}`}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-              <button
-                className="ghost"
-                onClick={() =>
-                  set({
-                    [field.key]: [...items, { name: `x${items.length}` }],
-                  })
-                }
-              >
-                + Add {field.itemLabel}
-              </button>
-            </div>
-          );
-        }
+      {shown.fields.map((field) => {
         if (field.kind === "select") {
           return (
             <div className="field" key={field.key}>
@@ -135,6 +111,24 @@ export default function Inspector({
           </div>
         );
       })}
+
+      {open.length > 0 && (
+        <div className="field">
+          <label>Inputs</label>
+          {open.map((p) => (
+            <div className="param-row" key={p.id}>
+              <span className="input-name">{p.label}</span>
+              <input
+                type="number"
+                step="any"
+                placeholder="—"
+                value={portValue(data, p.id) ?? ""}
+                onChange={(e) => setPortValue(p.id, e.target.value)}
+              />
+            </div>
+          ))}
+        </div>
+      )}
 
       {!spec.unique && (
         <button className="danger" onClick={() => onDelete(node.id)}>

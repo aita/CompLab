@@ -1,19 +1,11 @@
 {
+  "name": "random",
   "nodes": [
     {
-      "id": "start",
-      "type": "start",
-      "position": {
-        "x": 0,
-        "y": 0
-      },
-      "data": {}
-    },
-    {
-      "id": "rnd",
+      "id": "r",
       "type": "random",
       "position": {
-        "x": 200,
+        "x": 0,
         "y": 0
       },
       "data": {
@@ -24,22 +16,11 @@
       }
     },
     {
-      "id": "twice",
-      "type": "binop",
-      "position": {
-        "x": 400,
-        "y": 0
-      },
-      "data": {
-        "op": "add"
-      }
-    },
-    {
-      "id": "span",
+      "id": "t",
       "type": "random",
       "position": {
-        "x": 200,
-        "y": 200
+        "x": 0,
+        "y": 240
       },
       "data": {
         "values": {
@@ -49,7 +30,29 @@
       }
     },
     {
-      "id": "total",
+      "id": "sum",
+      "type": "binop",
+      "position": {
+        "x": 300,
+        "y": 0
+      },
+      "data": {
+        "op": "add"
+      }
+    },
+    {
+      "id": "sq",
+      "type": "expr",
+      "position": {
+        "x": 300,
+        "y": 240
+      },
+      "data": {
+        "text": "t * t"
+      }
+    },
+    {
+      "id": "all",
       "type": "binop",
       "position": {
         "x": 600,
@@ -60,10 +63,10 @@
       }
     },
     {
-      "id": "done",
-      "type": "end",
+      "id": "out",
+      "type": "out",
       "position": {
-        "x": 800,
+        "x": 900,
         "y": 0
       },
       "data": {}
@@ -71,45 +74,45 @@
   ],
   "edges": [
     {
-      "id": "x",
-      "source": "start",
-      "sourceHandle": "next",
-      "target": "done",
-      "targetHandle": "in"
-    },
-    {
       "id": "e1",
-      "source": "rnd",
+      "source": "r",
       "sourceHandle": "out",
-      "target": "twice",
+      "target": "sum",
       "targetHandle": "a"
     },
     {
       "id": "e2",
-      "source": "rnd",
+      "source": "r",
       "sourceHandle": "out",
-      "target": "twice",
+      "target": "sum",
       "targetHandle": "b"
     },
     {
       "id": "e3",
-      "source": "twice",
+      "source": "sum",
       "sourceHandle": "out",
-      "target": "total",
+      "target": "all",
       "targetHandle": "a"
     },
     {
       "id": "e4",
-      "source": "span",
+      "source": "t",
       "sourceHandle": "out",
-      "target": "total",
-      "targetHandle": "b"
+      "target": "sq",
+      "targetHandle": "t"
     },
     {
       "id": "e5",
-      "source": "total",
+      "source": "sq",
       "sourceHandle": "out",
-      "target": "done",
+      "target": "all",
+      "targetHandle": "b"
+    },
+    {
+      "id": "e6",
+      "source": "all",
+      "sourceHandle": "out",
+      "target": "out",
       "targetHandle": "value"
     }
   ]

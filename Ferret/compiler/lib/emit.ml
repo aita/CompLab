@@ -1,10 +1,10 @@
 (* IR -> a wasm module.
 
-   The module imports [env.log], so a flow can report intermediate values,
-   [env.random], and [env.watch], which is what a breakpoint compiles to; it
-   exports [main] taking the start node's inputs as f64 and returning an f64.
-   Locals are laid out as parameters, then variables, then whatever scratch
-   the expressions need.
+   The module imports [env.log], so a graph can report intermediate values,
+   [env.random], [env.now], [env.say], and [env.watch], which is what a
+   breakpoint compiles to; it exports [main], which takes nothing and returns
+   an f64: one cook of the graph.  Locals are laid out as the ones the IR
+   named, then whatever scratch the expressions need.
 
    Instruction selection follows the types the lowering worked out: a whole
    number is an i64, everything else an f64.  Both sides of an operator always
@@ -21,7 +21,7 @@ let is_atom = function Num _ | Int _ | Local _ -> true | _ -> false
    parks its argument, and a breakpoint on a whole number parks it while the
    host is handed a float copy. *)
 let rec scratch_of_expr ty = function
-  | Int _ | Num _ | Local _ | Now | Wait -> []
+  | Int _ | Num _ | Local _ | Global _ | Now -> []
   | Bin (Mod, l, r) ->
       (if ty l = VFloat then [ VFloat; VFloat ] else [])
       @ scratch_of_expr ty l @ scratch_of_expr ty r
@@ -40,42 +40,25 @@ let rec scratch_of_expr ty = function
 let rec scratch_of_block ty b = List.concat_map (scratch_of_stmt ty) b
 
 and scratch_of_stmt ty = function
-  | Assign (_, e) | Log e | Ret e | Drop e -> scratch_of_expr ty e
-  | If (c, t, e) ->
-      scratch_of_expr ty c @ scratch_of_block ty t @ scratch_of_block ty e
-  | Block (_, body) | Loop (_, body) -> scratch_of_block ty body
-  | Br _ -> []
+  | Assign (_, e) | Store (_, e) | Log e | Ret e | Drop e -> scratch_of_expr ty e
+  | Say _ -> []
 
 (* The imports come first, in the order they are declared. *)
 let log_index = 0
 let random_index = 1
 let watch_index = 2
 let now_index = 3
-let wait_index = 4
+let say_index = 4
 
 (* The only function the module defines, so it comes after the imports. *)
 let main_index = 5
 
 type env = {
   ty : expr -> vtype;
+  (* where each literal sits in the module's memory: offset and length *)
+  strings : (int * int) array;
   mutable scratch_next : int;  (* the scratch locals are taken in order *)
-  (* innermost last; an [if] counts as a level even though nothing lands on
-     it, which is why the depth is worked out here rather than by hand *)
-  mutable labels : label option list;
 }
-
-let depth_of env l =
-  let rec find n = function
-    | [] -> invalid_arg "Emit: branch to a label that is not open"
-    | Some x :: _ when x = l -> n
-    | _ :: rest -> find (n + 1) rest
-  in
-  find 0 env.labels
-
-let inside env l f =
-  env.labels <- l :: env.labels;
-  f ();
-  env.labels <- List.tl env.labels
 
 let take_scratch env n =
   let i = env.scratch_next in
@@ -112,6 +95,7 @@ let rec expr env b e =
   | Int n -> Wasm.i64_const b n
   | Num x -> Wasm.f64_const b x
   | Local i -> Wasm.local_get b i
+  | Global i -> Wasm.global_get b i
   | Widen e ->
       expr env b e;
       Wasm.op b Wasm.f64_convert_i64_s
@@ -179,7 +163,6 @@ let rec expr env b e =
       expr env b c;
       Wasm.op b Wasm.op_select
   | Now -> Wasm.call b now_index
-  | Wait -> Wasm.call b wait_index
   | Rand (lo, hi) ->
       (* lo + random() * (hi - lo).  Only lo is read twice, so only lo has to
          be parked, and not even that when it is already a local or a
@@ -231,26 +214,23 @@ and stmt env b = function
   | Assign (i, e) ->
       expr env b e;
       Wasm.local_set b i
+  | Store (i, e) ->
+      expr env b e;
+      Wasm.global_set b i
   | Drop e ->
       expr env b e;
       Wasm.op b Wasm.op_drop
   | Log e ->
       expr env b e;
       Wasm.call b log_index
+  | Say i ->
+      let off, len = env.strings.(i) in
+      Wasm.i32_const b off;
+      Wasm.i32_const b len;
+      Wasm.call b say_index
   | Ret e ->
       expr env b e;
       Wasm.op b Wasm.op_return
-  | If (c, t, e) ->
-      expr env b c;
-      inside env None (fun () ->
-          Wasm.if_else b
-            ~then_:(fun () -> block env b t)
-            ~else_:(if e = [] then None else Some (fun () -> block env b e)))
-  | Block (l, body) ->
-      inside env (Some l) (fun () -> Wasm.block b (fun () -> block env b body))
-  | Loop (l, body) ->
-      inside env (Some l) (fun () -> Wasm.loop b (fun () -> block env b body))
-  | Br l -> Wasm.br b (depth_of env l)
 
 let wasm_type = function
   | VInt -> Wasm.I64
@@ -270,22 +250,23 @@ let runs types =
 
 let local_types (f : func) i = snd (List.nth f.vars i)
 
-let module_of_func (f : func) : string =
-  let ty = Ir.type_of (local_types f) in
-  let scratch = scratch_of_block ty f.body in
-  let env =
-    {
-      ty;
-      scratch_next = List.length f.vars;
-      labels = [];
-    }
+(* One function, called once per cook.  What a feedback holds has to outlive
+   the call, so a graph's state is in globals rather than in a function's
+   locals -- which is also what lets the host read all of it. *)
+let module_of (m : modul) : string =
+  let globals i = let _, t, _ = List.nth m.globals i in t in
+  (* The literals go end to end from offset 0 and are never written to. *)
+  let data = String.concat "" m.strings in
+  let layout =
+    let at = ref 0 in
+    Array.of_list
+      (List.map
+         (fun s ->
+           let here = (!at, String.length s) in
+           at := !at + String.length s;
+           here)
+         m.strings)
   in
-  let code = Wasm.create () in
-  block env code f.body;
-  (* A flow that never reaches an end node still has to leave a result. *)
-  Wasm.f64_const code 0.;
-  let locals = runs (List.map snd f.vars @ scratch) in
-  let main_type = { Wasm.args = []; result = Some Wasm.F64 } in
   let log_type = { Wasm.args = [ Wasm.F64 ]; result = None } in
   let random_type = { Wasm.args = []; result = Some Wasm.F64 } in
   (* [now] has the same shape as [random], and is asked the same way: the host
@@ -293,16 +274,51 @@ let module_of_func (f : func) : string =
   let watch_type =
     { Wasm.args = [ Wasm.I32; Wasm.F64 ]; result = Some Wasm.F64 }
   in
+  (* [say] is handed a slice of the module's memory, which is exported so the
+     host can read the bytes back out of it. *)
+  let say_type = { Wasm.args = [ Wasm.I32; Wasm.I32 ]; result = None } in
+  let cook_type = { Wasm.args = []; result = Some Wasm.F64 } in
+  let imports =
+    [
+      { Wasm.imp_module = "env"; imp_field = "log"; imp_type = 0 };
+      { Wasm.imp_module = "env"; imp_field = "random"; imp_type = 1 };
+      { Wasm.imp_module = "env"; imp_field = "watch"; imp_type = 2 };
+      { Wasm.imp_module = "env"; imp_field = "now"; imp_type = 1 };
+      { Wasm.imp_module = "env"; imp_field = "say"; imp_type = 4 };
+    ]
+  in
+  let first = List.length imports in
+  let body_of (f : func) =
+    let locals i = snd (List.nth f.vars i) in
+    let ty = Ir.type_of ~locals ~globals in
+    let scratch = scratch_of_block ty f.body in
+    let env =
+      {
+        ty;
+        strings = layout;
+        scratch_next = List.length f.vars;
+      }
+    in
+    let code = Wasm.create () in
+    block env code f.body;
+    (* A flow that never reaches an end node still has to leave a result. *)
+    Wasm.f64_const code 0.;
+    {
+      Wasm.body_locals = runs (List.map snd f.vars @ scratch);
+      body_code = code;
+    }
+  in
   Wasm.encode
-    ~types:[ log_type; random_type; watch_type; main_type ]
-    ~imports:
-      [
-        { Wasm.imp_module = "env"; imp_field = "log"; imp_type = 0 };
-        { Wasm.imp_module = "env"; imp_field = "random"; imp_type = 1 };
-        { Wasm.imp_module = "env"; imp_field = "watch"; imp_type = 2 };
-        { Wasm.imp_module = "env"; imp_field = "now"; imp_type = 1 };
-        { Wasm.imp_module = "env"; imp_field = "wait"; imp_type = 1 };
-      ]
-    ~funcs:[ 3 ]
-    ~exports:[ ("main", main_index) ]
-    ~bodies:[ { Wasm.body_locals = locals; body_code = code } ]
+    ~types:[ log_type; random_type; watch_type; cook_type; say_type ]
+    ~imports
+    ~funcs:(List.map (fun _ -> 3) m.funcs)
+    ~globals:(List.map (fun (_, t, init) -> (wasm_type t, init)) m.globals)
+    ~data
+    ~exports:
+      (List.mapi (fun i (f : func) -> (f.name, Wasm.Func (first + i))) m.funcs
+      @ List.mapi
+          (fun i (v, _, _) -> (Ir.global_export v, Wasm.Global i))
+          m.globals
+      (* The host reads the text out of the memory it was handed a slice of. *)
+      @ (if m.strings = [] then [] else [ ("memory", Wasm.Memory) ]))
+    ~bodies:(List.map body_of m.funcs)

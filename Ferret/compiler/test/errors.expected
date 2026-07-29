@@ -1,26 +1,26 @@
-# no start node
-  the graph has no start node
+# a graph with nothing in it
+  the graph has nothing to work out: there is no Out, Log or Say
 
-# two start nodes
-  s2: there can only be one start node
+# two out nodes
+  b: there can only be one out node
 
 # an unconnected input
-  e: the value input is not connected
+  o: the value input is not connected
 
 # a number where a condition belongs
-  w: the cond input wants a true or false but is given a whole number
+  p: the cond input wants a true or false but is given a whole number
 
 # a condition where a number belongs
-  e: the value input wants a number but is given a true or false
+  sum: the a input wants a number but is given a true or false
 
-# a data cycle
+# a cycle with no feedback in it
   add: this node's value depends on itself
 
-# a condition with only one way out
-  w: both ways out of this node have to go somewhere
+# a flag fed a number
+  f: the value input wants a true or false but is given a whole number
 
-# a loop entered two ways
-  a: this loop has two ways in, which cannot be written with wasm's blocks; route both through one condition (the wire from c2 closes it)
+# a number said
+  n: a const node does not make text
 
 # an expression that does not parse
   f: * needs something before it
@@ -28,11 +28,10 @@
 # an expression naming something that is not there
   f: wobble is not one of the functions this understands
 
-# a for loop with nothing after it
-  l: both ways out of this node have to go somewhere
-
-# a counter carrying the old mode
-  c: a Counter adds its step to what it holds; a State node is the one that takes a value outright
+# a graph from the control-flow days
+  s: there is no start node in this language
+  e: there is no end node in this language
+  the graph has nothing to work out: there is no Out, Log or Say
 
 # not JSON at all
   the graph is not valid JSON: Line 1, bytes 12-13:

@@ -7,20 +7,13 @@ open Ir
 
 type env = {
   names : string array;  (* local index -> $name *)
+  strings : (int * int) array;  (* literal -> where it sits in memory *)
+  globals : string array;  (* global index -> $name *)
   ty : expr -> vtype;
   mutable scratch_next : int;
-  mutable labels : label option list;
   b : Buffer.t;
   mutable indent : int;
 }
-
-let depth_of env l =
-  let rec find n = function
-    | [] -> -1
-    | Some x :: _ when x = l -> n
-    | _ :: rest -> find (n + 1) rest
-  in
-  find 0 env.labels
 
 let line env fmt =
   Printf.ksprintf
@@ -32,6 +25,10 @@ let line env fmt =
 
 let local env i =
   if i < Array.length env.names then env.names.(i) else Printf.sprintf "$l%d" i
+
+let global env i =
+  if i < Array.length env.globals then env.globals.(i)
+  else Printf.sprintf "$g%d" i
 
 let take_scratch env n =
   let i = env.scratch_next in
@@ -78,6 +75,7 @@ let rec expr env e =
   | Int n -> line env "i64.const %d" n
   | Num x -> line env "f64.const %s" (num_literal x)
   | Local i -> line env "local.get %s" (local env i)
+  | Global i -> line env "global.get %s" (global env i)
   | Widen e ->
       expr env e;
       line env "f64.convert_i64_s"
@@ -141,7 +139,6 @@ let rec expr env e =
       expr env c;
       line env "select"
   | Now -> line env "call $now"
-  | Wait -> line env "call $wait"
   | Rand (lo, hi) ->
       let parked =
         if Emit.is_atom lo then None else Some (take_scratch env 1)
@@ -191,75 +188,111 @@ and stmt env = function
   | Assign (i, e) ->
       expr env e;
       line env "local.set %s" (local env i)
+  | Store (i, e) ->
+      expr env e;
+      line env "global.set %s" (global env i)
   | Drop e ->
       expr env e;
       line env "drop"
   | Log e ->
       expr env e;
       line env "call $log"
+  | Say i ->
+      let off, len = env.strings.(i) in
+      line env "i32.const %d" off;
+      line env "i32.const %d" len;
+      line env "call $say"
   | Ret e ->
       expr env e;
       line env "return"
-  | If (c, t, e) ->
-      expr env c;
-      line env "if";
-      env.labels <- None :: env.labels;
-      nested env (fun () -> block env t);
-      if e <> [] then (
-        line env "else";
-        nested env (fun () -> block env e));
-      env.labels <- List.tl env.labels;
-      line env "end"
-  | Block (l, body) ->
-      line env "block  ;; $%d" l;
-      env.labels <- Some l :: env.labels;
-      nested env (fun () -> block env body);
-      env.labels <- List.tl env.labels;
-      line env "end"
-  | Loop (l, body) ->
-      line env "loop  ;; $%d" l;
-      env.labels <- Some l :: env.labels;
-      nested env (fun () -> block env body);
-      env.labels <- List.tl env.labels;
-      line env "end"
-  | Br l -> line env "br %d  ;; $%d" (depth_of env l) l
+(* wat wants the bytes as an escaped string, and a graph's text can hold
+   anything the editor let someone type. *)
+let quoted s =
+  let b = Buffer.create (String.length s + 8) in
+  String.iter
+    (fun c ->
+      if c = '"' || c = '\\' then Printf.bprintf b "\\%c" c
+      else if c >= ' ' && c < '\127' then Buffer.add_char b c
+      else Printf.bprintf b "\\%02x" (Char.code c))
+    s;
+  Buffer.contents b
 
-let of_func (f : func) : string =
-  let ty = Ir.type_of (Emit.local_types f) in
-  let scratch =
-    List.mapi
-      (fun i t -> (Printf.sprintf "$t%d" i, t))
-      (Emit.scratch_of_block ty f.body)
-  in
-  let names =
+let of_module (m : modul) : string =
+  let globals = Array.of_list (List.map (fun (v, _, _) -> "$" ^ v) m.globals) in
+  let layout =
+    let at = ref 0 in
     Array.of_list
-      (List.map (fun n -> "$" ^ n) (List.map fst f.vars)
-      @ List.map fst scratch)
+      (List.map
+         (fun s ->
+           let here = (!at, String.length s) in
+           at := !at + String.length s;
+           here)
+         m.strings)
   in
-  let env =
+  let global_types i = let _, t, _ = List.nth m.globals i in t in
+  let b = Buffer.create 512 in
+  let top =
     {
-      names;
-      ty;
-      scratch_next = List.length f.vars;
-      labels = [];
-      b = Buffer.create 512;
+      names = [||];
+      strings = layout;
+      globals;
+      ty = (fun _ -> VFloat);
+      scratch_next = 0;
+      b;
       indent = 0;
     }
   in
-  line env "(module";
-  nested env (fun () ->
-      line env "(import \"env\" \"log\" (func $log (param f64)))";
-      line env "(import \"env\" \"random\" (func $random (result f64)))";
-      line env
+  line top "(module";
+  nested top (fun () ->
+      line top "(import \"env\" \"log\" (func $log (param f64)))";
+      line top "(import \"env\" \"random\" (func $random (result f64)))";
+      line top
         "(import \"env\" \"watch\" (func $watch (param i32) (param f64) (result f64)))";
-      line env "(import \"env\" \"now\" (func $now (result f64)))";
-      line env "(import \"env\" \"wait\" (func $wait (result f64)))";
-      line env "(func $main (export \"main\") (result f64)";
-      nested env (fun () ->
-          List.iter (fun (v, t) -> line env "(local $%s %s)" v (kind t)) f.vars;
-          List.iter (fun (n, t) -> line env "(local %s %s)" n (kind t)) scratch;
-          block env f.body;
-          line env "f64.const 0.0");
-      line env ")");
-  line env ")";
-  Buffer.contents env.b
+      line top "(import \"env\" \"now\" (func $now (result f64)))";
+      line top "(import \"env\" \"say\" (func $say (param i32) (param i32)))";
+      if m.strings <> [] then (
+        line top "(memory (export \"memory\") 1)";
+        line top "(data (i32.const 0) \"%s\")"
+          (quoted (String.concat "" m.strings)));
+      List.iter
+        (fun (v, t, init) ->
+          line top "(global $%s (export \"%s\") (mut %s) (%s.const %s))" v
+            (Ir.global_export v) (kind t) (kind t)
+            (if kind t = "f64" then num_literal init
+             else string_of_int (int_of_float init)))
+        m.globals;
+      List.iter
+        (fun (f : func) ->
+          let locals i = snd (List.nth f.vars i) in
+          let ty = Ir.type_of ~locals ~globals:global_types in
+          let scratch =
+            List.mapi
+              (fun i t -> (Printf.sprintf "$t%d" i, t))
+              (Emit.scratch_of_block ty f.body)
+          in
+          let names =
+            Array.of_list
+              (List.map (fun (n, _) -> "$" ^ n) f.vars
+              @ List.map fst scratch)
+          in
+          let env =
+            {
+              names;
+              strings = layout;
+              globals;
+              ty;
+              scratch_next = List.length f.vars;
+                      b;
+              indent = top.indent;
+            }
+          in
+          line env "(func $%s (export \"%s\") (result f64)" f.name f.name;
+          nested env (fun () ->
+              List.iter (fun (v, t) -> line env "(local $%s %s)" v (kind t)) f.vars;
+              List.iter (fun (n, t) -> line env "(local %s %s)" n (kind t)) scratch;
+              block env f.body;
+              line env "f64.const 0.0");
+          line env ")")
+        m.funcs);
+  line top ")";
+  Buffer.contents b

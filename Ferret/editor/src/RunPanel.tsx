@@ -1,18 +1,45 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CompileResult, Paused, Run, RunResult } from "./ferret";
 import { canPause, start } from "./ferret";
 
 interface Props {
   compiled: CompileResult;
-  /** The same program with a breakpoint on every node. */
+  /** The same program with a report on every node, which is what a run that
+   *  has to stop anywhere -- at a breakpoint or a step -- is run from. */
   stepwise: CompileResult;
+  /** The nodes the user marked, by id. */
+  breakpoints: Set<string>;
   onFocusNode: (id: string) => void;
   onReveal: (id: string) => void;
+}
+
+/** How long the panel leaves between cooks when it is driving them. */
+const FRAME_MS = 100;
+
+// What the graph is holding between cooks: its Feedbacks and its Inputs, read
+// straight out of the module's globals rather than reported by it.
+function Held({ held }: { held: { name: string; value: number }[] }) {
+  return (
+    <div className="logs">
+      <div className="logs-title">State</div>
+      <table className="hits">
+        <tbody>
+          {held.map((h) => (
+            <tr key={h.name}>
+              <td>{h.name}</td>
+              <td className="hits-value">{format(h.value)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 export default function RunPanel({
   compiled,
   stepwise,
+  breakpoints,
   onFocusNode,
   onReveal,
 }: Props) {
@@ -20,10 +47,36 @@ export default function RunPanel({
   const [paused, setPaused] = useState<Paused | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [stepping, setStepping] = useState(false);
-  const [waiting, setWaiting] = useState(false);
-  const [event, setEvent] = useState("1");
+  // Whether a run is up at all: the module stays instantiated between cooks,
+  // so what it holds carries over until this goes back to false.
+  const [live, setLive] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  // Which build a run is using decides which watch table its indices mean.
+  const [debugging, setDebugging] = useState(false);
+  /** What the panel will write into the module's input globals. */
+  const [given, setGiven] = useState<Record<string, string>>({});
+  const ticker = useRef<ReturnType<typeof setInterval> | null>(null);
   const run = useRef<Run | null>(null);
+  // The ticker fires from outside the render that started it, so what it asks
+  // about a cook in flight has to be a ref rather than a piece of state.
+  const inFlight = useRef(false);
+
+  // An edit to the graph is a new program, and what the running one is holding
+  // has nothing to do with it: the run ends rather than carrying state over
+  // from a graph that is no longer on the canvas.
+  useEffect(() => {
+    if (ticker.current) clearInterval(ticker.current);
+    ticker.current = null;
+    run.current?.stop();
+    run.current = null;
+    inFlight.current = false;
+    setPlaying(false);
+    setLive(false);
+    setBusy(false);
+    setPaused(null);
+    setResult(null);
+    setFailure(null);
+  }, [compiled]);
 
   if (!compiled.ok) {
     return (
@@ -48,51 +101,117 @@ export default function RunPanel({
   }
 
   const where = (watch: number) => {
-    const table = stepping && stepwise.ok ? stepwise.watches : compiled.watches;
+    const table = debugging && stepwise.ok ? stepwise.watches : compiled.watches;
     return table[watch] ?? { node: "?", label: "?" };
   };
-  const watches = compiled.watches;
 
-  const go = async (step = false) => {
-    const build = step && stepwise.ok ? stepwise : compiled;
+  const settle = (r: RunResult) => {
+    inFlight.current = false;
+    setResult(r);
+    setPaused(null);
+    setBusy(false);
+  };
+
+  const crashed = (e: unknown) => {
+    setFailure(e instanceof Error ? e.message : String(e));
+    stopRun();
+  };
+
+  const cooking = () => {
+    inFlight.current = true;
     setBusy(true);
-    setStepping(step);
+  };
+
+  // Starting a run instantiates the module and cooks it once.  A run that
+  // might have to stop runs the build that reports at every node, and the
+  // page says where to stop; with nothing to stop for, what runs is the graph
+  // as drawn.
+  const begin = async (step: boolean) => {
+    stopTicker();
+    run.current?.stop();
+    const watched = (step || breakpoints.size > 0) && stepwise.ok;
+    const build = watched ? stepwise : compiled;
+    cooking();
+    setDebugging(watched);
     setFailure(null);
     setResult(null);
     setPaused(null);
-    setWaiting(false);
     const active = start(
       build.wasm,
-      (p) => {
+      Object.fromEntries(
+        build.inputs.map((i) => [
+          i.export,
+          given[i.export] === undefined || given[i.export] === ""
+            ? i.value
+            : Number(given[i.export]),
+        ]),
+      ),
+      build.watches.map((w) => breakpoints.has(w.node)),
+      step,
+      (p: Paused) => {
         setPaused(p);
         const w = build.ok ? build.watches[p.watch] : undefined;
         if (w) onReveal(w.node);
       },
-      () => setWaiting(true),
     );
     run.current = active;
+    setLive(true);
     try {
-      const finished = await active.done;
-      setResult(finished);
+      settle(await active.done);
     } catch (e) {
-      setFailure(e instanceof Error ? e.message : String(e));
-    } finally {
-      setPaused(null);
-      setWaiting(false);
-      setBusy(false);
-      run.current = null;
-      setStepping(false);
+      crashed(e);
     }
   };
 
-  const resume = () => {
-    setPaused(null);
-    run.current?.resume();
+  // Another cook, on what the last one left behind.  This is the whole of how
+  // a dataflow program gets anywhere: the graph itself has no loop in it.
+  const again = async (step = false) => {
+    const active = run.current;
+    // Starting a run is itself the first cook, so there is nothing more to do.
+    if (!active) return begin(step);
+    cooking();
+    try {
+      settle(await active.again(step));
+    } catch (e) {
+      crashed(e);
+    }
   };
 
-  const send = () => {
-    setWaiting(false);
-    run.current?.send(Number(event) || 0);
+  const stopTicker = () => {
+    if (ticker.current) clearInterval(ticker.current);
+    ticker.current = null;
+    setPlaying(false);
+  };
+
+  const stopRun = () => {
+    stopTicker();
+    run.current?.stop();
+    run.current = null;
+    inFlight.current = false;
+    setLive(false);
+    setBusy(false);
+    setPaused(null);
+  };
+
+  // Cooking over and over is what makes a graph a program that runs, the way
+  // a frame does in a patcher: the host drives it, the graph does not loop.
+  const play = async () => {
+    if (playing) {
+      stopTicker();
+      return;
+    }
+    if (!run.current) await begin(false);
+    if (!run.current) return;
+    setPlaying(true);
+    ticker.current = setInterval(() => {
+      // A cook still going, or held at a breakpoint, keeps its turn.
+      if (!inFlight.current) void again();
+    }, FRAME_MS);
+  };
+
+  const resume = (step = false) => {
+    setPaused(null);
+    run.current?.resume(step);
   };
 
   return (
@@ -101,29 +220,63 @@ export default function RunPanel({
         Compiled — {compiled.wasm.length} bytes of wasm
       </div>
 
-      <p className="muted">
-        A graph takes no arguments. The start node hands out the time the run
-        began; everything else it works out for itself.
-      </p>
+      {compiled.inputs.length === 0 ? (
+        <p className="muted">
+          This graph asks for nothing. Add an Input node for a number to give
+          it before the run.
+        </p>
+      ) : (
+        compiled.inputs.map((i) => (
+          <div className="field" key={i.export}>
+            <label>{i.label}</label>
+            <input
+              type="number"
+              step="any"
+              value={given[i.export] ?? String(i.value)}
+              disabled={live}
+              onChange={(e) =>
+                setGiven({ ...given, [i.export]: e.target.value })
+              }
+            />
+          </div>
+        ))
+      )}
 
       <div className="run-buttons">
-        <button
-          className="primary"
-          disabled={busy}
-          onClick={() => go(false)}
-        >
-          {busy && !stepping ? "Running…" : "▶ Run"}
+        <button className={playing ? "" : "primary"} onClick={() => void play()}>
+          {playing ? "❚❚ Pause" : "▶ Play"}
         </button>
-        <button disabled={busy} onClick={() => go(true)} title="Stop at every node">
+        <button
+          disabled={busy && !paused}
+          onClick={() => void again()}
+          title="Work the graph out once"
+        >
+          ↻ Cook
+        </button>
+        <button
+          disabled={busy && !paused}
+          onClick={() => void again(true)}
+          title="Cook it, stopping at every node"
+        >
           ⏭ Step
         </button>
+        {live && <button onClick={stopRun}>■ Stop</button>}
       </div>
 
-      {watches.length > 0 && !busy && (
+      <p className="muted">
+        {live
+          ? `Cooking on; the graph keeps what it holds until Stop.${
+              playing ? ` One cook every ${FRAME_MS} ms.` : ""
+            }`
+          : "Play cooks the graph over and over; Cook does it once. What the Feedbacks hold carries from one cook to the next."}
+      </p>
+
+      {breakpoints.size > 0 && !busy && (
         <p className="muted breakpoint-note">
-          {watches.length} breakpoint{watches.length === 1 ? "" : "s"} set.
+          {breakpoints.size} breakpoint{breakpoints.size === 1 ? "" : "s"} set;
+          a cook stops at them, and Next carries on a node at a time.
           {!canPause() &&
-            " This page is not cross-origin isolated, so a run reports them rather than stopping at them."}
+            " This page is not cross-origin isolated, so a cook reports them rather than stopping at them."}
         </p>
       )}
 
@@ -137,59 +290,50 @@ export default function RunPanel({
             >
               {where(paused.watch).node}
             </button>
+            <span className="paused-where">cook {paused.cook}</span>
           </div>
           <div className="result">
             <span className="result-label">{where(paused.watch).label}</span>
             <span className="result-value">{format(paused.value)}</span>
           </div>
           <div className="muted">hit {paused.hit}</div>
+          {paused.state.length > 0 && <Held held={paused.state} />}
           <div className="paused-buttons">
-            <button className="primary" onClick={resume}>
-              {stepping ? "Next" : "Continue"}
+            <button className="primary" onClick={() => resume(true)}>
+              ⏭ Next
             </button>
-            <button onClick={() => run.current?.stop()}>Stop</button>
-          </div>
-        </div>
-      )}
-
-      {waiting && (
-        <div className="paused">
-          <div className="paused-head">Waiting for an event</div>
-          <div className="field">
-            <label>Send</label>
-            <input
-              type="number"
-              step="any"
-              value={event}
-              autoFocus
-              onChange={(e) => setEvent(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") send();
-              }}
-            />
-          </div>
-          <div className="paused-buttons">
-            <button className="primary" onClick={send}>
-              Send
-            </button>
-            <button onClick={() => run.current?.stop()}>Stop</button>
+            <button onClick={() => resume(false)}>Continue</button>
+            <button onClick={stopRun}>Stop</button>
           </div>
         </div>
       )}
 
       {failure && <div className="run-status bad">{failure}</div>}
 
-      {result && (
+      {result && !paused && (
         <>
           <div className="result">
             <span className="result-label">
-              {result.stopped ? "stopped" : "returned"}
+              {result.stopped ? "stopped" : `cook ${result.cook} gave`}
             </span>
             <span className="result-value">
               {result.value === null ? "—" : format(result.value)}
             </span>
           </div>
           <div className="muted">{result.ms.toFixed(2)} ms</div>
+
+          {result.state.length > 0 && <Held held={result.state} />}
+
+          {result.said.length > 0 && (
+            <div className="logs">
+              <div className="logs-title">Said ({result.said.length})</div>
+              <ol className="said">
+                {result.said.map((s, i) => (
+                  <li key={i}>{s}</li>
+                ))}
+              </ol>
+            </div>
+          )}
 
           {result.hits.length > 0 && (
             <div className="logs">

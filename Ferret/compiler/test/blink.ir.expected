@@ -1,0 +1,8 @@
+(global on bool)
+(func main (result f64)
+  (local on_next bool)
+  (log (float (select on 1 0)))
+  (say "blink")
+  (set on_next (not on))
+  (set on on_next)
+  (return 0))
