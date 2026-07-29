@@ -60,6 +60,8 @@ export default function RunPanel({
   // The ticker fires from outside the render that started it, so what it asks
   // about a cook in flight has to be a ref rather than a piece of state.
   const inFlight = useRef(false);
+  // Set while Play is getting a run up, which it has to await.
+  const starting = useRef(false);
 
   // A run belongs to a program, not to a canvas.  Nodes are measured, moved
   // and selected without what they compile to changing at all, so what ends a
@@ -68,6 +70,17 @@ export default function RunPanel({
   const program = useMemo(
     () => (compiled.ok ? compiled.wasm.join(",") : "does not compile"),
     [compiled],
+  );
+
+  // Whatever is left running belongs to this panel, so it goes when the panel
+  // does: the module and everything it holds live in the worker, and there is
+  // nothing else to reach them by afterwards.
+  useEffect(
+    () => () => {
+      if (ticker.current) clearInterval(ticker.current);
+      run.current?.stop();
+    },
+    [],
   );
 
   // A new program is a new run: what the old one is holding has nothing to do
@@ -174,6 +187,10 @@ export default function RunPanel({
   // Another cook, on what the last one left behind.  This is the whole of how
   // a dataflow program gets anywhere: the graph itself has no loop in it.
   const again = async (step = false) => {
+    // One cook is in flight at a time.  The buttons are disabled while one is,
+    // but a second click can land before the render that disables them, and
+    // the worker answers one message at a time either way.
+    if (inFlight.current) return;
     const active = run.current;
     // Starting a run is itself the first cook, so there is nothing more to do.
     // Stepping needs the build that reports at every node, so asking a run
@@ -207,17 +224,26 @@ export default function RunPanel({
   // Cooking over and over is what makes a graph a program that runs, the way
   // a frame does in a patcher: the host drives it, the graph does not loop.
   const play = async () => {
-    if (playing) {
+    // The ticker rather than the state flag, because a second click can land
+    // while the first is still starting the run -- two tickers would be two
+    // cooks a frame, and only one of them could ever be stopped again.
+    if (ticker.current) {
       stopTicker();
       return;
     }
-    if (!run.current) await begin(false);
-    if (!run.current) return;
-    setPlaying(true);
-    ticker.current = setInterval(() => {
-      // A cook still going, or held at a breakpoint, keeps its turn.
-      if (!inFlight.current) void again();
-    }, FRAME_MS);
+    if (starting.current) return;
+    starting.current = true;
+    try {
+      if (!run.current) await begin(false);
+      if (!run.current || ticker.current) return;
+      setPlaying(true);
+      ticker.current = setInterval(() => {
+        // A cook still going, or held at a breakpoint, keeps its turn.
+        if (!inFlight.current) void again();
+      }, FRAME_MS);
+    } finally {
+      starting.current = false;
+    }
   };
 
   const resume = (step = false) => {

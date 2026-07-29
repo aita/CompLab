@@ -624,7 +624,10 @@ export default function App() {
                     onDelete={deleteNode}
                   />
                 )}
-                {tab === "run" && (
+                {/* The run panel stays mounted whichever tab is on top: a
+                    graph that is cooking is not something to throw away
+                    because someone clicked a card to look at it. */}
+                <div hidden={tab !== "run"}>
                   <RunPanel
                     compiled={compiled}
                     stepwise={stepwise}
@@ -638,7 +641,7 @@ export default function App() {
                       );
                     }}
                   />
-                )}
+                </div>
                 {tab === "code" && <CodePanel compiled={compiled} />}
               </div>
             </aside>
