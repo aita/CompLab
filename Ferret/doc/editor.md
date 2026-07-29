@@ -32,9 +32,18 @@ let () =
 $ npm run compiler   # dune build --profile release + public/ へコピー
 ```
 
-リリースビルドで 190 KB です。
+リリースビルドで 197 KB です。
 
 ## ノードの定義はコンパイラ側にある
+
+パレットに並ぶのは**グループだけ**です。カタログが30項目を越えて一覧には長すぎるので、
+グループにポインタを乗せる（かクリックする）と、その中身が横に開きます。選ぶとその
+ノードが置かれ、メニューは閉じます。ドラッグでキャンバスに落とすこともできます。
+
+メニューはパレットの外に出るので `position: fixed` で、行の矩形から座標を取ります
+（パレットは `overflow-y: auto` なので、中に絶対配置すると切られてしまう）。行から
+メニューへポインタを動かすと途中に隙間があるので、閉じるのは140ミリ秒待ってから
+です — 移動中に消えないように。
 
 ノードについて知るべきことは、`compiler/lib/spec.ml` の1エントリに全部あります。
 **エディタ側に写しはありません。**
@@ -42,20 +51,20 @@ $ npm run compiler   # dune build --profile release + public/ へコピー
 ```ocaml
 {
   blank with
-  kind = "counter";
-  title = "Counter";
-  glyph = "i";
-  color = "#06aed4";
-  category = "Flow";
-  hint = "The only node that holds anything. …";
-  exec_in = true;
-  exec_out = next;
-  inputs = [ num "from" "starts at"; num "by" "moves by" ];
-  outputs = [ num "value" "value" ];
-  data = [ ("name", `String "i"); ("mode", `String "by"); … ];
+  kind = "feedback";
+  title = "Feedback";
+  glyph = "↺";
+  color = "#15b79e";
+  category = "Values";
+  hint = "What the last cook left. …";
+  outputs = [ num "out" "held" ];
+  inputs = [ num "value" "next" ];
+  data = [ ("name", `String "held"); ("holds", `String "number");
+           ("start", `Int 0) ];
   fields =
     [ Text { key = "name"; label = "Name" };
-      Select { key = "mode"; label = "Each pass it"; options = … } ];
+      Select { key = "holds"; label = "Holds"; options = … };
+      Number { key = "start"; label = "Starts at" } ];
 }
 ```
 
@@ -63,8 +72,8 @@ $ npm run compiler   # dune build --profile release + public/ へコピー
 `targetHandle` から読むのがこの文字列で、カードに描かれるのも同じ値です。同じ
 ファイルの中にあるので、片方だけ直して食い違う、ということが起こりません。
 
-実行の**入力**ポートだけは、何本でも受け取ります。ループを閉じるのがそれだから
-です。値の入力と実行の出力は1本きりで、新しい線を落とすと差し替わります。
+入力ポートは1本きりで、新しい線を落とすと差し替わります。出力は何本でも出せます
+— 1つのノードが1度しか計算されないというのが、そもそもそのための規則です。
 
 ノードを1種類足すのに要るのは、ここに1エントリと、隣の `lower.ml` に1ケース。
 エディタには何も足しません。
@@ -82,14 +91,33 @@ let describe kind data = … (* その設定のときのタイトル・記号・
 ```
 $ ferretc --emit spec | head -3
 {
-  "categories": [ "Flow", "Operators", "Values" ],
+  "categories": [ "Out", "Values", "Operators" ],
   "nodes": [
 ```
 
+### 線がつながっていない入力は、その場で数を打つ
+
+数値の入力ポートに何もつながっていなければ、そこは数の入力欄になります。カードの上に
+小さく出るのに加えて、**インスペクタにも「Inputs」として並べます**。`Expression` の
+入力はテキストが自由に残した名前で決まるので、探しに行く先はカードの端の小さな箱では
+なくインスペクタだろう、という理由です。どのノードでも同じように出ます。
+
+```tsx
+// An input with nothing wired into it is a number to give, and the card's
+// own box is small and easy to miss -- an Expression's inputs are named by
+// whatever its text left free, so this is where you go looking for them.
+const open = shown.inputs.filter(
+  (p) => p.kind === "num" && !connected.has(portKey(node.id, p.id)),
+);
+```
+
+書き込む先はカードの箱と同じ `data.values` なので、どちらで直しても同じところに入り
+ます。線をつなぐと欄は消えます — 値の出どころは1つだけです。
+
 ### ポートが設定で変わるノード
 
-`Start` の出力は宣言された入力の数だけあり、`Logic` の入力は `not` のときだけ1本です。そして
-`Expression` のポートは、**打ち込まれたテキスト次第**です。
+`Logic` の入力は `not` のときだけ1本、`Feedback` と `Choose` のポートは持つものが数か
+真偽かで変わります。そして `Expression` のポートは、**打ち込まれたテキスト次第**です。
 
 だからカタログとは別に、1ノードぶんを答える口があります。
 
@@ -100,9 +128,10 @@ $ ferret.describe("expr", '{"text":"a > b && a < 10"}')
  "outputs":[{"id":"out","label":"result","kind":"bool"}]}
 ```
 
-以前はここにエディタ側の判定がありました。「呼び出しの頭でない名前を拾う」正規表現と、
-「括弧の外に比較があれば bool」という近似です。いまは**同じレキサとパーサが答えます。**
-出力が条件かどうかは木の頂点を見るだけなので、近似ではなくなりました。
+エディタ側で近似することもできます — 「呼び出しの頭でない名前を拾う」正規表現と、
+「括弧の外に比較があれば bool」という判定です。そうせずに**同じレキサとパーサに
+答えさせています。** 出力が条件かどうかは木の頂点を見るだけなので、近似ではなく
+本当の答えが返ります。
 
 半端に打ちかけのテキストでもポートは出ます。名前はパースではなくトークン列から
 読むので、`a * b + ` の途中でも `a` と `b` は残ります。
@@ -115,8 +144,8 @@ let free_names (text : string) : string list = …
 ```
 
 カードは描画のたびにこれを聞きますが、答えは記憶します。鍵は種類と設定なので、
-**同じ設定なら同じ答え**で、設定が変わるのは編集したときだけです。実測では、
-6ノードの triangle を開いて5回、ノードをドラッグして0回、8文字打って8回でした。
+**同じ設定なら同じ答え**で、設定が変わるのは編集したときだけです。ノードをドラッグ
+しても1回も呼ばれません。
 
 ### 1エントリが n 個の項目になる
 
@@ -149,12 +178,24 @@ const compiled: CompileResult = useMemo(() => compile(graph), [graph]);
 ## 走らせる
 
 生成したモジュールは Web Worker で instantiate します。UI スレッドではありません。
-戻り線1本で止まらないループが書けてしまうので、3秒で terminate できる場所に置く
-必要があります。ブレークポイントで止める仕組みも同じワーカーの上です
-（[4章](debug.md)）。
+ブレークポイントで止めるにはスレッドごと止めるしかないからで、暴走した cook を
+3秒で terminate できるのも同じ理由です（[4章](debug.md)）。
 
-ホストが渡すインポートは5本です。**引数はありません** — グラフは何も受け取らず、
-必要なら Start から時刻を、`Wait for Event` からイベントを貰います。
+**モジュールはワーカーの中に立ったままです。** `main` を1回呼ぶのが1 cook で、
+Feedback が持っているものは次の cook のためにそこに残ります。パネルの ▶ Play は
+100 ms ごとに「もう1回 cook して」とワーカーに投げるだけです。
+
+```ts
+if ("cook" in e.data) {
+  stepAll = e.data.step ?? false;
+  cook();
+  return;
+}
+```
+
+ホストが渡すインポートは5本、エクスポートは `main` とグラフの状態を持つグローバル、
+それに文字列があればメモリです。**引数はありません** — グラフは何も受け取らず、
+必要なら `Input` のグローバルと `env.now` から貰います。
 
 ```ts
 env: {
@@ -162,12 +203,9 @@ env: {
   random: () => Math.random(),
   watch: (watch, value) => { … return value; },
   now: () => Date.now(),
-  wait: () => { … Atomics.wait(flags, AT_EVENT, RUNNING); return payload[0]; },
+  say: (ptr, len) => …,   // モジュールのメモリの一部を読む
 }
 ```
-
-`wait` の中でワーカーは止まります。ページは共有バッファに数を書いて `notify` する
-だけです。**待っているのはハングではない**ので、3秒の時計もそのあいだ止めます。
 
 ## エッジの描き方
 
@@ -181,28 +219,29 @@ Blueprint が読みやすい理由の半分は曲線ではなく**縁取り**に
 
 ```tsx
 <g className={"wire" + (faded ? " is-faded" : "")}>
-  <path className="wire-casing" d={path} strokeWidth={exec ? 8 : 6} />
-  <BaseEdge id={id} path={path} markerEnd={markerEnd}
-            style={{ stroke: color, strokeWidth: exec ? 2.5 : 2 }} />
+  <path className="wire-casing" d={path} strokeWidth={6} />
+  <BaseEdge id={id} path={path}
+            style={{ stroke: color, strokeWidth: 2,
+                     strokeDasharray: later ? "7 5" : undefined }} />
 </g>
 ```
 
+**`Feedback` に入る線だけ破線です。** グラフの中でその1本だけが、この cook から次の
+cook へ渡る線だからです。逆向きに走っている線が絵の中にあるのは普通ですが、時間を
+またぐのはこれだけで、そこは区別が付いたほうがいい。
+
 戻る線は別の経路を取ります。ノードが横に並んでいると、戻り線は**ノードが乗っている
-その線の上**を通ることになり、行を貫く1本の直線になります。ループがいちばん
-見えてはいけない形です。そこで、右へ出て、自分の高さまで上がって越え、左から入る、
-という経路にしています。両端は変わらず水平に出入りするので、1本の筆致に見えます。
+その線の上**を通ることになり、行を貫く1本の直線になります。そこで、右へ出て、自分の
+高さまで上がって越え、左から入る、という経路にしています。両端は変わらず水平に出入り
+するので、1本の筆致に見えます。
 
 高さが違う戻り線は普通の曲線のままです。すでに曲線として読めているものを上へ
 回すと、関係するノードから遠ざかるだけなので。
 
-矢印は実行エッジにだけ付けます。値の向きは、カードのどちら側から出ているかで既に
-分かるからです（これも Blueprint と同じ）。
+矢印は付けません。値の向きは、カードのどちら側から出ているかで既に分かるからです。
 
-ノードを選ぶと、触れていないエッジが薄くなります。ループの帰り線を目で追うには
+ノードを選ぶと、触れていないエッジが薄くなります。何度も枝分かれした先を目で追うには
 これが一番効きます。
-
-実行ポートはカード上端の帯にまとめてあります。実行の筋がカードの上辺を通る1本の
-レーンになり、値の配線と高さで分離されます。
 
 ## ファイル
 
@@ -237,9 +276,9 @@ JSON import でそのまま取り込むので、コピーもコード生成も�
 
 | | ノード | エッジ | 何を見せるか |
 |---|---|---|---|
-| Sum of 1 to n | 6 | 9 | Condition の戻り線と、積み上げる Counter |
-| Collatz steps | 13 | 19 | State、Choose、`%`、ログ |
-| π by throwing darts | 16 | 21 | Random と、1回の抽選を2回読むこと |
-| Multiplication triangle | 6 | 8 | For Loop の入れ子と、`r * c` の Expression |
-| Row sums | 7 | 11 | State の reset と in、2本の通り道 |
-| Echo events | 7 | 10 | Wait for Event を Condition の輪に入れたイベントループ |
+| Counting | 5 | 5 | Feedback ひとつ。cook を重ねると数が増える |
+| Wave | 6 | 6 | 折り返す位相と、1つの値を2つの出口が読むこと |
+| Bounce | 11 | 15 | 互いを読む2つの Feedback、真偽を選ぶ Choose |
+| Blink | 6 | 5 | 真偽を持つ Feedback、Text と Say |
+| Random walk | 4 | 4 | cook ごとに1回引く Random |
+| Monte Carlo | 11 | 12 | 累算する2つの Feedback と、名前を2回使う Expression |

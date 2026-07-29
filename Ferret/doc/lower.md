@@ -1,90 +1,114 @@
 # 1. グラフから IR へ — `lower.ml`
 
-グラフには入口も順序もありません。あるのはノードとエッジだけです。IR には順序が
-あります。この章はその間を埋める1パスの話です。
+グラフには順序がありません。あるのはノードとエッジだけです。IR には順序があります。
+この章はその間を埋める1パスの話です。
 
-## 2通りの歩き方
+## 出口から後ろ向きに歩く
 
-**データエッジ**は後ろ向きに歩いて式の木を組み立て、**実行エッジ**は制御フロー
-グラフを作ってから構造を復元します。
-
-後ろ向きの歩きは、Counter が保持している値で止まります。そこはローカルだからです。
+歩き始めるのは**出口**です。`Out`・`Log`・`Say`、それに新しい値を与えられている
+`Feedback`。そこから「この値は何でできているか」を辿ると、必要なノードだけが必要な
+順に並びます。
 
 ```ocaml
-| "counter" ->
-    (* Reading what a counter holds stops the backward walk: the value is a
-       local, so the step may name the counter itself without that being a
-       cycle. *)
-    (Local (state_slot ctx n), assumed ctx (slot_key n))
+(* The nodes a cook is for.  Everything else in the graph is only there
+   because one of these asks for it: nothing is evaluated that nothing wants,
+   which is the whole of the evaluation order. *)
+let sink_kinds = [ "out"; "log"; "say" ]
 ```
 
-**これが、絵の中の閉路が再帰の中の閉路にならない理由です。** 条件や「次の値」の式が
-スロットを名指ししても、そこで木は終わります。本当の循環 — 加算ノードの出力が自分の
-入力に戻っている類 — は別に検出してエラーにします。
+**前向きに歩くものは何もありません。** どこにもつながっていないノードはコードに
+なりませんし、「先に置いたから先に走る」ということもありません。
+
+後ろ向きの歩きは `Feedback` で止まります。そこはグローバルだからです。
+
+```ocaml
+| "feedback" ->
+    (* Reading a feedback stops the backward walk: what comes out is what
+       the last cook left, so the value it is fed may name the feedback
+       itself without that being a cycle.  This is the only way a graph can
+       depend on itself. *)
+    (Global (state_slot ctx n), holds ctx n)
+```
+
+**これが、絵の中の閉路が式の中の閉路にならない理由です。** Feedback に与える式が
+その Feedback 自身を名指ししても、そこで木は終わります。Feedback を通らない本当の
+循環 — 加算ノードの出力が自分の入力に戻っている類 — は別に検出してエラーにします。
 
 ```
   add: this node's value depends on itself
 ```
 
-## 制御フローグラフを組み直す
+歩いている途中のノードを覚えておいて、もう一度踏んだら閉路、というだけです。
 
-実行エッジは循環します。wasm には goto がなく `block` / `loop` / `br` の入れ子しか
-無いので、**描かれたグラフから入れ子を復元する**必要があります。`cfg.ml` がその
-下ごしらえをします。
+```ocaml
+if Hashtbl.mem ctx.active n.id then (
+  complain ctx ~node:n.id "this node's value depends on itself";
+  (Int 0, VInt))
+```
 
-1. 実行ノードを頂点、実行エッジを辺としてグラフを作る
-2. 逆後行順（reverse postorder）を取る
-3. 支配木を求める — Cooper・Harvey・Kennedy の反復版。この規模なら2〜3周で収束します
-4. 深さ優先の戻り辺を見つける。戻り先が始点を支配していなければ**簡約不能**なので断る
+## cook 1回の形
 
-そのうえで、標準的な形で書き出します。
-
-- **ループの先頭**（戻り辺が入るノード）は `loop` になり、そこへ戻る枝は `br` になる
-- **合流点**（前向きの入り辺が2本以上あるノード）は、そこへ飛ぶ枝を全部囲む `block`
-  の直後に置かれる。`br` でその block を抜けると、ちょうど合流点の手前に落ちる
-- それ以外のノードは、**支配しているノードのその場に**書き出される
-
-各ノードはちょうど1度だけ書かれます。
-
-`examples/sum.json` — Condition に戻り線が1本あるだけのグラフ — はこうなります。
+出てくる関数はいつも同じ骨格です。
 
 ```
-$ ferretc --emit ir examples/sum.json
+pre      共有された値の巻き上げ（下記）
+sunk     出口 — Log・Say と、Out の値をローカルに取る1行
+work     各 Feedback の新しい値を、それぞれのローカルに
+commit   ローカルからグローバルへ、まとめて
+return   Out のローカル、または 0
+```
+
+`work` と `commit` が分かれているのが**「すべての Feedback が同時に取り込む」**です。
+
+```
+$ ferretc --emit ir examples/bounce.json
+(global x int)
+(global rising bool 1)
 (func main (result f64)
-  (local total int)
-  (local i int)
-  (set total 0)
-  (set i 1)
-  (loop $1
-    (if (<= i 100)
-      (then
-        (set total (+ total i))
-        (set i (+ i 1))
-        (br $1))
-      (else
-        (return (float total))))))
+  (local next_value int)
+  (local result float)
+  (local x_next int)
+  (local rising_next bool)
+  (set next_value (+ x (select rising 1 -1)))
+  (log (float next_value))
+  (set result (float next_value))
+  (set x_next next_value)                                      ← work
+  (set rising_next (select (or (>= next_value 10) (<= next_value 0)) (not rising) rising))
+  (set x x_next)                                               ← commit
+  (set rising rising_next)
+  (return result))
 ```
 
-Counter の開始値が入口にまとめて出ていること、戻り線が `br $1` になっていることに
-注目してください。
+`rising_next` の式が `rising` を読んでいるのに注意してください。commit がすべての
+work の後にあるので、これは**この cook の頭の値**です。work と commit を混ぜると、
+Feedback を書く順番が意味を持ってしまいます。
 
-合流のほうは `block` になります。
+`Out` の値も同じ理由でローカルを1つ使います。値そのものは出口の並びの中のその場で
+計算されますが、返すのは commit のあと — つまり関数の最後です。
 
+## 制御フローが無いということ
+
+実行の順序を描く言語なら、ここが章の半分を占めます — 描かれたグラフは循環するのに
+wasm には `block` / `loop` / `br` の入れ子しか無いので、支配木を求め、戻り辺を
+見つけ、入れ子を復元し、簡約不能なものを断ることになります。**リルーパ**です。
+
+この IR に分岐命令はありません。
+
+```ocaml
+type stmt =
+  | Assign of int * expr  (* a local *)
+  | Store of int * expr   (* a global: what the graph holds *)
+  | Drop of expr
+  | Log of expr
+  | Say of int            (* the index of a string literal *)
+  | Ret of expr
+
+type block = stmt list
 ```
-(func main (result f64)
-  (block $1
-    (if (< i 10)
-      (then
-        (log 1))
-      (else
-        (log 2))))
-  (log 3)
-  (return 0))
-```
 
-両方の枝の末尾にあった `br $1` は消えています。**いま居るブロックの終わりへ飛ぶ
-のは何もしないのと同じ**なので、後始末の1パスで落としています。これが無いと、
-ただの if/else が if/else に見えません。
+条件分岐に当たるものは `Select` — 両方を計算して選ぶ式 — ひとつだけで、これは
+**グラフの中に副作用のある場所が無い**から成り立ちます。読んだところで何も起きない
+ので、要らないほうを計算しても構いません。
 
 ### なぜ S 式なのか
 
@@ -95,79 +119,14 @@ wat とは別物です。`wat.ml` が書くのはスタックマシンで、1行
 2行先の `i64.add` の引数になります。こちらは呼び出しの中に引数が入ったままです。
 
 ```
-(set total (+ total i))          IR
+(set count_next (+ count step))   IR
 ```
 ```wat
-local.get $total                 wat
-local.get $i
-i64.add
-local.set $total
+global.get $count                 wat
+global.get $step
+f64.add
+local.set $count_next
 ```
-
-### 深さは数えない
-
-`br` は相対の深さで書きます。ここを手で数えると必ず間違えます — **`if` も1段
-数える**からです。だから IR ではラベルを持ち、深さは出力側がラベルの積み重なりから
-求めます。
-
-```ocaml
-type label = int
-
-type stmt =
-  | Block of label * block  (* branching to it leaves the block *)
-  | Loop of label * block   (* branching to it goes round again *)
-  | Br of label
-```
-
-さきほどの sum が出す wat は `br 1` です。`loop` の1つ内側に `if` があるので、
-`loop` へ戻るには1段ではなく2段目を指します。
-
-## 1枚のノードが3つの頂点になる
-
-`For Loop` は、描かれているのは1枚ですが、制御フローの上では3か所です。**入られる
-ところ**（開始値を入れる）、**戻ってくるところ**（判定する）、**本体が落ちてくる
-ところ**（1つ進める）。
-
-そこで制御フローグラフの頂点を「ノード id」ではなく「ノード id と、どの扉から
-入ったか」にしました。
-
-```ocaml
-(* A for loop is three places rather than one: the setup it is entered at, the
-   test it comes back to, and the step the body falls into.  So a vertex of
-   the control-flow graph is a node and the door it was entered by. *)
-let vertex_for ctx ~dst ~port =
-  let n = Graph.find ctx.g dst in
-  if n.kind = "forloop" && port = "in" then dst ^ "#init" else dst
-```
-
-`l#init` の次は `l`、`l#step` の次も `l` です。あとは支配木もループ検出も、この
-3頂点を普通の頂点として扱うだけで、Counter と Condition を並べて描いたときと同じ
-形が出ます。
-
-**開始値が入口ではなくここに出るのが、入れ子のループが数え直す理由です。**
-
-### つながっていない端子も頂点にする
-
-本体の終わりを step へ戻すには、「行き先の無いところ」を見つける必要があります。
-ところが後続を「実行エッジの行き先の一覧」にすると、`true` が空なのか `false` が
-空なのかが**リストの長さからは分かりません**。
-
-そこで、配線されていない端子も頂点にしました。
-
-```ocaml
-(* A way out that was left unwired is a vertex of its own rather than a
-   missing successor, so that a node with two exits keeps two of them however
-   little is drawn: which pin is dangling is the whole question, and a list
-   with a hole in it cannot say. *)
-let gap ~node ~port = node ^ "#gap:" ^ port
-```
-
-ループ本体から辿り着いた gap は step に書き換えられ、書き換えられずに残った gap は
-「both ways out of this node have to go somewhere」になります。本体の中の
-Condition の片側を描き忘れたときは前者、ループの外で描き忘れたときは後者です。
-
-本体を辿る歩きは、**別の For Loop の本体には入りません。** そこはその For Loop の
-持ち物で、内側の `done` だけが外側に属します。
 
 ## 1つの値を1度だけ計算する
 
@@ -180,8 +139,8 @@ Condition の片側を描き忘れたときは前者、ループの外で描き�
 
 | | 展開したまま | 共有あり |
 |---|---|---|
-| 生成 wasm | 12,582,980 バイト | **254 バイト** |
-| 所要時間 | 5.6 秒 | **6 ミリ秒** |
+| 生成 wasm | 12,583,046 バイト | **285 バイト** |
+| 所要時間 | 6.8 秒 | **38 ミリ秒** |
 
 ブラウザ側はコンパイルを同期に走らせるので、これはそのままタブのフリーズでした。
 
@@ -194,30 +153,50 @@ Condition の片側を描き忘れたときは前者、ループの外で描き�
 $ ferretc --emit ir compiler/test/sharing.json
 (func main (result f64)
   (local b0_value int)
-  (local b1_value int)
+  (local result float)
   (set b0_value (+ 2 2))
-  (set b1_value (+ b0_value b0_value))
-  (return (float (+ b1_value b1_value))))
+  (set result (float (+ b0_value b0_value)))
+  (return result))
 ```
 
 巻き上げが等価であることを保証しているのは**グループ**です。グループとは、生成される
-コードの中で式がまとめて評価される1箇所のこと — 1つの文、ループの条件、ループの
-「次の値」全体 — で、共有はグループの内側だけに閉じます。
+コードの中で式がまとめて評価される1箇所のことで、共有はグループの内側だけに閉じます。
 
 ```ocaml
 (* A group is one place in the emitted code where a set of expressions is
-   evaluated together: a statement, a loop's condition, a loop's whole set of
-   next values.  Sharing is scoped to a group, and the assignments it hoists
+   evaluated together: one sink, or the whole set of new values the feedbacks
+   take.  Sharing is scoped to a group, and the assignments it hoists
    run at the head of it -- which is only sound because a group never writes a
    local that its own expressions read. *)
 ```
 
-**グループは自分の式が読むローカルを書きません。** だから巻き上げた代入をグループの
-先頭に置いてよいことになります。グループをまたいだ共有はしないので、ループの更新を
-挟んで読まれた値はちゃんと2回読まれます。
+**cook 全体がちょうど1つのグループです。** グラフの中に代入が無く、Feedback への
+書き戻しは全部いちばん最後にまとまっているので、「自分の式が読むローカルを書かない」
+がそのまま成り立ちます。だから巻き上げた代入を関数の先頭に置いてよいことになります。
 
-ループの条件から巻き上げた代入は、`loop` の中・`if` の手前に出ます。毎周回そこを
-通るので、条件が読む値はそのつど作り直されます。
+### ホストに訊くノードは、辺の数によらず必ず1度
+
+`Random` と `Time` は、**出て行く辺が1本でもローカルに取ります。**
+
+```ocaml
+(* A node that asks the host something is its answer: one draw, one reading
+   of the clock, and every reader sees that one.  It is worked out into a
+   local however few edges leave it, because the edge count is not the whole
+   story -- a formula that names it twice leaves one edge and reads it
+   twice. *)
+let impure = List.mem from.Graph.kind [ "random"; "time" ] in
+```
+
+辺の数を数えるだけでは足りません。`Expression` に `x * x` と書いて `x` に乱数を
+1本挿すと、辺は1本なのに読みは2回です。数えているのが**辺**で、意味を決めているのが
+**読み**なので、ここだけは辺を無視します。
+
+## 型は不動点
+
+`Feedback` の型は一度見ただけでは決まりません — その新しい値の式が、その Feedback
+自身を読むからです。だから lowering 全体が不動点になっています。全部を i64 と仮定
+して始め、狭すぎたことが分かったらもう一度走る。仮定は緩む方向にしか動かないので、
+Feedback の数 + 2 回で必ず止まります。詳しくは[2章](types.md)で。
 
 ## エラーは集めてから返す
 
@@ -227,13 +206,18 @@ $ ferretc --emit ir compiler/test/sharing.json
 
 ```
 $ dune test          # compiler/test/errors.ml が固定している文言から
-  e: the value input is not connected
-  w: the cond input wants a true or false but is given a whole number
+  o: the value input is not connected
+  p: the cond input wants a true or false but is given a whole number
   add: this node's value depends on itself
+  n: a const node does not make text
   f: * needs something before it
+  s: there is no start node in this language
 ```
 
-同じ文言が2度出ないよう、重複は落としています（名前を2回宣言すると同じ質問が2回
-飛んでくるため）。
+最後のひとつは、このカタログに無い種類のノードが入っていたときです。「読み飛ばす」
+のではなく名指しで断ります — 何も読まないノードは黙って消えてしまい、別のものを
+計算した結果だけが残るからです。
+
+同じ文言が2度出ないよう、重複は落としています。
 
 次は[2章 数に型をつける](types.md)。

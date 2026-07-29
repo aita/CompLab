@@ -8,108 +8,115 @@
 整数のリテラルは i64 になり、それだけで組み立てられたものも i64 になります。値は
 f64 と出会うところで広がり、狭まることはありません。
 
-広がるのは3箇所です。
+広がるのは4箇所です。
 
-- `Start` の時刻。ホストから来るので f64 です
+- `Time` と `Random` と `Input`。ホストから来るので f64 です
 - 除算。両端が整数でも商は整数とは限りません
-- `Log`・`End`・ブレークポイント。ホストが受け取るのは f64 です
+- `Log`・`Out`・ブレークポイント。ホストが受け取るのは f64 です
+- `Feedback` の開始値が整数でなかったとき
 
 `min` / `max` も f64 に倒します。wasm に i64 の最小・最大命令がないためです。
 
 ```
 $ ferretc --emit ir compiler/test/typing.json
+(global i int)
 (func main (result f64)
-  (local i int)
-  (set i 0)
-  (loop $1
-    (if (< i 10)
-      (then
-        (log (float (% i 3)))
-        (set i (+ i 1))
-        (br $1))
-      (else
-        (return (/ (float i) 2))))))
+  (local result float)
+  (local i_next int)
+  (log (float (% i 3)))
+  (set result (/ (float i) 2))
+  (set i_next (+ i 1))
+  (set i i_next)
+  (return result))
 ```
 
 対応する命令列:
 
 ```wat
-(local $i i64)
-i64.const 0
-local.set $i
-loop  ;; $1
-  local.get $i
-  i64.const 10
-  i64.lt_s              ← 両辺が整数なので i64 の比較
-  if
-    local.get $i
-    i64.const 3
-    i64.rem_s           ← 1命令
-    f64.convert_i64_s   ← ホストに渡すためにここで1回だけ広げる
-    call $log
-    …
+(global $i (export "state_i") (mut i64) (i64.const 0))
+(func $main (export "main") (result f64)
+  (local $result f64)
+  (local $i_next i64)
+  global.get $i
+  i64.const 3
+  i64.rem_s             ← 1命令
+  f64.convert_i64_s     ← ホストに渡すためにここで1回だけ広げる
+  call $log
+  global.get $i
+  f64.convert_i64_s     ← 商は整数とは限らないのでここでも広げる
+  f64.const 2.0
+  f64.div
+  local.set $result
+  …
 ```
 
 `i64.rem_s` に注目してください。f64 には剰余命令がないので、浮動小数点の `%` は
 `x - trunc(x / y) * y` に展開され、**8命令とスクラッチローカル2本**を使います。整数
 なら1命令です。
 
-## Counter は1回見ても型が決まらない
+## Feedback は1回見ても型が決まらない
 
-`i` が整数かどうかは、`i` の step を見れば分かります。ところがその式は `i` を
+`i` が整数かどうかは、`i` に与えられる式を見れば分かります。ところがその式は `i` を
 読みます。鶏と卵です。
 
-そこで **lowering 全体を不動点にしました。** 最初は全 Counter を整数と仮定して
+そこで **lowering 全体を不動点にしました。** 最初は全 Feedback を整数と仮定して
 走り、狭すぎたと分かったらもう一度走ります。仮定は緩む方向にしか動かないので、
-Counter の数ぶんの回数で必ず収束します。
+Feedback の数ぶんの回数で必ず収束します。
 
 ```ocaml
-(* Narrowing never happens in a settled pass: reaching it means a loop slot
-   was assumed to be whole and is not, so this pass is about to be thrown
-   away and what it emits does not matter. *)
+(* Narrowing never happens in a settled pass: reaching it means a feedback
+   slot was assumed to be whole and is not, so this pass is about to be
+   thrown away and what it emits does not matter. *)
 let coerce ctx (e, ty) want =
   if ty = want then e
-  else if ty = VInt then as_float (e, ty)
-  else (
+  else if ty = VInt && want = VFloat then as_float (e, ty)
+  else if is_num ty && is_num want then (
     ctx.too_narrow <- true;
     Int 0)
+  else …
 ```
 
 捨てられるパスが何を吐こうと関係ないので、狭める必要が出た地点では適当な値を置いて
 先へ進みます。
 
-collatz の例がこの仕組みの見本です。
+`examples/count.json` がこの仕組みの見本です。
 
 ```
-(func main (result f64)
-  (local cur float)          ← 27 から始まるが、2で割るので float
-  (local steps int)          ← 0 から始まり 1 ずつ増えるので int
-  …
+(global step float 1)      ← Input はホストが書くので f64
+(global count float)       ← その step を足されるので、整数のつもりでも f64
 ```
 
-`cur` は最初のパスで整数と仮定され、`cur / 2` が整数とは限らないと分かった時点で
-緩められ、2回目のパスで float として lowering されます。
+`count` は最初のパスで整数と仮定されます。`count + step` の `step` が f64 だと
+分かった時点で緩められ、2回目のパスで float として lowering されます。同じグラフの
+`step` を Input ではなく Constant にすると、両方とも int になります。
 
 ## 効果
 
+数のリテラルを全部 f64 にしたコンパイラを1本組んで、同じグラフを通しました。
+
 | | すべて f64 | 整数を i64 |
 |---|---|---|
-| Sum of 1 to n | 169 | **160** バイト |
-| Collatz steps | 242 | **250** |
-| π by throwing darts | 290 | **276** |
-| 上の検証用グラフ | 188 | **166** |
+| 上の検証用グラフ | 212 | **180** バイト |
+| Bounce | 252 | **223** |
+| Monte Carlo | 360 | **328** |
+| Blink | 217 | **204** |
+| Counting | 199 | 199 |
+| Wave | 228 | 228 |
 
-（f64 側の数は Loop / Count ノードだった頃のもので、いまの節点集合で測り直しては
-いません。i64 側は現在の値で、f64 側には無かったインポート2本を含んでいます。小さな
-モジュールでは、いまや import セクションがいちばん大きい部分です。）
+最後の2つが動かないのは、Input と 0.25 が f64 なので**元から整数が1つも無い**から
+です。推論が効いていないのではなく、効く余地がありません。
 
 差の大半は定数です。`f64.const` は**オペコード1 + 8バイト**の9バイト、`i64.const` は
 LEB128 なので小さい値なら**2バイト**です。
 
+この規模のモジュールでは、中身よりそれを説明するセクションのほうが大きいことにも
+注意してください。180 バイトのうち命令はごく一部です。
+
 ## なぜ i32 ではないのか
 
-`sum(1..100000)` は 5,000,050,000 です。i32 は 2³¹ ≈ 21億までなので、静かに溢れて
-壊れます。それが flagship の例で起きるのは論外でした。
+Feedback は cook をまたいで足し込み続けます。i32 は 2³¹ ≈ 21億までなので、1 cook で
+100 万足すグラフなら 2000 cook ちょっとで静かに溢れます。走らせっぱなしにできるのが
+このモデルの売りなのに、走らせっぱなしにすると壊れるのでは話になりません。
 
 そして重要なのは、**整数プログラムに関しては i64 のほうが f64 より正確だ**という
 ことです。f64 が整数を正確に表せるのは 2⁵³ までで、それを超えると丸めが始まります。
@@ -124,13 +131,15 @@ lowering が終わった時点で、演算子の両辺は必ず同じ型にな�
 読み戻せます。emit は型注釈を持ち回る必要がありません。
 
 ```ocaml
-let rec type_of locals = function
-  | Int _ -> VInt
-  | Num _ | Widen _ | Rand _ -> VFloat
-  | Local i -> locals i
-  | Bin ((Div | Min | Max), _, _) -> VFloat
-  | Bin (_, a, _) -> type_of locals a
-  …
+let type_of ~locals ~globals =
+  let rec go = function
+    | Int _ -> VInt
+    | Num _ | Widen _ | Rand _ | Now -> VFloat
+    | Local i -> locals i
+    | Global i -> globals i
+    | Bin ((Div | Min | Max), _, _) -> VFloat
+    | Bin (_, a, _) -> go a
+    …
 ```
 
 ## 混ぜても壊れないことの確認
@@ -140,10 +149,14 @@ let rec type_of locals = function
 コンパイルできたものを全部 instantiate しました。
 
 ```
-600 graphs, 299 compiled, 0 hangs, 0 invalid
+{ rounds: 600, compiled: 86, cooked: 86, invalid: 0, hangs: 0 }
 ```
 
-生成には breakpoint・random・埋め込み定数・小数リテラル・実行エッジの循環も
-混ぜています。
+生成には breakpoint・random・埋め込み定数・小数リテラル・真偽を持つ Feedback も
+混ぜています。instantiate したあと `main` を**2回**呼んでいるのは、1回目が Feedback
+に置いていったものを2回目が読むからです — 型が合っていなければそこで落ちます。
+
+残り 514 個はコンパイルを断られたものです。無作為に線を張ると、繋ぎ忘れた入力か、
+Feedback を通らない閉路のどちらかにたいてい引っかかります。
 
 次は[3章 バイト列を手で書く](emit.md)。
