@@ -1,8 +1,10 @@
 (executable
- (name main))
+ (name stoat)
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
 
-(ocamllex
- (modules lexer))
+(ocamllex lexer)
 
 (menhir
- (modules parser))
+ (modules parser)
+ (flags --explain))

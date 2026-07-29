@@ -1,0 +1,12 @@
+before
+errors/undefined.stoat:2: runtime error: undefined variable 'nope'
+errors/arity.stoat:2: runtime error: f expects 2 arguments but got 1
+errors/field.stoat:3: runtime error: A has no field or method 'missing'
+errors/mro.stoat:5: runtime error: cannot build a consistent method resolution order for class 'R' (the bases are listed in conflicting orders)
+errors/type.stoat:1: runtime error: unsupported operands for +: string and int
+errors/index.stoat:2: runtime error: index 5 is out of range (length 2)
+errors/unbound_assign.stoat:1: runtime error: 'y' is not defined; use 'let y = ...' to declare it
+errors/lvalue.stoat:2:1: the left of '=' is not assignable
+errors/syntax.stoat:2:11: syntax error near ";"
+errors/super.stoat:1: runtime error: no method 'init' after A in the MRO of A
+errors/string.stoat:1:15: unterminated string literal

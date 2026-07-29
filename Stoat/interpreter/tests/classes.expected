@@ -1,0 +1,9 @@
+rectangle with area 12
+square with area 25 (all sides 5)
+circle with area 3.14159
+[<rectangle>, <square>, <circle>]
+[12, 25, 3.14159]
+["Square", "Rectangle", "Shape"]
+true false
+rectangle with area 12
+the small one 4

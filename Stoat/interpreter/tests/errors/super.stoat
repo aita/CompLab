@@ -1,0 +1,2 @@
+class A { fun init() { super.init() } }
+A()

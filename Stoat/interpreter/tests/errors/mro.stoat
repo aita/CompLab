@@ -1,0 +1,5 @@
+class X {}
+class Y {}
+class P : X, Y {}
+class Q : Y, X {}
+class R : P, Q {}

@@ -1,0 +1,77 @@
+// Closures.
+//
+// A function captures the environment it was created in, by reference, so it
+// can keep mutating variables that have gone out of scope everywhere else.
+
+fun counter(start) {
+  let n = start;
+  fn () { n = n + 1; n }
+}
+
+let tick = counter(0);
+let other = counter(100);
+print(tick(), tick(), tick(), other(), tick());
+
+// Several closures over the same variable share it.
+fun account(balance) {
+  let deposit = fn (amount) { balance = balance + amount; balance };
+  let withdraw = fn (amount) {
+    if amount > balance {
+      "insufficient funds"
+    } else {
+      balance = balance - amount;
+      balance
+    }
+  };
+  [deposit, withdraw, fn () { balance }]
+}
+
+let acc = account(50);
+let deposit = acc[0];
+let withdraw = acc[1];
+let balance = acc[2];
+print(deposit(25), withdraw(30), withdraw(1000), balance());
+
+// Each turn of a loop gets a fresh binding, so these three do not share 'i'.
+let fs = [];
+for i in range(3) { fs.push(fn () { i * 10 }) };
+print(fs.map(fn (f) { f() }));
+
+// Closures compose into the usual higher order helpers.
+fun compose(f, g) { fn (x) { f(g(x)) } }
+fun adder(n) { fn (x) { x + n } }
+
+let add3 = adder(3);
+let add3_then_double = compose(fn (x) { x * 2 }, add3);
+print(add3(4), add3_then_double(4));
+
+// A memoized fib: the cache lives in the closure, and 'go' refers to itself
+// through the variable it was assigned to.
+fun memo_fib() {
+  let cache = [0, 1];
+  let go = nil;
+  go = fn (k) {
+    if k < cache.len() {
+      cache[k]
+    } else {
+      let v = go(k - 1) + go(k - 2);
+      cache.push(v);
+      v
+    }
+  };
+  go
+}
+let fib = memo_fib();
+print(fib(30), fib(50));
+
+// Methods close over 'self', so a bound method is a closure too.
+class Repeater {
+  fun init(word) { self.word = word }
+  fun say(times) {
+    let out = [];
+    for _ in range(times) { out.push(self.word) };
+    out.join(" ")
+  }
+}
+let say = Repeater("stoat").say;
+print(say(3))

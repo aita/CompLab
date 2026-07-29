@@ -1,0 +1,130 @@
+// A calculator written in Stoat: a hand written lexer and a recursive descent
+// parser that evaluates as it goes.  Everything else in this directory shows
+// one feature at a time; this one is just a program.
+
+class Token {
+  fun init(text) { self.text = text }
+  fun to_string() { self.text }
+}
+
+class Num : Token {
+  fun init(value) {
+    super.init(str(value));
+    self.value = value
+  }
+}
+
+class Op : Token {}
+
+let DIGITS = "0123456789";
+
+class Lexer {
+  fun init(src) {
+    self.src = src;
+    self.pos = 0
+  }
+
+  fun done() { self.pos >= self.src.len() }
+  fun peek() { self.src[self.pos] }
+
+  fun advance() {
+    let c = self.peek();
+    self.pos = self.pos + 1;
+    c
+  }
+
+  fun tokens() {
+    let out = [];
+    while !self.done() {
+      let c = self.peek();
+      if c == " " {
+        self.advance()
+      } else if DIGITS.contains(c) {
+        let text = "";
+        while !self.done() && DIGITS.contains(self.peek()) {
+          text = text + self.advance()
+        };
+        out.push(Num(int(text)))
+      } else if "+-*/()".contains(c) {
+        out.push(Op(self.advance()))
+      } else {
+        print("lexer: skipping " + repr(c));
+        self.advance()
+      }
+    };
+    out
+  }
+}
+
+class Parser {
+  fun init(tokens) {
+    self.toks = tokens;
+    self.pos = 0
+  }
+
+  fun peek() {
+    if self.pos < self.toks.len() { self.toks[self.pos] } else { nil }
+  }
+
+  fun advance() {
+    let t = self.peek();
+    self.pos = self.pos + 1;
+    t
+  }
+
+  fun at(text) {
+    let t = self.peek();
+    t != nil && t.text == text
+  }
+
+  // expr := term (('+' | '-') term)*
+  fun expr() {
+    let left = self.term();
+    while self.at("+") || self.at("-") {
+      let op = self.advance().text;
+      let right = self.term();
+      left = if op == "+" { left + right } else { left - right }
+    };
+    left
+  }
+
+  // term := atom (('*' | '/') atom)*
+  fun term() {
+    let left = self.atom();
+    while self.at("*") || self.at("/") {
+      let op = self.advance().text;
+      let right = self.atom();
+      left = if op == "*" { left * right } else { left / right }
+    };
+    left
+  }
+
+  // atom := NUMBER | '-' atom | '(' expr ')'
+  fun atom() {
+    if self.at("-") {
+      self.advance();
+      -self.atom()
+    } else if self.at("(") {
+      self.advance();
+      let v = self.expr();
+      if !self.at(")") { print("parser: missing ')'") } else { self.advance() };
+      v
+    } else {
+      let t = self.advance();
+      if is_instance(t, Num) { t.value } else { print("parser: unexpected " + str(t)); 0 }
+    }
+  }
+}
+
+fun calc(src) {
+  let toks = Lexer(src).tokens();
+  let value = Parser(toks).expr();
+  print(src, "=>", toks.join(" "), "=>", value);
+  value
+}
+
+calc("1 + 2 * 3");
+calc("(1 + 2) * 3");
+calc("100 / 5 / 2");
+calc("2 * (3 + 4) - -6");
+calc("42")

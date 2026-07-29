@@ -1,0 +1,97 @@
+// Corner cases that the examples do not spell out.
+
+// blocks have their own scope, and 'let' shadows rather than assigns
+let x = "outer";
+if true { let x = "inner"; print(x) };
+print(x);
+
+fun shadow() { let x = "function"; x }
+print(shadow(), x);
+
+// assignment reaches the binding it finds, wherever it lives
+let counter = 0;
+fun bump() { counter = counter + 1 }
+bump();
+bump();
+print(counter);
+
+// the value of a block is its last expression; 'return' exits early
+fun no_return(n) { n * 2 }
+fun early(n) {
+  for i in range(10) { if i == n { return "found " + str(i) } };
+  "not found"
+}
+print(no_return(4), early(3), early(99));
+
+// an empty block, an if without else, and a while are all nil
+fun nothing() {}
+print(nothing(), if false { 1 }, while false { 1 });
+
+// break and continue, including in a while
+let seen = [];
+let i = 0;
+while true {
+  i = i + 1;
+  if i > 6 { break };
+  if i % 3 != 0 { continue };
+  seen.push(i)
+};
+print(seen, i);
+
+// nested loops: break only leaves the inner one
+let pairs = [];
+for a in range(3) {
+  for b in range(3) {
+    if b > a { break };
+    pairs.push(str(a) + str(b))
+  }
+};
+print(pairs);
+
+// mutual recursion works because names are looked up when the call happens
+fun is_even(n) { if n == 0 { true } else { is_odd(n - 1) } }
+fun is_odd(n) { if n == 0 { false } else { is_even(n - 1) } }
+print(is_even(10), is_odd(10));
+
+// negative and mixed indexing
+let xs = [1, 2, 3];
+xs[-1] = 30;
+print(xs, xs[-3], "stoat"[-2]);
+
+// equality is structural for lists and by identity for objects
+class Point {
+  fun init(x, y) { self.x = x; self.y = y }
+  fun to_string() { "(" + str(self.x) + ", " + str(self.y) + ")" }
+}
+let p = Point(1, 2);
+print([1, [2]] == [1, [2]], p == p, p == Point(1, 2), 1 == 1.0, nil == false);
+print(p, str(p), repr("a\nb"), [p, "s"]);
+
+// classes are values; a class with no init takes no arguments
+class Empty {}
+let cls = Empty;
+print(cls(), type(cls), type(cls()));
+
+// deep single inheritance chains resolve through the MRO one step at a time
+class A { fun tag() { "A" } }
+class B : A { fun tag() { "B" + super.tag() } }
+class C : B { fun tag() { "C" + super.tag() } }
+class D : C {}
+print(D().tag(), mro(D));
+
+// a method can be replaced on the class... via the object, at least
+let d = D();
+d.tag = fn () { "patched" };
+print(d.tag(), D().tag());
+
+// functions defined inside functions capture the enclosing frame
+fun outer(n) {
+  fun inner(m) { n + m }
+  inner(10)
+}
+print(outer(5));
+
+// numbers keep int-ness unless a float shows up
+print(3 / 2, 3.0 / 2, 3 * 1.0, int("12") + 1, float("1.5"), str(1.0), 1e3);
+print(min(3, 1, 2), max(3, 1, 2), abs(-4), sqrt(9.0), floor(1.7), ceil(1.2));
+print(len("abc"), len([1, 2]), bool(nil), bool(0), assert(true))

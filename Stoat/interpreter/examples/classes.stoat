@@ -1,0 +1,75 @@
+// Classes, single inheritance and 'super'.
+//
+// 'init' is the constructor and 'self' is bound implicitly inside methods.
+// A class with a 'to_string' method decides how print shows its instances.
+
+class Shape {
+  fun init(name) {
+    self.name = name
+  }
+
+  fun area() {
+    0
+  }
+
+  fun describe() {
+    self.name + " with area " + str(self.area())
+  }
+
+  fun to_string() {
+    "<" + self.name + ">"
+  }
+}
+
+class Rectangle : Shape {
+  fun init(w, h) {
+    super.init("rectangle");
+    self.w = w;
+    self.h = h
+  }
+
+  fun area() {
+    self.w * self.h
+  }
+}
+
+class Square : Rectangle {
+  fun init(side) {
+    super.init(side, side);
+    self.name = "square"
+  }
+
+  // extend, rather than replace, the inherited description
+  fun describe() {
+    super.describe() + " (all sides " + str(self.w) + ")"
+  }
+}
+
+class Circle : Shape {
+  fun init(r) {
+    super.init("circle");
+    self.r = r
+  }
+
+  fun area() {
+    3.14159 * self.r * self.r
+  }
+}
+
+let shapes = [Rectangle(3, 4), Square(5), Circle(1)];
+
+for s in shapes { print(s.describe()) };
+
+print(shapes);
+print(shapes.map(fn (s) { s.area() }));
+print(mro(Square));
+print(is_instance(Square(2), Shape), is_instance(Circle(1), Rectangle));
+
+// methods are values: you can pull one off an object and pass it around
+let describe = shapes[0].describe;
+print(describe());
+
+// fields are just entries in the instance, so they can be added at any time
+let sq = Square(2);
+sq.label = "the small one";
+print(sq.label, sq.area())

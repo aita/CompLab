@@ -1,0 +1,70 @@
+// Multiple inheritance with a C3 method resolution order.
+//
+// 'super' does not mean "my base class": it means "the next class after mine
+// in the MRO of the object I am running on".  That is what makes diamonds
+// like the one below call each class exactly once.
+
+class Base {
+  fun init() { self.trail = [] }
+  fun ping() { self.trail.push("Base") }
+}
+
+class Left : Base {
+  fun ping() { self.trail.push("Left"); super.ping() }
+}
+
+class Right : Base {
+  fun ping() { self.trail.push("Right"); super.ping() }
+}
+
+class Bottom : Left, Right {
+  fun ping() { self.trail.push("Bottom"); super.ping() }
+}
+
+print(mro(Bottom));
+
+let b = Bottom();
+b.ping();
+print(b.trail);
+
+// Left on its own skips Right entirely: the MRO depends on the object.
+let l = Left();
+l.ping();
+print(mro(l), l.trail);
+
+// The classic three-way diamond from the C3 paper.
+class O {}
+class A : O {}
+class B : O {}
+class C : O {}
+class D : O {}
+class E : O {}
+class K1 : A, B, C {}
+class K2 : D, B, E {}
+class K3 : D, A {}
+class Z : K1, K2, K3 {}
+
+print(mro(Z));
+
+// Cooperative constructors: every init in the chain runs once, in MRO order.
+class Widget {
+  fun init(opts) { self.opts = opts; self.built = ["Widget"] }
+}
+
+class Clickable : Widget {
+  fun init(opts) { super.init(opts); self.built.push("Clickable") }
+  fun click() { "clicked " + self.opts }
+}
+
+class Draggable : Widget {
+  fun init(opts) { super.init(opts); self.built.push("Draggable") }
+  fun drag() { "dragged " + self.opts }
+}
+
+class Button : Clickable, Draggable {
+  fun init(opts) { super.init(opts); self.built.push("Button") }
+}
+
+let btn = Button("ok-button");
+print(btn.built);
+print(btn.click(), "/", btn.drag())

@@ -1,0 +1,6 @@
+["Bottom", "Left", "Right", "Base"]
+["Bottom", "Left", "Right", "Base"]
+["Left", "Base"] ["Left", "Base"]
+["Z", "K1", "K2", "K3", "D", "A", "B", "C", "E", "O"]
+["Widget", "Draggable", "Clickable", "Button"]
+clicked ok-button / dragged ok-button

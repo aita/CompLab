@@ -1,0 +1,108 @@
+; Golden tests: run a program, diff its output against the .expected file.
+; Update them all with `dune promote` after `dune test`.
+
+(rule
+ (with-stdout-to
+  features.out
+  (run %{exe:../src/stoat.exe} %{dep:features.stoat})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff features.expected features.out)))
+
+(rule
+ (with-stdout-to
+  tour.out
+  (run %{exe:../src/stoat.exe} %{dep:../examples/tour.stoat})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.out)))
+
+(rule
+ (with-stdout-to
+  classes.out
+  (run %{exe:../src/stoat.exe} %{dep:../examples/classes.stoat})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff classes.expected classes.out)))
+
+(rule
+ (with-stdout-to
+  mro.out
+  (run %{exe:../src/stoat.exe} %{dep:../examples/mro.stoat})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff mro.expected mro.out)))
+
+(rule
+ (with-stdout-to
+  closures.out
+  (run %{exe:../src/stoat.exe} %{dep:../examples/closures.stoat})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff closures.expected closures.out)))
+
+(rule
+ (with-stdout-to
+  calc.out
+  (run %{exe:../src/stoat.exe} %{dep:../examples/calc.stoat})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff calc.expected calc.out)))
+
+; Every program under errors/ is expected to fail; their messages (stdout and
+; stderr together) are collected into one golden file.
+
+(rule
+ (with-outputs-to
+  errors.out
+  (progn
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/undefined.stoat}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/arity.stoat}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/field.stoat}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/mro.stoat}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/type.stoat}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/index.stoat}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/unbound_assign.stoat}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/lvalue.stoat}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/syntax.stoat}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/super.stoat}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/stoat.exe} %{dep:errors/string.stoat})))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff errors.expected errors.out)))
