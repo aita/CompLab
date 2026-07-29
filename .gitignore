@@ -26,3 +26,6 @@ htmlcov/
 .vscode/
 .DS_Store
 *.swp
+
+# Rust
+target/
