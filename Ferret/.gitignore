@@ -5,3 +5,5 @@ editor/dist/
 # built by `npm run compiler` from compiler/web
 editor/public/ferret.js
 editor/tsconfig.tsbuildinfo
+# The Pages emulator (wrangler pages dev) keeps its scratch here.
+editor/.wrangler/

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { CompileResult, Paused, Run, RunResult } from "./ferret";
 import { canPause, start } from "./ferret";
 
@@ -61,9 +61,17 @@ export default function RunPanel({
   // about a cook in flight has to be a ref rather than a piece of state.
   const inFlight = useRef(false);
 
-  // An edit to the graph is a new program, and what the running one is holding
-  // has nothing to do with it: the run ends rather than carrying state over
-  // from a graph that is no longer on the canvas.
+  // A run belongs to a program, not to a canvas.  Nodes are measured, moved
+  // and selected without what they compile to changing at all, so what ends a
+  // run is the module's bytes coming out different -- otherwise dragging a
+  // card would stop a graph that is cooking.
+  const program = useMemo(
+    () => (compiled.ok ? compiled.wasm.join(",") : "does not compile"),
+    [compiled],
+  );
+
+  // A new program is a new run: what the old one is holding has nothing to do
+  // with the graph on the canvas now.
   useEffect(() => {
     if (ticker.current) clearInterval(ticker.current);
     ticker.current = null;
@@ -76,7 +84,7 @@ export default function RunPanel({
     setPaused(null);
     setResult(null);
     setFailure(null);
-  }, [compiled]);
+  }, [program]);
 
   if (!compiled.ok) {
     return (
@@ -168,7 +176,10 @@ export default function RunPanel({
   const again = async (step = false) => {
     const active = run.current;
     // Starting a run is itself the first cook, so there is nothing more to do.
-    if (!active) return begin(step);
+    // Stepping needs the build that reports at every node, so asking a run
+    // that is not that build to step starts a new one: the instrumented
+    // module is a different instance, and what the old one held goes with it.
+    if (!active || (step && !debugging)) return begin(step);
     cooking();
     try {
       settle(await active.again(step));

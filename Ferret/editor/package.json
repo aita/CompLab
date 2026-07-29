@@ -7,7 +7,8 @@
     "compiler": "cd .. && dune build compiler/web/ferret_js.bc.js --profile release && cp -f _build/default/compiler/web/ferret_js.bc.js editor/public/ferret.js",
     "dev": "npm run compiler && vite",
     "build": "npm run compiler && tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "npm run build && wrangler pages deploy dist --project-name ferret"
   },
   "dependencies": {
     "@xyflow/react": "^12.8.6",

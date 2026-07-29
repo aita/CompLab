@@ -1,0 +1,8 @@
+# Cloudflare Pages reads this from the root of what is deployed.  It is the
+# same pair of headers the dev server sends: SharedArrayBuffer, which is how a
+# breakpoint holds the worker still, is only handed out to a cross-origin
+# isolated page.  Everything the page loads is same-origin, so require-corp
+# costs nothing.
+/*
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Embedder-Policy: require-corp

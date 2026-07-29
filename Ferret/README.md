@@ -41,6 +41,27 @@ takes on the command line, so a graph drawn in the editor can be compiled from
 a terminal without a conversion step. Whatever you last edited is kept in the
 browser and comes back on reload.
 
+### Putting it somewhere
+
+The build is a static site — there is no server side to it — so `npm run
+build` and upload `editor/dist`. The one thing the host has to do is send
+`Cross-Origin-Opener-Policy: same-origin` and
+`Cross-Origin-Embedder-Policy: require-corp`, because a `SharedArrayBuffer` is
+how a breakpoint holds the worker still, and a page that is not cross-origin
+isolated does not get one. `editor/public/_headers` says so in the form
+Cloudflare Pages and Netlify read, and it is copied into the build.
+
+```
+cd editor
+npx wrangler login          # once
+npm run deploy              # build, then upload dist to Cloudflare Pages
+```
+
+Served without those headers everything still runs; a breakpoint reports its
+hit and the run carries on rather than stopping, and the panel says so. The
+same goes for plain `http://` on anything but localhost, which is not a secure
+context and so gets no `SharedArrayBuffer` however the headers are set.
+
 Without the editor:
 
 ```
