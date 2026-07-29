@@ -1,0 +1,2 @@
+#system poly
+val bad = fn x => x + true

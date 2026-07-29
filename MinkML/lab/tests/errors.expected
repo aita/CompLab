@@ -1,0 +1,21 @@
+errors/rank2.mnk:4:32: type error: cannot make bool a subtype of int
+errors/mismatch.mnk:2:23: type error: cannot make bool a subtype of int
+errors/field.mnk:3:11: type error: there is no field x here
+errors/rigid.mnk:3:22: type error: cannot unify int with 'a
+errors/postcondition.mnk:2:43: cannot verify: v1 == n + 1 ==> v1 > 0
+    checking that this has type { v : int | v > 0 }
+    it can fail when v1 == n + 1 && not (v1 > 0)
+errors/divisor.mnk:2:43: cannot verify: b <> 0
+    the right operand of `div` must not be zero
+    it can fail when not (b <> 0)
+errors/argument.mnk:3:25: cannot verify: v1 == 0 ==> v1 > 0
+    checking that this has type { v : int | v > 0 }
+    it can fail when v1 == 0 && not (v1 > 0)
+errors/twice.mnk:7:23: type error: c has linear type chan (!int ; !int ; stop) and has already been used: a linear value is used exactly once
+errors/dropped.mnk:4:15: type error: c has linear type chan (!int ; stop) and is never used
+errors/protocol.mnk:6:15: type error: the protocol sends int, but this is bool
+errors/unclosed.mnk:6:7: type error: c has linear type chan (?bool ; stop) and is never used
+errors/branches.mnk:3:3: type error: the protocol offers `yes : stop, `no : stop; every branch must be answered
+errors/headOfEmpty.mnk:6:22: type error: this has type unit, but nat * unit was expected
+errors/recursion.mnk:4:28: type error: loop cannot call itself: the `dep` system has no recursion, because a definition that never finishes would prove anything.  Recur with natrec instead
+errors/syntax.mnk:3:1: syntax error: unexpected end of file

@@ -1,0 +1,3 @@
+#system refine
+fun needsPositive (n : { v : int | v > 0 }) : int = n
+val bad = needsPositive 0

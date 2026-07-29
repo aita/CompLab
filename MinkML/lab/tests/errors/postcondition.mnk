@@ -1,0 +1,2 @@
+#system refine
+fun bad (n : int) : { v : int | v > 0 } = n + 1

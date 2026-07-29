@@ -1,0 +1,3 @@
+#system row
+(* The annotation promises to work for any 'a; the body only works for int. *)
+val bad : 'a -> 'a = fn x => x + 1

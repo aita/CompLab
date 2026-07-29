@@ -1,0 +1,16 @@
+#system poly
+
+(* What normalisation does to a program.  Every intermediate result is named,
+   every operand is a name or a literal, and the two calls in `f (f x)` differ:
+   the inner one pushes a frame, the outer one is a tail call. *)
+
+fun twice f x = f (f x)
+
+fun classify n =
+  if n > 10 then n * 2 else n + 1
+
+fun sumTo n =
+  let fun go i acc = if i > n then acc else go (i + 1) (acc + i)
+  in go 0 0 end
+
+val answer = sumTo 4

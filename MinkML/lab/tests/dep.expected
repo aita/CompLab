@@ -1,0 +1,17 @@
+id : (a : Type) -> a -> a = fn a => fn x => x
+three : nat = 3
+plus : nat -> nat -> nat = fn n => fn m => natrec (fn _ => nat) m (fn _ => fn r => suc r) n
+seven : nat = 7
+times : nat -> nat -> nat = fn n => fn m => natrec (fn _ => nat) 0 (fn _ => fn r => natrec (fn _ => nat) r (fn _ => fn r => suc r) m) n
+twelve : nat = 12
+leftUnit : (n : nat) -> Eq nat (plus 0 n) n = fn n => refl nat n
+rightUnit : (n : nat) -> Eq nat (plus n 0) n = fn n => natrec (fn k => Eq nat (natrec (fn _ => nat) 0 (fn _ => fn r => suc r) k) k) (refl nat 0) (fn k => fn ih => J nat (natrec (fn _ => nat) 0 (fn _ => fn r => suc r) k) (fn y => fn _ => Eq nat (suc (natrec (fn _ => nat) 0 (fn _ => fn r => suc r) k)) (suc y)) (refl nat (suc (natrec (fn _ => nat) 0 (fn _ => fn r => suc r) k))) k ih) n
+vec : Type -> nat -> Type = fn a => fn n => natrec (fn _ => Type) unit (fn _ => fn rest => a * rest) n
+empty : vec nat 0 = tt
+digits : vec nat 3 = (1, (2, (3, tt)))
+head : (a : Type) -> (n : nat) -> vec a (suc n) -> a = fn a => fn n => fn v => fst v
+first : nat = 1
+tail : (a : Type) -> (n : nat) -> vec a (suc n) -> vec a n = fn a => fn n => fn v => snd v
+rest : nat * (nat * unit) = (2, (3, tt))
+sized : (n : nat) * vec nat n = (2, (7, (8, tt)))
+itsLength : nat = 2

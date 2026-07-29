@@ -1,0 +1,9 @@
+#system refine
+
+(* The implications this file generates, in SMT-LIB 2. *)
+
+fun inc (n : { v : int | v >= 0 }) : { v : int | v > 0 } = n + 1
+
+fun safeDiv (a : int) (b : { v : int | v <> 0 }) : int = a div b
+
+val four = safeDiv (inc 7) 2

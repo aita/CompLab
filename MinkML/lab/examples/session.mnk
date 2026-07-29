@@ -1,0 +1,106 @@
+#system linear
+
+(* Linear types, and session types on channels.
+
+   A channel endpoint is linear: it must be used exactly once, and using it
+   returns the endpoint again with the rest of the protocol as its type.  That
+   is why every step is written `val c = send x c` -- the new `c` is a channel
+   with less protocol left to run. *)
+
+(* !int ; ?bool ; stop -- send an int, then receive a bool, then finish. *)
+fun classify (c : chan (?int ; !bool ; stop)) : unit =
+  let val (n, c) = recv c
+      val c = send (n > 10) c
+  in close c end
+
+val asked =
+  let val c = fork classify
+      val c = send 42 c
+      val (big, c) = recv c
+      val () = close c
+  in big end
+
+(* An external choice: the server offers `add` and `quit`, and must answer both.
+   `branch` is where the protocol forks; each arm gets the endpoint with its own
+   continuation. *)
+fun calculator (c : chan (&{ `add : ?int ; ?int ; !int ; stop, `quit : stop })) : unit =
+  branch c of
+    `add c =>
+      let val (x, c) = recv c
+          val (y, c) = recv c
+          val c = send (x + y) c
+      in close c end
+  | `quit c => close c
+
+val sum =
+  let val c = fork calculator
+      val c = select `add c
+      val c = send 20 c
+      val c = send 22 c
+      val (total, c) = recv c
+      val () = close c
+  in total end
+
+val quitEarly =
+  let val c = fork calculator
+      val c = select `quit c
+  in close c end
+
+(* Two processes and an interleaving.  The machine buffers one message, so the
+   pinger blocks until the ponger has taken what it sent, and the output shows
+   them taking turns. *)
+fun ponger (c : chan (?int ; !int ; ?int ; !int ; stop)) : unit =
+  let val (a, c) = recv c
+      val () = print a
+      val c = send (a * 10) c
+      val (b, c) = recv c
+      val () = print b
+      val c = send (b * 10) c
+  in close c end
+
+val pinged =
+  let val c = fork ponger
+      val c = send 1 c
+      val (r1, c) = recv c
+      val () = print r1
+      val c = send 2 c
+      val (r2, c) = recv c
+      val () = print r2
+  in close c end
+
+(* Linearity is not only about channels.  A `lin` pair must be taken apart
+   rather than dropped. *)
+val useOnce =
+  let val p : lin (int * int) = (3, 4)
+      val (x, y) = p
+  in x + y end
+
+(* And a closure that captures a linear value is itself linear: the qualifier is
+   not written anywhere below, it is discovered, and it shows up in `adder`'s
+   type as `-o`. *)
+val addedOnce =
+  let val p : lin (int * int) = (10, 20)
+      val adder = fn (n : int) => let val (x, y) = p in x + y + n end
+  in adder 12 end
+
+(* Delegation: a channel is an ordinary value, so it can be sent over another
+   channel.  The broker never talks to the worker -- it hands its endpoint to
+   whoever asked, and the protocol travels with it. *)
+fun worker (c : chan (?int ; !int ; stop)) : unit =
+  let val (n, c) = recv c
+      val c = send (n + 1) c
+  in close c end
+
+fun broker (c : chan (?chan (!int ; ?int ; stop) ; stop)) : unit =
+  let val (w, c) = recv c
+      val () = close c
+      val w = send 41 w
+      val (answer, w) = recv w
+      val () = print answer
+  in close w end
+
+val delegated =
+  let val b = fork broker
+      val w = fork worker
+      val b = send w b
+  in close b end

@@ -1,0 +1,8 @@
+#system linear
+fun server (c : chan (?int ; ?int ; stop)) : unit =
+  let val (x, c) = recv c val (y, c) = recv c in close c end
+val bad =
+  let val c = fork server
+      val c1 = send 1 c
+      val c2 = send 2 c
+  in close c1 end

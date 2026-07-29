@@ -1,0 +1,4 @@
+#system poly
+(* Using an argument at two types needs an annotation saying it is polymorphic;
+   without one, the first use decides. *)
+val useTwice = fn f => (f 1, f true)

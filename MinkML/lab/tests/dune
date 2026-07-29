@@ -1,0 +1,136 @@
+; Golden tests: run a program, diff its output against the .expected file.
+; `dune test` checks them; `dune promote` accepts new output after a change.
+;
+; The five examples are the five systems, so this is also the check that each
+; system still accepts what it is supposed to accept.
+
+(rule
+ (with-stdout-to
+  poly.out
+  (run %{exe:../src/mink.exe} %{dep:../examples/poly.mnk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff poly.expected poly.out)))
+
+(rule
+ (with-stdout-to
+  rows.out
+  (run %{exe:../src/mink.exe} %{dep:../examples/rows.mnk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff rows.expected rows.out)))
+
+(rule
+ (with-stdout-to
+  refine.out
+  (run %{exe:../src/mink.exe} %{dep:../examples/refine.mnk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff refine.expected refine.out)))
+
+(rule
+ (with-stdout-to
+  session.out
+  (run %{exe:../src/mink.exe} %{dep:../examples/session.mnk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff session.expected session.out)))
+
+(rule
+ (with-stdout-to
+  dep.out
+  (run %{exe:../src/mink.exe} %{dep:../examples/dep.mnk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff dep.expected dep.out)))
+
+; The A-normal form and the verification conditions are output too, and both
+; are things a change can quietly break.
+
+(rule
+ (with-stdout-to
+  anf.out
+  (run %{exe:../src/mink.exe} --dump-anf %{dep:anf.mnk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff anf.expected anf.out)))
+
+(rule
+ (with-stdout-to
+  vc.out
+  (run %{exe:../src/mink.exe} --dump-vc %{dep:vc.mnk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff vc.expected vc.out)))
+
+; Every program under errors/ is expected to fail; their messages, stdout and
+; stderr together, are collected into one golden file.
+
+(rule
+ (with-outputs-to
+  errors.out
+  (progn
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/rank2.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/mismatch.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/field.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/rigid.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/postcondition.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/divisor.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/argument.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/twice.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/dropped.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/protocol.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/unclosed.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/branches.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/headOfEmpty.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/recursion.mnk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/syntax.mnk})))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff errors.expected errors.out)))

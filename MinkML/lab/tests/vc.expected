@@ -1,0 +1,38 @@
+-- vc.mnk:5:60: checking that this has type { v : int | v > 0 }
+(set-logic QF_LIA)
+(declare-const n Int)
+(declare-const v1 Int)
+(assert (>= n 0))
+(assert (= v1 (+ n 1)))
+(assert (not (> v1 0)))
+(check-sat)
+-- vc.mnk:7:64: the right operand of `div` must not be zero
+(set-logic QF_LIA)
+(declare-const a Int)
+(declare-const b Int)
+(assert (not (= b 0)))
+(assert (not (not (= b 0))))
+(check-sat)
+-- vc.mnk:9:25: checking that this has type { v : int | v >= 0 }
+(set-logic QF_LIA)
+(declare-const v2 Int)
+(assert (= v2 7))
+(assert (not (>= v2 0)))
+(check-sat)
+-- vc.mnk:9:25: checking that this has type { v : int | v >= 0 }
+(set-logic QF_LIA)
+(declare-const v3 Int)
+(assert (= v3 7))
+(assert (not (>= v3 0)))
+(check-sat)
+-- vc.mnk:9:28: checking that this has type { v : int | v <> 0 }
+(set-logic QF_LIA)
+(declare-const t4 Int)
+(declare-const v5 Int)
+(assert (> t4 0))
+(assert (= v5 2))
+(assert (not (not (= v5 0))))
+(check-sat)
+inc : { v : int | v >= 0 } -> { v : int | v > 0 } = <fun>
+safeDiv : int -> { v : int | v <> 0 } -> int = <fun>
+four : int = 4

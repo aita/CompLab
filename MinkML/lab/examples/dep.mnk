@@ -1,0 +1,68 @@
+#system dep
+
+(* Dependent types.  There is no separate language of types here: a type is a
+   term, `Type` is its type, and the checker compares types by normalising
+   them.  Nothing is run afterwards -- normalising is what running means -- so
+   every definition below prints its normal form. *)
+
+val id : (a : Type) -> a -> a = fn a => fn x => x
+
+val three = id nat 3
+
+(* Recursion is by eliminator: `natrec motive base step n`.  There is no `fun`
+   that calls itself in this system, because a language that proves things must
+   not let a non-terminating definition stand in for a proof. *)
+val plus : nat -> nat -> nat =
+  fn n => fn m => natrec (fn _ => nat) m (fn _ => fn r => suc r) n
+
+val seven = plus 3 4
+
+val times : nat -> nat -> nat =
+  fn n => fn m => natrec (fn _ => nat) 0 (fn _ => fn r => plus m r) n
+
+val twelve = times 3 4
+
+(* `plus 0 n` and `n` are the same term after normalisation, so `refl` proves
+   them equal and the type below is accepted as written. *)
+val leftUnit : (n : nat) -> Eq nat (plus 0 n) n = fn n => refl nat n
+
+(* The other unit law is not free: `plus n 0` is blocked on `n`, so it needs
+   induction.  `natrec`'s motive is itself an equality, and the step transports
+   the proof for `k` to a proof for `suc k` with `J`. *)
+val rightUnit : (n : nat) -> Eq nat (plus n 0) n =
+  fn n =>
+    natrec
+      (fn k => Eq nat (plus k 0) k)
+      (refl nat 0)
+      (fn k => fn ih =>
+        J nat (plus k 0)
+          (fn y => fn _ => Eq nat (suc (plus k 0)) (suc y))
+          (refl nat (suc (plus k 0)))
+          k ih)
+      n
+
+(* An indexed family without indexed data: `vec a n` is defined by recursion on
+   n into Type, so a vector of length 3 is a nested pair and a vector of length
+   0 is the unit type. *)
+val vec : Type -> nat -> Type =
+  fn a => fn n => natrec (fn _ => Type) unit (fn _ => fn rest => a * rest) n
+
+val empty : vec nat 0 = tt
+val digits : vec nat 3 = (1, (2, (3, tt)))
+
+(* The type of `head` says what a total head needs: a vector whose length is a
+   successor.  `vec a 0` cannot be passed, because `vec a 0` is `unit`. *)
+val head : (a : Type) -> (n : nat) -> vec a (suc n) -> a =
+  fn a => fn n => fn v => fst v
+
+val first = head nat 2 digits
+
+val tail : (a : Type) -> (n : nat) -> vec a (suc n) -> vec a n =
+  fn a => fn n => fn v => snd v
+
+val rest = tail nat 2 digits
+
+(* A dependent pair: the second component's type mentions the first.  This one
+   packages a length with a vector of that length. *)
+val sized : (n : nat) * vec nat n = (2, (7, (8, tt)))
+val itsLength = fst sized
