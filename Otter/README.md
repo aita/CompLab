@@ -1,7 +1,7 @@
 # Otter
 
-A small statically typed language, and a tree-walking interpreter for it
-written in C++23.
+A small statically typed language, and two tree-walking interpreters for it:
+one written in C++23, one written in OCaml.
 
 Otter is a laboratory language: it has modules, structs, arrays, strings,
 pointers, type aliases and first-class functions with closures, but no
@@ -25,6 +25,20 @@ fun main() -> int {
   which is the last word on the syntax.
 - [`interpreter/examples/`](interpreter/examples) — programs to read, starting
   with `tour.otter`.
+
+## The two interpreters
+
+[`interpreter/`](interpreter) holds the one written in C++23, which is what the
+rest of this file describes: ANTLR generates its parser, and it has a
+mark-and-sweep collector of its own.
+
+[`ocaml/`](ocaml) holds the one written in OCaml, described in
+[`ocaml/README.md`](ocaml/README.md): ocamllex and menhir generate its parser,
+and memory is OCaml's collector's to reclaim.
+
+They read the same language and report the same diagnostics, down to the
+column. Each tree carries the examples and the tests, so both are held to the
+same programs.
 
 ## Building
 

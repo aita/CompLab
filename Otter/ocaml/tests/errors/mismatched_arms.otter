@@ -1,0 +1,6 @@
+module mismatched_arms;
+
+fun main() -> int {
+    var value: int = if (true) { 1 } else { "two" };
+    return value;
+}

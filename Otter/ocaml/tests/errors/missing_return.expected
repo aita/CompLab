@@ -1,0 +1,1 @@
+missing_return.otter:3:1: `largest` returns int, but control can reach the end of its body without a return

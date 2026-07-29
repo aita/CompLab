@@ -1,0 +1,56 @@
+module arrays;
+
+import io;
+import str;
+
+fun sum(values: array<int>) -> int {
+    var total: int = 0;
+    var index: int = 0;
+    while (index < values.length) {
+        total = total + values[index];
+        index = index + 1;
+    }
+    return total;
+}
+
+fun render(values: array<int>) -> string {
+    var text: string = "";
+    var index: int = 0;
+    while (index < values.length) {
+        if (index > 0) {
+            text = text + ", ";
+        }
+        text = text + str.from_int(values[index]);
+        index = index + 1;
+    }
+    return "[" + text + "]";
+}
+
+fun main() -> int {
+    var values: array<int> = [10, 20, 30, 40];
+    io.println(render(values));
+    io.println("sum " + str.from_int(sum(values)));
+
+    values[1] = 99;
+    io.println("written " + render(values));
+
+    var repeated: array<int> = [7; 4];
+    io.println("repeated " + render(repeated));
+
+    // The length is decided when the array is made, so it may be computed.
+    var counted: array<int> = [0; values.length + 1];
+    io.println("counted " + str.from_int(counted.length));
+
+    // Arrays are reference values: this is the same run of elements.
+    var alias: array<int> = values;
+    alias[0] = 1;
+    io.println("aliased " + render(values));
+
+    // Arrays nest.
+    var grid: array<array<int>> = [[1, 2], [3, 4]];
+    io.println("nested " + str.from_int(grid[1][0]));
+
+    var empty: array<int> = [];
+    io.println("empty " + str.from_int(empty.length));
+    return 0;
+}

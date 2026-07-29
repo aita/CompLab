@@ -1,0 +1,8 @@
+module hello;
+
+import io;
+
+fun main() -> int {
+    io.println("hello, otter");
+    return 0;
+}

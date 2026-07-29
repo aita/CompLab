@@ -1,0 +1,88 @@
+// Sorting, with the order to sort by passed in as a function value.
+
+module sort;
+
+import io;
+import str;
+
+fun render(values: array<int>) -> string {
+    var text: string = "";
+    var index: int = 0;
+    while (index < values.length) {
+        if (index > 0) {
+            text = text + " ";
+        }
+        text = text + str.from_int(values[index]);
+        index = index + 1;
+    }
+    return text;
+}
+
+fun swap(values: array<int>, left: int, right: int) -> void {
+    var held: int = values[left];
+    values[left] = values[right];
+    values[right] = held;
+    return;
+}
+
+// `before` decides the order, so one sort serves ascending, descending, and
+// anything else that can be written as a comparison.
+fun quicksort(values: array<int>, low: int, high: int,
+              before: fun(int, int) -> bool) -> void {
+    if (low >= high) {
+        return;
+    }
+
+    var pivot: int = values[high];
+    var boundary: int = low;
+    var index: int = low;
+    while (index < high) {
+        if (before(values[index], pivot)) {
+            swap(values, index, boundary);
+            boundary = boundary + 1;
+        }
+        index = index + 1;
+    }
+    swap(values, boundary, high);
+
+    quicksort(values, low, boundary - 1, before);
+    quicksort(values, boundary + 1, high, before);
+    return;
+}
+
+fun sorted(values: array<int>, before: fun(int, int) -> bool) -> array<int> {
+    var copy: array<int> = [0; values.length];
+    var index: int = 0;
+    while (index < values.length) {
+        copy[index] = values[index];
+        index = index + 1;
+    }
+    quicksort(copy, 0, copy.length - 1, before);
+    return copy;
+}
+
+fun ascending(left: int, right: int) -> bool {
+    return left < right;
+}
+
+fun main() -> int {
+    var values: array<int> = [5, 3, 9, 1, 7, 2, 8, 6, 4];
+    io.println("given      " + render(values));
+
+    io.println("ascending  " + render(sorted(values, ascending)));
+
+    io.println("descending " + render(sorted(values, fun(left: int, right: int) -> bool {
+        return left > right;
+    })));
+
+    // Any order will do, as long as it can be written as a comparison.
+    io.println("evens last " + render(sorted(values, fun(left: int, right: int) -> bool {
+        if (left % 2 != right % 2) {
+            return left % 2 == 1;
+        }
+        return left < right;
+    })));
+
+    io.println("untouched  " + render(values));
+    return 0;
+}

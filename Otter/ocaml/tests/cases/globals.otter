@@ -1,0 +1,39 @@
+module globals;
+
+import io;
+import str;
+
+struct Counter {
+    hits: int;
+}
+
+// Globals are initialised in the order they are written, and may use what came
+// before them.
+var base: int = 10;
+var doubled: int = base * 2;
+var label: string = "count";
+var shared: Counter = new Counter { hits: 0 };
+var table: array<int> = [0; 4];
+
+fun record(slot: int) -> void {
+    shared.hits = shared.hits + 1;
+    table[slot] = table[slot] + 1;
+    return;
+}
+
+fun main() -> int {
+    io.println("base " + str.from_int(base));
+    io.println("doubled " + str.from_int(doubled));
+
+    record(0);
+    record(0);
+    record(3);
+    io.println(label + " " + str.from_int(shared.hits));
+    io.println("slot 0 " + str.from_int(table[0]));
+    io.println("slot 3 " + str.from_int(table[3]));
+
+    base = base + 1;
+    io.println("changed " + str.from_int(base));
+    io.println("unchanged " + str.from_int(doubled));
+    return 0;
+}

@@ -1,0 +1,11 @@
+module type_name_taken;
+
+struct Thing {
+    value: int;
+}
+
+type Thing = int;
+
+fun main() -> int {
+    return 0;
+}

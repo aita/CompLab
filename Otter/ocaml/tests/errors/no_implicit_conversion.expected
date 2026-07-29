@@ -1,0 +1,1 @@
+no_implicit_conversion.otter:5:26: this initial value is int, but float64 was expected

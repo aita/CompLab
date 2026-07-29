@@ -1,0 +1,7 @@
+module not_exported;
+
+import hidden;
+
+fun main() -> int {
+    return hidden.secret();
+}

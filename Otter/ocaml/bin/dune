@@ -1,0 +1,16 @@
+(executable
+ (name main)
+ (libraries otter))
+
+; The program is `otter`, whatever the module holding its entry point is called.
+
+(rule
+ (targets otter.exe)
+ (deps main.exe)
+ (action
+  (copy main.exe otter.exe)))
+
+(rule
+ (alias default)
+ (deps otter.exe)
+ (action (progn)))

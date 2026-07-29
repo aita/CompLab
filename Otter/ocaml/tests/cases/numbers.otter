@@ -1,0 +1,44 @@
+module numbers;
+
+import io;
+import str;
+
+fun show(label: string, value: int) -> void {
+    io.println(label + " " + str.from_int(value));
+    return;
+}
+
+fun main() -> int {
+    show("sum", 2 + 3 * 4);
+    show("group", (2 + 3) * 4);
+    show("divide", 7 / 2);
+    show("remainder", 7 % 2);
+    show("negative divide", 0 - 7 / 2);
+    show("hex", 0xff);
+    show("binary", 0b1010);
+    show("underscores", 1_000_000);
+    show("shifted", ~0);
+
+    // A literal takes its type from where it is used, and the check happens
+    // before the program runs.
+    var small: byte = 255;
+    show("byte", small as int);
+    small = small + 1;
+    show("byte wraps", small as int);
+
+    var letter: char = 'A';
+    letter = letter + 2 as char;
+    io.println("char " + str.from_char(letter));
+
+    // There are no implicit conversions, so widening is written out.
+    var whole: int = 3;
+    var exact: float64 = whole as float64 / 2.0;
+    io.println("float64 " + str.from_float(exact));
+
+    var narrow: float32 = 0.5 as float32;
+    io.println("float32 " + str.from_float(narrow as float64));
+    io.println("truncated " + str.from_int(3.9 as int));
+
+    io.println("compare " + str.from_bool(1 < 2 && 2 <= 2 && 3 > 2 && !(3 < 2)));
+    return 0;
+}

@@ -1,0 +1,11 @@
+module null_pointer;
+
+struct Node {
+    value: int;
+    next: *Node;
+}
+
+fun main() -> int {
+    var list: *Node = null;
+    return list.value;
+}

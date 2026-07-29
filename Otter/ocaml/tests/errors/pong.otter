@@ -1,0 +1,7 @@
+module pong;
+
+import ping;
+
+export fun value() -> int {
+    return 1;
+}

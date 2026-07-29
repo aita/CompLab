@@ -1,0 +1,8 @@
+[10, 20, 30, 40]
+sum 100
+written [10, 99, 30, 40]
+repeated [7, 7, 7, 7]
+counted 5
+aliased [1, 99, 30, 40]
+nested 3
+empty 0

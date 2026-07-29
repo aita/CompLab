@@ -1,0 +1,1 @@
+struct_holds_itself.otter:3:1: struct `Node` contains itself by value, which has no size; hold it through a pointer instead

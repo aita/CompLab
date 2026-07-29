@@ -1,0 +1,1 @@
+break_outside_loop.otter:4:5: `break` is only meaningful inside a loop

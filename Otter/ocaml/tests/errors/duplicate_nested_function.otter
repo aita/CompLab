@@ -1,0 +1,11 @@
+module duplicate_nested_function;
+
+fun main() -> int {
+    fun helper() -> int {
+        return 1;
+    }
+    fun helper() -> int {
+        return 2;
+    }
+    return helper();
+}

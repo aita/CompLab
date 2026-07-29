@@ -1,0 +1,6 @@
+module divide_by_zero;
+
+fun main() -> int {
+    var zero: int = 0;
+    return 1 / zero;
+}

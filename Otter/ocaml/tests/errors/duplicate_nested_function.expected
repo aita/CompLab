@@ -1,0 +1,1 @@
+duplicate_nested_function.otter:7:5: `helper` is already declared in this block

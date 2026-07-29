@@ -1,0 +1,1 @@
+mismatched_arms.otter:4:22: one arm of this if gives int and the other gives string, so it has no single type

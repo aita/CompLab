@@ -1,0 +1,93 @@
+// The eight queens, placed by backtracking.
+
+module queens;
+
+import io;
+import str;
+
+var size: int = 8;
+
+// `columns[row]` is the column the queen in that row stands in.
+fun safe(columns: array<int>, row: int, column: int) -> bool {
+    var earlier: int = 0;
+    while (earlier < row) {
+        var taken: int = columns[earlier];
+        if (taken == column) {
+            return false;
+        }
+        if (taken - earlier == column - row) {
+            return false;
+        }
+        if (taken + earlier == column + row) {
+            return false;
+        }
+        earlier = earlier + 1;
+    }
+    return true;
+}
+
+fun place(columns: array<int>, row: int) -> int {
+    if (row == size) {
+        return 1;
+    }
+
+    var found: int = 0;
+    var column: int = 0;
+    while (column < size) {
+        if (safe(columns, row, column)) {
+            columns[row] = column;
+            found = found + place(columns, row + 1);
+        }
+        column = column + 1;
+    }
+    return found;
+}
+
+fun first(columns: array<int>, row: int) -> bool {
+    if (row == size) {
+        return true;
+    }
+    var column: int = 0;
+    while (column < size) {
+        if (safe(columns, row, column)) {
+            columns[row] = column;
+            if (first(columns, row + 1)) {
+                return true;
+            }
+        }
+        column = column + 1;
+    }
+    return false;
+}
+
+fun draw(columns: array<int>) -> void {
+    var row: int = 0;
+    while (row < size) {
+        var line: string = "";
+        var column: int = 0;
+        while (column < size) {
+            if (columns[row] == column) {
+                line = line + "Q";
+            } else {
+                line = line + ".";
+            }
+            column = column + 1;
+        }
+        io.println(line);
+        row = row + 1;
+    }
+    return;
+}
+
+fun main() -> int {
+    var columns: array<int> = [0; size];
+
+    io.println("solutions " + str.from_int(place(columns, 0)));
+
+    var board: array<int> = [0; size];
+    if (first(board, 0)) {
+        io.println("");
+        draw(board);
+    }
+    return 0;
+}

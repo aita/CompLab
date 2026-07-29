@@ -1,0 +1,25 @@
+; Each test is a program and a transcript of what running it should write.
+;
+; `cases/` holds programs that run to completion and are compared on their
+; standard output; `errors/` holds programs that must be rejected or must fault,
+; and are compared on their diagnostics. The examples are documentation, so they
+; are held to running as well.
+
+(executable
+ (name run_tests))
+
+(rule
+ (alias runtest)
+ (deps
+  run_tests.exe
+  %{exe:../bin/otter.exe}
+  (source_tree cases)
+  (source_tree errors)
+  (source_tree ../examples))
+ (action
+  (run
+   ./run_tests.exe
+   %{exe:../bin/otter.exe}
+   cases:stdout:0
+   errors:stderr:1
+   ../examples:stdout:0)))

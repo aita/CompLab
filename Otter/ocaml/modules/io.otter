@@ -1,0 +1,23 @@
+module io;
+
+fun otter_io_print(text: string) -> void;
+fun otter_io_println(text: string) -> void;
+fun otter_io_read_line() -> string;
+
+// Writes the text as it stands.
+export fun print(text: string) -> void {
+    otter_io_print(text);
+    return;
+}
+
+// Writes the text and ends the line.
+export fun println(text: string) -> void {
+    otter_io_println(text);
+    return;
+}
+
+// Reads one line from the standard input, without its line ending. Returns
+// the empty string at end of input.
+export fun read_line() -> string {
+    return otter_io_read_line();
+}

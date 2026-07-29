@@ -1,0 +1,11 @@
+module missing_return;
+
+fun largest(left: int, right: int) -> int {
+    if (left > right) {
+        return left;
+    }
+}
+
+fun main() -> int {
+    return largest(1, 2);
+}

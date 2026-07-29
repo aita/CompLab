@@ -1,0 +1,64 @@
+module value_blocks;
+
+import io;
+import str;
+
+// An arm of a value if is a block that ends in the expression it gives, and
+// what that expression is may be another if.
+fun grade(score: int) -> string {
+    return if (score < 0) {
+        "invalid"
+    } else {
+        if (score < 50) {
+            "low"
+        } else {
+            "high"
+        }
+    };
+}
+
+fun main() -> int {
+    io.println("grade " + grade(0 - 1) + " " + grade(10) + " " + grade(90));
+
+    // An arm may work before it yields, and what it declares is gone
+    // afterwards.
+    var scaled: int = if (true) {
+        var doubled: int = 21;
+        doubled * 2
+    } else {
+        0
+    };
+    io.println("scaled " + str.from_int(scaled));
+
+    // The value an arm gives may itself be an if that was written last.
+    var picked: int = if (scaled > 40) {
+        var half: int = scaled / 2;
+        if (half > 20) {
+            half
+        } else {
+            0
+        }
+    } else {
+        0
+    };
+    io.println("picked " + str.from_int(picked));
+
+    // A loop written inside an arm is its own affair.
+    var counted: int = if (picked > 0) {
+        var total: int = 0;
+        for (var index: int = 0; index < 5; index = index + 1) {
+            if (index == 3) {
+                break;
+            }
+            total = total + index;
+        }
+        total
+    } else {
+        0
+    };
+    io.println("counted " + str.from_int(counted));
+
+    // Nothing about it is special where an expression is wanted.
+    io.println("inline " + str.from_int(1 + if (counted > 0) { 10 } else { 20 }));
+    return 0;
+}

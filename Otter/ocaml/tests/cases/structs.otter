@@ -1,0 +1,64 @@
+module structs;
+
+import io;
+import str;
+
+struct Point {
+    x: int;
+    y: int;
+}
+
+struct Line {
+    from: Point;
+    to: Point;
+    label: string;
+}
+
+fun render(point: Point) -> string {
+    return "(" + str.from_int(point.x) + ", " + str.from_int(point.y) + ")";
+}
+
+fun moved(point: Point, dx: int, dy: int) -> Point {
+    return new Point { x: point.x + dx, y: point.y + dy };
+}
+
+// A struct arrives by value, so changing it here leaves the caller's alone.
+fun clobber(point: Point) -> void {
+    point.x = 0;
+    return;
+}
+
+fun main() -> int {
+    var here: Point = new Point { x: 3, y: 4 };
+    io.println("here " + render(here));
+    io.println("moved " + render(moved(here, 1, 1)));
+
+    var copy: Point = here;
+    copy.x = 99;
+    io.println("after copy " + render(here));
+
+    clobber(here);
+    io.println("after call " + render(here));
+
+    // Nested structs are copied all the way down.
+    var line: Line = new Line {
+        from: here,
+        to: new Point { x: 10, y: 10 },
+        label: "diagonal"
+    };
+    line.from.x = 100;
+    io.println("nested " + render(line.from) + " " + render(here));
+    io.println("label " + line.label);
+
+    // Field order in a literal does not have to match the declaration.
+    var backwards: Point = new Point { y: 2, x: 1 };
+    io.println("backwards " + render(backwards));
+
+    io.println("equal " + str.from_bool(backwards == new Point { x: 1, y: 2 }));
+
+    // Structs sit inside arrays as values.
+    var path: array<Point> = [here; 2];
+    path[0].x = 7;
+    io.println("in array " + render(path[0]) + " " + render(path[1]));
+    return 0;
+}

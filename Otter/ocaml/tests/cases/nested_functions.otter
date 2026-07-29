@@ -1,0 +1,83 @@
+module nested_functions;
+
+import io;
+import str;
+
+// A function declared inside another reads the variables around it, and is
+// gone once its block is.
+fun make_report(title: string) -> string {
+    var lines: int = 0;
+
+    fun line(text: string) -> string {
+        lines = lines + 1;
+        return str.from_int(lines) + ". " + text;
+    }
+
+    var first: string = line("one");
+    var second: string = line("two");
+    return title + ": " + first + " " + second;
+}
+
+// Two functions in one block may call each other, and either may be used
+// above where it is written.
+fun parity(value: int) -> string {
+    fun even(n: int) -> bool {
+        if (n == 0) {
+            return true;
+        }
+        return odd(n - 1);
+    }
+
+    fun odd(n: int) -> bool {
+        if (n == 0) {
+            return false;
+        }
+        return even(n - 1);
+    }
+
+    if (even(value)) {
+        return "even";
+    }
+    return "odd";
+}
+
+// A nested function is a value like any other, so it may be handed out and
+// keeps what it captured.
+fun make_adder(amount: int) -> fun(int) -> int {
+    fun add(value: int) -> int {
+        return value + amount;
+    }
+    return add;
+}
+
+fun shadowing() -> string {
+    fun name() -> string {
+        return "outer";
+    }
+
+    var text: string = name();
+    {
+        fun name() -> string {
+            return "inner";
+        }
+        text = text + " " + name();
+    }
+    return text + " " + name();
+}
+
+fun main() -> int {
+    io.println(make_report("counted"));
+    io.println("10 is " + parity(10));
+    io.println("7 is " + parity(7));
+
+    var add_five: fun(int) -> int = make_adder(5);
+    io.println("adder " + str.from_int(add_five(37)));
+
+    io.println(shadowing());
+
+    // Each call gets its own set of nested functions, over its own variables.
+    var one: fun(int) -> int = make_adder(1);
+    var two: fun(int) -> int = make_adder(2);
+    io.println("separate " + str.from_int(one(0)) + " " + str.from_int(two(0)));
+    return 0;
+}

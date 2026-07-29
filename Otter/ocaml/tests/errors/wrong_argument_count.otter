@@ -1,0 +1,9 @@
+module wrong_argument_count;
+
+fun add(left: int, right: int) -> int {
+    return left + right;
+}
+
+fun main() -> int {
+    return add(1);
+}
