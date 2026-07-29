@@ -356,3 +356,27 @@ LiquidHaskell がこの系譜で、さらに遡ると F*・Dafny・Why3・ESC/Ja
   `int`・`bool`・`unit` だけです。
 - **完全な整数算術。** 上に書いたとおり、組み込み手続きは整数について不完全です。
   `--smt` がその答えです。
+
+## 参考文献
+
+- P. M. Rondon, M. Kawaguchi, R. Jhala, [*Liquid types*][liquid], PLDI 2008。修飾子・κ・
+  Horn 制約・述語抽象。「液体型」の節がこれです。
+- R. Jhala, N. Vazou, [*Refinement types: a tutorial*][rt-tutorial], 2020。篩型の入門として
+  一番読みやすいもの。測度とデータ型まで含みます。
+- R. Nieuwenhuis, A. Oliveras, C. Tinelli, [*Solving SAT and SAT modulo theories*][dpllt],
+  JACM 53(6), 2006。「SMT とは何か」の DPLL(T) の節。
+- G. Nelson, D. C. Oppen, [*Simplification by cooperating decision procedures*][no79],
+  TOPLAS 1(2), 1979。理論を組み合わせる方法。
+- L. de Moura, N. Bjørner, [*Z3: an efficient SMT solver*][z3], TACAS 2008。
+  `--smt "z3 -in"` の相手。
+- A. Schrijver, *Theory of Linear and Integer Programming*, Wiley 1986, §12。
+  Fourier–Motzkin 消去と、有理数緩和が整数解について何を言えるか。
+- C. Barrett, A. Stump, C. Tinelli, [*The SMT-LIB standard*][smtlib], version 2.0, 2010。
+  `--dump-vc` が出す言語。
+
+[liquid]: https://doi.org/10.1145/1375581.1375602
+[rt-tutorial]: https://arxiv.org/abs/2010.07763
+[dpllt]: https://doi.org/10.1145/1217856.1217859
+[no79]: https://doi.org/10.1145/357073.357079
+[z3]: https://doi.org/10.1007/978-3-540-78800-3_24
+[smtlib]: https://smtlib.cs.uiowa.edu/papers/smt-lib-reference-v2.0-r10.12.21.pdf

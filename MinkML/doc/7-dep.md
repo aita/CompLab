@@ -14,6 +14,69 @@ seven : nat = 7
 leftUnit : (n : nat) -> Eq nat (plus 0 n) n = fn n => refl nat n
 ```
 
+## 用語
+
+### Curry–Howard 対応
+
+この章で「型」と「命題」、「項」と「証明」が同じ言葉で語られるのは、それが同じものだからです。
+
+| 論理 | 型 |
+|---|---|
+| 命題 | 型 |
+| 証明 | その型を持つ項 |
+| `A ⟹ B` | `A -> B` |
+| `A ∧ B` | `A * B` |
+| `∀x:A. P(x)` | 依存関数型 `(x : A) -> P x` |
+| `∃x:A. P(x)` | 依存直積 `(x : A) * P x` |
+
+だから `rightUnit : (n : nat) -> Eq nat (plus n 0) n` は「すべての `n` について `plus n 0 = n`」
+という**命題**で、その型を持つ項が**証明**です。そして「停止しない定義を許すと何でも証明できて
+しまう」という下の注意が意味を持ちます——嘘の証明が作れる、ということです。
+
+依存型の2つの型を、論理の言葉と対応させて呼びます。
+
+| | 名前 | 読み |
+|---|---|---|
+| `(x : A) -> B` | **Π型**（依存関数型） | 結果の型が引数の値に依存できる関数 |
+| `(x : A) * B` | **Σ型**（依存直積） | 第2成分の型が第1成分の値に依存できる対 |
+
+`B` が `x` を使わなければ、Π型は `A -> B`、Σ型は `A * B` に戻ります。**ふつうの矢印と対は、
+依存版の特別な場合**です。
+
+### 定義的等値と命題的等値
+
+この章の中心にある区別です。
+
+| | 何か | 誰が決めるか |
+|---|---|---|
+| **定義的等値** (definitional / judgmental equality) | 計算して同じ形になる | **型検査器**が自動で判定する（`conv`） |
+| **命題的等値** (propositional equality) | 等式を主張する**型** `Eq A a b` | **人**が証明項を書く。使うのは除去子 `J` |
+
+`plus 0 n` と `n` は定義的に等しいので `refl` だけで済みます。`plus n 0` と `n` は定義的には
+等しくない（`n` が変数だと計算が詰まる）ので、命題的等値を帰納法で証明することになります。
+「`plus 0 n` と `plus n 0` — 証明の非対称」の節が全部この差の話です。
+
+定義的等値を判定する手続きを **変換検査 (conversion checking)** と呼び、この処理系ではそれを
+NbE でやります。含めているのは β（適用の計算）、除去子の計算、そして **η**（`fn x => f x` と
+`f` を同じとみなす）です。
+
+### そのほか
+
+| | |
+|---|---|
+| **宇宙 (universe)** | 型の型。`Type : Type 1 : Type 2 : ...` |
+| **Girard のパラドックス** | `Type : Type` にすると矛盾が導けるという結果。だから階層が要る |
+| **除去子 (eliminator)** | その型の値を「使う」唯一の方法。`nat` には `natrec`、`Eq` には `J`。パターンマッチのかわり |
+| **動機 (motive)** | 除去子に渡す「結果の型が引数によってどう変わるか」を言う関数 |
+| **中性値 (neutral)** | 自由変数に当たって計算が止まった値。`x`、`f x`、`natrec ... x` |
+| **α 変換** | 束縛変数の名前替え。de Bruijn レベルで名前を使わないので問題にならない |
+| **de Bruijn レベル** | 変数を「外側から数えた深さ」で表す方式。`conv` の `lvl` がこれ |
+| **エラボレーション** | 書かれた構文を、検査済みの核言語の項に翻訳すること |
+
+**NbE (normalization by evaluation)** の名前は手順そのものです——正規化 (normalization) を、
+構文の書き換えではなく**評価 (evaluation) して読み戻す**ことで行う。`eval` で意味的な値にし、
+`quote` で構文に戻します。代入が現れないのが利点です。
+
 ## 何が入っているか
 
 - **宇宙（universe）の階層** `Type`、`Type 1`、… — 「型の型」です。`Type : Type 1` で、
@@ -231,3 +294,20 @@ rightUnit : (n : nat) -> Eq nat (plus n 0) n = fn n => natrec (fn k => Eq nat (n
 - **添字付き帰納型。** `nat` と `Eq` だけが組み込みで、`data` 宣言はありません。上のように
   `natrec` で族を作るのが代わりです。
 - **停止性検査。** 再帰がないので要りません。
+
+## 参考文献
+
+- P. Martin-Löf, *Intuitionistic type theory*, Bibliopolis 1984。Π・Σ・`nat`・`Eq` と、
+  それぞれの除去子。この章が実装している体系の出どころ。
+- J.-Y. Girard, *Interprétation fonctionnelle et élimination des coupures*, 1972。
+  `Type : Type` から矛盾が出ること（Girard のパラドックス）。宇宙に階層がある理由。
+- U. Berger, H. Schwichtenberg, [*An inverse of the evaluation functional for typed
+  λ-calculus*][nbe], LICS 1991。NbE。`eval` と `quote` の対。
+- A. Abel, [*Normalization by evaluation: dependent types and impredicativity*][abel13],
+  Habilitationsschrift 2013。依存型に対する NbE と変換検査の、いま使われている形。
+- A. Kovács, [*Elaboration zoo*][zoo]。メタ変数・暗黙引数・単一化まで含めた実装の見本。
+  この章が「入れていない」ものが、そこにあります。
+
+[nbe]: https://doi.org/10.1109/LICS.1991.151645
+[abel13]: https://www.cse.chalmers.se/~abela/habil.pdf
+[zoo]: https://github.com/AndrasKovacs/elaboration-zoo

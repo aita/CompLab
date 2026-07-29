@@ -4,6 +4,45 @@
 「どのプログラムが正しいか」で意見が分かれますが、「正しいプログラムがどう走るか」では完全に
 一致するので、この2つは共有されます。
 
+## 用語 — 正規形と抽象機械
+
+**正規形 (normal form)** とは、書き方の自由度を削って「同じことを言う書き方が1通りしかない」
+形にした中間表現のことです。削るのは後段が読みやすくなる自由度で、どの自由度を削るかが
+正規形の名前になります。
+
+**A正規形 (ANF, administrative normal form / A-normal form)** が削るのは
+**部分式の入れ子**です。演算や呼び出しの被演算子は**原子 (atom)** ——変数かリテラル——でなければ
+ならず、それ以外は `let` で名前を付けます。だから `f (g x)` は書けず、
+`let t = g x in f t` になります。
+
+**CPS (continuation-passing style)** はもっと強く、「次に何をするか」を関数（継続）として
+明示的に渡す形にします。表現力は上ですが、変換の副産物として意味のない β 冗長
+（**administrative redex**）が大量に出るので、ダンプが読みにくくなります。ANF は
+「CPS のうち継続が呼び出しスタックで足りる部分」に相当します。
+
+**抽象機械 (abstract machine)** は、評価を「状態の書き換え規則」として書いたものです。名前は
+状態の構成要素の頭文字です。
+
+| | 状態 | |
+|---|---|---|
+| **CEK** | **C**ontrol（実行中の項）・**E**nvironment（環境）・**K**ontinuation（継続フレーム列） | この処理系の基本形 |
+| **CESK** | CEK ＋ **S**tore（可変な記憶） | チャネルの端点を置くので、`linear` があるとこちら |
+| **SECD** | **S**tack・**E**nvironment・**C**ontrol・**D**ump | Landin の古典。ANF では S が要らず、D は K の劣った版になる |
+
+継続を「フレームの列」として持つことが要点です。**フレームが1種類しかない**（`KLet`）のは、
+A正規形では「値を待っているもの」が `let` だけだからです。
+
+そのほか、この章で出てくる語:
+
+| | |
+|---|---|
+| 末尾位置 (tail position) | その式の値がそのまま関数の返り値になる位置。ここでの呼び出しはフレームを積まなくてよい |
+| 末尾呼び出し (tail call) | 末尾位置にある呼び出し。ANF では `tailcall` という別の節点 |
+| join point | 分岐が合流する点。ここでは局所関数として具体化する |
+| カリー化 (currying) | 2引数関数を「1引数関数を返す1引数関数」にすること |
+| PAP (partial application) | 引数が足りない呼び出しを表す実行時の表現。カリー化を正規化でやると要らない |
+| CBPV (call-by-push-value) | 値と計算を型で分ける体系。構文カテゴリが2つ増える |
+
 ## なぜ木を直接歩かないのか
 
 構文木をそのまま再帰で評価する方式（tree-walking）は短く書けますが、ラボとしては情報が
@@ -185,3 +224,22 @@ four : int = 4
 型システムが変えているのは、プログラムが走る前に何を証明させられるかだけです。`inc` の
 引数を `{ v : int | v > 0 }` に変えれば `refine` だけが呼び出し側に証明を要求し、他の3つは
 その型を読むことすらできません。
+
+## 参考文献
+
+- C. Flanagan, A. Sabry, B. F. Duba, M. Felleisen, [*The essence of compiling with
+  continuations*][anf], PLDI 1993。A正規形。CPS 変換の後に administrative redex を消すと
+  ANF になる、という関係がここに書かれています。
+- P. J. Landin, [*The mechanical evaluation of expressions*][landin], Computer Journal 6(4),
+  1964。SECD 機械。
+- M. Felleisen, D. P. Friedman, [*Control operators, the SECD machine, and the
+  λ-calculus*][cek], 1986。CEK 機械。
+- L. Maurer, P. Downen, S. Peyton Jones, [*Compiling without continuations*][joinpoints],
+  PLDI 2017。join point を IR の一級市民にする側。ここではクロージャで代用しています。
+- P. B. Levy, [*Call-by-push-value: a subsuming paradigm*][cbpv], TLCA 1999。上の表の CBPV。
+
+[anf]: https://doi.org/10.1145/155090.155113
+[landin]: https://doi.org/10.1093/comjnl/6.4.308
+[cek]: https://legacy.cs.indiana.edu/ftp/techreports/TR197.pdf
+[joinpoints]: https://doi.org/10.1145/3062341.3062380
+[cbpv]: https://doi.org/10.1007/3-540-48959-2_17

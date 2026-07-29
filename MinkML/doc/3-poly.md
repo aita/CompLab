@@ -5,6 +5,44 @@
 (ICFP 2013、以下 DK'13) の実装に、整数・真偽値・対・`let` の一般化を足したものです。
 実装は [`lab/src/poly.ml`](../lab/src/poly.ml) の1ファイルです。
 
+## 用語 — rank とは何か
+
+**単型 (monotype)** は `forall` を含まない型です。`int`、`int -> bool`、`'a -> 'a`（`'a` が
+束縛されていないなら単型の一部）。**多相型 (polytype / type scheme)** は `forall` を持つ型です。
+
+**rank** は「`forall` が矢印の**左側**に何段入れ子になっているか」です。右側に何個あっても
+rank は上がりません。
+
+| rank | 型の例 | |
+|---|---|---|
+| 0 | `int -> bool` | 単型。`forall` なし |
+| 1 | `forall 'a. 'a -> 'a` | `forall` が先頭だけ。**Hindley–Milner が推論できる範囲** |
+| 1 | `forall 'a. 'a -> (forall 'b. 'b -> 'b)` | 右にいくつあっても rank 1（前に出せる） |
+| 2 | `(forall 'a. 'a -> 'a) -> int * bool` | `forall` が矢印の**左**に1段 |
+| 3 | `((forall 'a. 'a -> 'a) -> int) -> int` | 左に2段 |
+
+rank-1 が特別なのは、**`forall` を全部型の先頭に集められる**ことです。だから「型スキームを
+具体化して単型で扱い、最後に一般化する」という Hindley–Milner の手順が成立します。矢印の左に
+`forall` があると、それを前に出すことができません——引数の位置に「どんな型でも受け取れる関数」
+という要求が立ってしまい、単型では表せない。
+
+そして **rank-2 以上の推論は決定不能**です（Wells 1999）。だから rank-N を扱う体系はどれも
+「どこを書いてもらうか」を決めます。DK'13 の答えは**多相な引数の型は書いてもらう**、です。
+
+この章で出てくる、rank に付随する語:
+
+| | |
+|---|---|
+| 述語的 (predicative) | `â`（未確定変数）に代入できるのは**単型だけ**。多相型は入らない |
+| 非述語的 (impredicative) | `â` に多相型も代入できる。表現力は上がるが推論はさらに難しくなる |
+| 剛性変数 (rigid variable) | `forall` で束縛された変数。**何とも単一化しない**。「任意の型で成り立つ」を強制する側 |
+| 未確定変数 (existential variable) | まだ決まっていない単型を表す穴。解かれる側。`â`、表示は `?n` |
+| 反変 (contravariant) | 矢印の引数の位置。部分型の向きが逆になる |
+| 共変 (covariant) | 矢印の結果の位置。部分型の向きがそのまま |
+
+`â` を "existential variable" と呼ぶのは DK'13 の用語で、**存在型 (existential type) とは
+無関係**です。意味は「未確定」だけです。
+
 ## 解きたい問題
 
 Hindley–Milner（[4章](4-rows.md)の `row` システム）が推論できるのは rank-1 の多相、つまり
@@ -197,3 +235,18 @@ tests/errors/rank2.mnk:4:32: type error: cannot make bool a subtype of int
   それは `id` の型を具体化した結果が単型だからです。
 - **型別名（`type`）。** `poly` では拒否します。行や篩と違い、多相の話に別名は要らないからです。
 - **レコード・ヴァリアント・チャネル・依存型。** それぞれ担当システムのエラーになります。
+
+## 参考文献
+
+- J. Dunfield, N. R. Krishnaswami, [*Complete and Easy Bidirectional Typechecking for
+  Higher-Rank Polymorphism*][dk13], ICFP 2013。この章の実装元。順序付き文脈、`â`、目印、
+  そして4つの判断（`⇐` `⇒` `<:` `•`）はこの論文の図そのままです。
+- J. B. Wells, [*Typability and type checking in System F are equivalent and
+  undecidable*][wells], Annals of Pure and Applied Logic 98, 1999。rank-2 以上の推論が
+  決定不能であること。「推論をあきらめる場所を決める」の根拠です。
+- D. Le Botlan, D. Rémy, [*MLF: raising ML to the power of System F*][mlf], ICFP 2003。
+  別の答え——注釈を型の中に持ち込んで、非述語的な多相まで推論する道。こちらは採っていません。
+
+[dk13]: https://doi.org/10.1145/2500365.2500582
+[wells]: https://doi.org/10.1016/S0168-0072(98)00047-5
+[mlf]: https://doi.org/10.1145/944705.944709
