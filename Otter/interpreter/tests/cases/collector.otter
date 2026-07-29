@@ -1,0 +1,65 @@
+module collector;
+
+import io;
+import str;
+import gc;
+
+struct Node {
+    value: int;
+    next: *Node;
+}
+
+fun build(length: int) -> *Node {
+    var head: *Node = null;
+    for (var index: int = 0; index < length; index = index + 1) {
+        head = &new Node { value: index, next: head };
+    }
+    return head;
+}
+
+fun total(list: *Node) -> int {
+    var sum: int = 0;
+    for (var walk: *Node = list; walk != null; walk = walk.next) {
+        sum = sum + walk.value;
+    }
+    return sum;
+}
+
+// The closure holds the scope, and the scope holds the closure. Counting
+// references would never free one of these; tracing does.
+fun make_counter() -> fun() -> int {
+    var count: int = 0;
+    fun tick() -> int {
+        count = count + 1;
+        return count;
+    }
+    return tick;
+}
+
+fun main() -> int {
+    // Build a lot of garbage and let go of it.
+    for (var round: int = 0; round < 200; round = round + 1) {
+        build(50);
+    }
+    for (var round: int = 0; round < 2000; round = round + 1) {
+        make_counter();
+    }
+    gc.collect();
+    var quiet: int = gc.live();
+
+    // Hold something across a collection and check it is all still there.
+    var kept: *Node = build(500);
+    var counter: fun() -> int = make_counter();
+    counter();
+    counter();
+
+    gc.collect();
+    var holding: int = gc.live();
+
+    io.println("sum " + str.from_int(total(kept)));
+    io.println("counter " + str.from_int(counter()));
+    io.println("collected " + str.from_bool(gc.collections() >= 2));
+    io.println("garbage freed " + str.from_bool(quiet < 1000));
+    io.println("live data kept " + str.from_bool(holding >= quiet + 500));
+    return 0;
+}

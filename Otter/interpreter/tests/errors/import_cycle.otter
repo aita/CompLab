@@ -1,0 +1,7 @@
+module import_cycle;
+
+import ping;
+
+fun main() -> int {
+    return ping.value();
+}

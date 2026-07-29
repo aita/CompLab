@@ -1,0 +1,28 @@
+module strings;
+
+import io;
+import str;
+
+fun main() -> int {
+    var text: string = "otters swim well";
+
+    io.println(text);
+    io.println("length " + str.from_int(text.length));
+    io.println("slice " + str.substring(text, 7, 4));
+    io.println("found " + str.from_int(str.index_of(text, "swim")));
+    io.println("missing " + str.from_int(str.index_of(text, "fly")));
+
+    // Indexing a string gives one byte of its utf-8, not one character.
+    io.println("first byte " + str.from_int(text[0] as int));
+
+    io.println("equal " + str.from_bool("swim" == "swim"));
+    io.println("ordered " + str.from_bool("apple" < "banana"));
+
+    io.println("parsed " + str.from_int(str.to_int("1234") + 1));
+
+    // Escapes and non-ascii text survive the round trip.
+    io.println("tab\tand\\backslash");
+    var paw: string = "\u{1F9A6}";
+    io.println("otter " + paw + " is " + str.from_int(paw.length) + " bytes");
+    return 0;
+}

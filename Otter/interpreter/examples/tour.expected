@@ -1,0 +1,50 @@
+the tour
+
+== numbers
+int     42
+byte    255
+char    o
+float64 0.3333333333333333
+float32 0.3333333432674408
+wrapped 0
+sqrt 2  1.4142135623730951
+
+== strings
+length  11
+slice   otters
+find    7
+byte 0  111
+compare true
+
+== arrays
+sum     169
+zeros   5
+aliased 1
+
+== structs
+length  5
+copied  3
+through 30
+
+== closures
+adder   15
+twice   25
+counter 2
+nested  2 even, 3 odd
+
+== control
+for     37
+if      below zero above
+value   72
+
+== lists
+total   6
+head    3
+
+== recursion
+even 10 true
+odd 10  false
+
+== memory
+kept    3
+swept   true

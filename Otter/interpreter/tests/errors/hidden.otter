@@ -1,0 +1,9 @@
+module hidden;
+
+fun secret() -> int {
+    return 42;
+}
+
+export fun open() -> int {
+    return 1;
+}

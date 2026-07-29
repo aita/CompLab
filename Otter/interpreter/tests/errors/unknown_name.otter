@@ -1,0 +1,5 @@
+module unknown_name;
+
+fun main() -> int {
+    return missing + 1;
+}

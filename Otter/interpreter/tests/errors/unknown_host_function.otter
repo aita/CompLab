@@ -1,0 +1,9 @@
+module unknown_host_function;
+
+// A function with no body is one the host provides, and this is not one.
+fun otter_io_shout(text: string) -> void;
+
+fun main() -> int {
+    otter_io_shout("hello");
+    return 0;
+}

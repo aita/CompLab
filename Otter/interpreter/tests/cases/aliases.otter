@@ -1,0 +1,56 @@
+module aliases;
+
+import io;
+import str;
+import shapes;
+
+struct Point {
+    x: int;
+    y: int;
+}
+
+// An alias is transparent: the name and what it stands for are one type, not
+// two that convert.
+type UserId = int;
+type Position = Point;
+type Callback = fun(int) -> int;
+type Names = array<string>;
+type Handle = *Point;
+
+// Aliases may be written in any order and may name each other.
+type Older = Elder;
+type Elder = UserId;
+
+fun bump(id: UserId) -> int {
+    return id + 1;
+}
+
+fun main() -> int {
+    var id: UserId = 7;
+    // The parameter says UserId and the argument says int; they are the same.
+    var raw: int = id;
+    io.println("alias " + str.from_int(bump(raw)));
+
+    var here: Position = new Point { x: 1, y: 2 };
+    var handle: Handle = &here;
+    handle.x = 10;
+    io.println("struct " + str.from_int(here.x));
+
+    var step: Callback = fun(value: int) -> int { return value * 3; };
+    io.println("function " + str.from_int(step(id)));
+
+    var names: Names = ["otter", "stoat"];
+    io.println("array " + names[1] + " " + str.from_int(names.length));
+
+    var chained: Older = 41;
+    io.println("chained " + str.from_int(chained + 1));
+
+    // An alias from another module works the same way.
+    var span: shapes.Length = 2.0;
+    io.println("imported " + str.from_float(shapes.area(new shapes.Circle { radius: span })));
+
+    // What a mismatch reports is the type behind the alias, since that is what
+    // it is.
+    io.println("described " + str.from_bool(id == 7));
+    return 0;
+}

@@ -1,0 +1,68 @@
+module closures;
+
+import io;
+import str;
+
+fun make_adder(amount: int) -> fun(int) -> int {
+    return fun(value: int) -> int {
+        return value + amount;
+    };
+}
+
+fun apply(step: fun(int) -> int, value: int) -> int {
+    return step(value);
+}
+
+fun compose(outer: fun(int) -> int, inner: fun(int) -> int) -> fun(int) -> int {
+    return fun(value: int) -> int {
+        return outer(inner(value));
+    };
+}
+
+fun double(value: int) -> int {
+    return value * 2;
+}
+
+fun main() -> int {
+    var add_ten: fun(int) -> int = make_adder(10);
+    var add_one: fun(int) -> int = make_adder(1);
+
+    io.println("ten " + str.from_int(add_ten(5)));
+    io.println("one " + str.from_int(add_one(5)));
+
+    // A named function is a value of the same function type.
+    var named: fun(int) -> int = double;
+    io.println("named " + str.from_int(apply(named, 21)));
+
+    io.println("composed " + str.from_int(compose(add_ten, named)(5)));
+
+    // A closure holds the variable itself, so both of these see the same one.
+    var count: int = 0;
+    var bump: fun() -> void = fun() -> void {
+        count = count + 1;
+        return;
+    };
+    var read: fun() -> int = fun() -> int {
+        return count;
+    };
+    bump();
+    bump();
+    bump();
+    io.println("counted " + str.from_int(read()));
+
+    // Each call to the maker gets its own copy of the captured variable.
+    var counters: array<fun() -> int> = [make_counter(), make_counter()];
+    counters[0]();
+    counters[0]();
+    io.println("first " + str.from_int(counters[0]()));
+    io.println("second " + str.from_int(counters[1]()));
+    return 0;
+}
+
+fun make_counter() -> fun() -> int {
+    var count: int = 0;
+    return fun() -> int {
+        count = count + 1;
+        return count;
+    };
+}

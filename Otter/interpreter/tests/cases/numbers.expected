@@ -1,0 +1,16 @@
+sum 14
+group 20
+divide 3
+remainder 1
+negative divide -3
+hex 255
+binary 10
+underscores 1000000
+shifted -1
+byte 255
+byte wraps 0
+char C
+float64 1.5
+float32 0.5
+truncated 3
+compare true

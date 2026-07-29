@@ -1,0 +1,94 @@
+module loops;
+
+import io;
+import str;
+
+fun render(values: array<int>) -> string {
+    var text: string = "";
+    for (var index: int = 0; index < values.length; index = index + 1) {
+        if (index > 0) {
+            text = text + " ";
+        }
+        text = text + str.from_int(values[index]);
+    }
+    return text;
+}
+
+// A for with no condition ends only by returning or breaking, so this needs no
+// unreachable return after the loop.
+fun first_square_above(limit: int) -> int {
+    for (var candidate: int = 1;; candidate = candidate + 1) {
+        if (candidate * candidate > limit) {
+            return candidate * candidate;
+        }
+    }
+}
+
+fun main() -> int {
+    var total: int = 0;
+    for (var index: int = 1; index <= 10; index = index + 1) {
+        total = total + index;
+    }
+    io.println("sum " + str.from_int(total));
+
+    // `continue` still runs the step, so this ends.
+    var odds: int = 0;
+    for (var index: int = 0; index < 10; index = index + 1) {
+        if (index % 2 == 0) {
+            continue;
+        }
+        odds = odds + index;
+    }
+    io.println("odds " + str.from_int(odds));
+
+    var stopped: int = 0;
+    for (var index: int = 0; index < 100; index = index + 1) {
+        if (index == 5) {
+            break;
+        }
+        stopped = index;
+    }
+    io.println("stopped " + str.from_int(stopped));
+
+    // Any of the three parts may be left out.
+    var counted: int = 0;
+    for (;;) {
+        counted = counted + 1;
+        if (counted == 4) {
+            break;
+        }
+    }
+    io.println("endless " + str.from_int(counted));
+
+    var outside: int = 0;
+    for (; outside < 3;) {
+        outside = outside + 1;
+    }
+    io.println("condition only " + str.from_int(outside));
+
+    // The initialiser may be an expression rather than a declaration.
+    var reused: int = 10;
+    for (reused = 0; reused < 3; reused = reused + 1) {
+    }
+    io.println("expression init " + str.from_int(reused));
+
+    var values: array<int> = [0; 5];
+    for (var index: int = 0; index < values.length; index = index + 1) {
+        values[index] = index * index;
+    }
+    io.println("filled " + render(values));
+
+    var grid: int = 0;
+    for (var row: int = 0; row < 3; row = row + 1) {
+        for (var column: int = 0; column < 3; column = column + 1) {
+            if (column == 2) {
+                break;
+            }
+            grid = grid + 1;
+        }
+    }
+    io.println("nested " + str.from_int(grid));
+
+    io.println("square " + str.from_int(first_square_above(50)));
+    return 0;
+}

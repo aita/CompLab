@@ -1,0 +1,66 @@
+module conditionals;
+
+import io;
+import str;
+
+struct Point {
+    x: int;
+    y: int;
+}
+
+fun classify(value: int) -> string {
+    return if (value < 0) {
+        "negative"
+    } else if (value == 0) {
+        "zero"
+    } else {
+        "positive"
+    };
+}
+
+fun main() -> int {
+    io.println(classify(0 - 3) + " " + classify(0) + " " + classify(3));
+
+    // An arm may compute before it yields.
+    var id: int = 7;
+    var scaled: int = if (id > 5) {
+        var doubled: int = id * 2;
+        doubled + 1
+    } else {
+        0
+    };
+    io.println("computed " + str.from_int(scaled));
+
+    // It is an expression, so it nests where any other does.
+    io.println("nested " + str.from_int(1 + if (true) { 10 } else { 20 }));
+
+    var sizes: array<int> = [if (id > 5) { 1 } else { 2 }, 3];
+    io.println("in array " + str.from_int(sizes[0]));
+
+    // The arms may give any one type, including a struct or a pointer.
+    var here: Point = if (id == 7) {
+        new Point { x: 1, y: 2 }
+    } else {
+        new Point { x: 0, y: 0 }
+    };
+    io.println("struct " + str.from_int(here.x));
+
+    var handle: *Point = if (id == 0) { &here } else { null };
+    io.println("pointer " + str.from_bool(handle == null));
+
+    // A loop inside an arm is fine; it is jumping out of the block that is not.
+    var counted: int = if (id > 0) {
+        var total: int = 0;
+        for (var i: int = 0; i < 4; i = i + 1) {
+            if (i == 3) {
+                break;
+            }
+            total = total + i;
+        }
+        total
+    } else {
+        0
+    };
+    io.println("looped " + str.from_int(counted));
+    return 0;
+}

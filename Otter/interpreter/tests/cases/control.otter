@@ -1,0 +1,58 @@
+module control;
+
+import io;
+import str;
+
+fun classify(value: int) -> string {
+    if (value < 0) {
+        return "negative";
+    } else if (value == 0) {
+        return "zero";
+    } else {
+        return "positive";
+    }
+}
+
+// A loop that only ends by returning counts as returning, so no unreachable
+// return is needed after it.
+fun first_multiple(of: int, above: int) -> int {
+    var candidate: int = above + 1;
+    while (true) {
+        if (candidate % of == 0) {
+            return candidate;
+        }
+        candidate = candidate + 1;
+    }
+}
+
+fun main() -> int {
+    io.println(classify(0 - 5));
+    io.println(classify(0));
+    io.println(classify(5));
+
+    var total: int = 0;
+    var index: int = 0;
+    while (index < 10) {
+        index = index + 1;
+        if (index % 2 == 0) {
+            continue;
+        }
+        if (index > 7) {
+            break;
+        }
+        total = total + index;
+    }
+    io.println("total " + str.from_int(total));
+
+    // A block is a statement of its own, and names declared in one are gone
+    // after it.
+    var shadowed: int = 1;
+    {
+        var shadowed: int = 2;
+        io.println("inner " + str.from_int(shadowed));
+    }
+    io.println("outer " + str.from_int(shadowed));
+
+    io.println("multiple " + str.from_int(first_multiple(7, 20)));
+    return 0;
+}

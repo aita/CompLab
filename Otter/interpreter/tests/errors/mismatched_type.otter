@@ -1,0 +1,6 @@
+module mismatched_type;
+
+fun main() -> int {
+    var count: int = "not a number";
+    return count;
+}

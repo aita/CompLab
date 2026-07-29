@@ -1,0 +1,7 @@
+module string_is_immutable;
+
+fun main() -> int {
+    var text: string = "otter";
+    text[0] = 79 as byte;
+    return 0;
+}

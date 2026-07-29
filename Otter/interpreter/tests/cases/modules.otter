@@ -1,0 +1,23 @@
+module modules;
+
+import io;
+import str;
+import shapes;
+
+// A module's own names sit beside the ones it imports; nothing is brought in
+// implicitly.
+var scale: float64 = 2.0;
+
+fun main() -> int {
+    var circle: shapes.Circle = new shapes.Circle { radius: scale };
+
+    io.println("from " + shapes.name);
+    io.println("area " + str.from_float(shapes.area(circle)));
+    io.println("unit " + str.from_float(shapes.area(shapes.unit())));
+    io.println("diagonal " + str.from_float(shapes.diagonal(3.0, 4.0)));
+
+    // An exported function is a value like any other.
+    var measure: fun(shapes.Circle) -> float64 = shapes.area;
+    io.println("indirect " + str.from_float(measure(circle)));
+    return 0;
+}

@@ -1,0 +1,1 @@
+type_name_taken.otter:7:1: module `type_name_taken` already declares a type named `Thing`

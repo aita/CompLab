@@ -1,0 +1,28 @@
+module shapes;
+
+import math;
+
+export type Length = float64;
+
+export struct Circle {
+    radius: Length;
+}
+
+export var name: string = "shapes";
+
+// Only what is exported can be reached from another module.
+fun square(value: float64) -> float64 {
+    return value * value;
+}
+
+export fun area(circle: Circle) -> float64 {
+    return 3.14159 * square(circle.radius);
+}
+
+export fun unit() -> Circle {
+    return new Circle { radius: 1.0 };
+}
+
+export fun diagonal(width: float64, height: float64) -> float64 {
+    return math.sqrt(square(width) + square(height));
+}

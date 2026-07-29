@@ -1,0 +1,15 @@
+module jump_out_of_value_block;
+
+fun pick(flag: bool) -> int {
+    var value: int = if (flag) {
+        return 1;
+        2
+    } else {
+        3
+    };
+    return value;
+}
+
+fun main() -> int {
+    return pick(true);
+}

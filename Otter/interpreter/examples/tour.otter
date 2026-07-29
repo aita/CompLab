@@ -1,0 +1,302 @@
+// A walk through everything the language has.
+
+module tour;
+
+import io;
+import str;
+import math;
+import gc;
+
+// An alias is transparent: the name and what it stands for are one type.
+type Distance = float64;
+type Transform = fun(int) -> int;
+
+struct Point {
+    x: Distance;
+    y: Distance;
+}
+
+// A struct may hold itself through a pointer, which is what makes linked
+// structures possible.
+struct Node {
+    value: int;
+    next: *Node;
+}
+
+var greeting: string = "the tour";
+
+fun heading(text: string) -> void {
+    io.println("");
+    io.println("== " + text);
+    return;
+}
+
+// -- numbers ----------------------------------------------------------------
+
+fun numbers() -> void {
+    heading("numbers");
+
+    var whole: int = 42;
+    var small: byte = 0xff;
+    var letter: char = 'o';
+    var precise: float64 = 1.0 / 3.0;
+    var rough: float32 = 1.0 as float32 / 3.0 as float32;
+
+    io.println("int     " + str.from_int(whole));
+    io.println("byte    " + str.from_int(small as int));
+    io.println("char    " + str.from_char(letter));
+    io.println("float64 " + str.from_float(precise));
+    io.println("float32 " + str.from_float(rough as float64));
+
+    // A byte wraps rather than growing.
+    small = small + 1;
+    io.println("wrapped " + str.from_int(small as int));
+
+    io.println("sqrt 2  " + str.from_float(math.sqrt(2.0)));
+    return;
+}
+
+// -- strings ----------------------------------------------------------------
+
+fun strings() -> void {
+    heading("strings");
+
+    var text: string = "otters swim";
+    io.println("length  " + str.from_int(text.length));
+    io.println("slice   " + str.substring(text, 0, 6));
+    io.println("find    " + str.from_int(str.index_of(text, "swim")));
+    io.println("byte 0  " + str.from_int(text[0] as int));
+    io.println("compare " + str.from_bool("a" < "b"));
+    return;
+}
+
+// -- arrays -----------------------------------------------------------------
+
+fun sum(values: array<int>) -> int {
+    var total: int = 0;
+    for (var index: int = 0; index < values.length; index = index + 1) {
+        total = total + values[index];
+    }
+    return total;
+}
+
+fun arrays() -> void {
+    heading("arrays");
+
+    var values: array<int> = [10, 20, 30, 40];
+    var zeros: array<int> = [0; 5];
+
+    values[2] = 99;
+    io.println("sum     " + str.from_int(sum(values)));
+    io.println("zeros   " + str.from_int(zeros.length));
+
+    // Arrays are reference values, so this names the same run of elements.
+    var alias: array<int> = values;
+    alias[0] = 1;
+    io.println("aliased " + str.from_int(values[0]));
+    return;
+}
+
+// -- structs ----------------------------------------------------------------
+
+fun length(point: Point) -> float64 {
+    return math.sqrt(point.x * point.x + point.y * point.y);
+}
+
+fun structs() -> void {
+    heading("structs");
+
+    var here: Point = new Point { x: 3.0, y: 4.0 };
+    io.println("length  " + str.from_float(length(here)));
+
+    // Structs are value types, so this copies rather than aliases.
+    var there: Point = here;
+    there.x = 30.0;
+    io.println("copied  " + str.from_float(here.x));
+
+    // A pointer reaches the original, and `.` follows it.
+    var handle: *Point = &here;
+    handle.x = 30.0;
+    io.println("through " + str.from_float(here.x));
+    return;
+}
+
+// -- closures ---------------------------------------------------------------
+
+fun make_adder(amount: int) -> Transform {
+    return fun(value: int) -> int {
+        return value + amount;
+    };
+}
+
+fun twice(step: Transform, value: int) -> int {
+    return step(step(value));
+}
+
+// A function may be declared inside another, where it reads the variables
+// around it and is gone once its block is.
+fun tally(values: array<int>) -> string {
+    var evens: int = 0;
+    var odds: int = 0;
+
+    fun record(value: int) -> void {
+        if (value % 2 == 0) {
+            evens = evens + 1;
+        } else {
+            odds = odds + 1;
+        }
+        return;
+    }
+
+    for (var index: int = 0; index < values.length; index = index + 1) {
+        record(values[index]);
+    }
+    return str.from_int(evens) + " even, " + str.from_int(odds) + " odd";
+}
+
+fun closures() -> void {
+    heading("closures");
+
+    var add_ten: Transform = make_adder(10);
+    io.println("adder   " + str.from_int(add_ten(5)));
+    io.println("twice   " + str.from_int(twice(add_ten, 5)));
+
+    // A closure keeps the variable itself, not a snapshot of it.
+    var count: int = 0;
+    var tick: fun() -> int = fun() -> int {
+        count = count + 1;
+        return count;
+    };
+    tick();
+    tick();
+    io.println("counter " + str.from_int(count));
+
+    io.println("nested  " + tally([1, 2, 3, 4, 5]));
+    return;
+}
+
+// -- control flow -----------------------------------------------------------
+
+fun control() -> void {
+    heading("control");
+
+    var total: int = 0;
+    for (var index: int = 1; index <= 10; index = index + 1) {
+        if (index % 3 == 0) {
+            continue;
+        }
+        total = total + index;
+    }
+    io.println("for     " + str.from_int(total));
+
+    // An if may stand for a value, in which case both arms are needed and each
+    // ends in the expression it gives.
+    fun describe(value: int) -> string {
+        return if (value < 0) {
+            "below"
+        } else if (value == 0) {
+            "zero"
+        } else {
+            "above"
+        };
+    }
+
+    io.println("if      " + describe(0 - 1) + " " + describe(0) + " " + describe(1));
+
+    var doubled: int = if (total > 20) {
+        var half: int = total / 2;
+        half * 4
+    } else {
+        total
+    };
+    io.println("value   " + str.from_int(doubled));
+    return;
+}
+
+// -- linked structures ------------------------------------------------------
+
+fun push(list: *Node, value: int) -> *Node {
+    return &new Node { value: value, next: list };
+}
+
+fun total(list: *Node) -> int {
+    var walk: *Node = list;
+    var result: int = 0;
+    while (walk != null) {
+        result = result + walk.value;
+        walk = walk.next;
+    }
+    return result;
+}
+
+fun lists() -> void {
+    heading("lists");
+
+    var list: *Node = null;
+    list = push(list, 1);
+    list = push(list, 2);
+    list = push(list, 3);
+
+    io.println("total   " + str.from_int(total(list)));
+    io.println("head    " + str.from_int(list.value));
+    return;
+}
+
+// -- recursion --------------------------------------------------------------
+
+// Two functions may call each other; a module registers all its signatures
+// before it checks any body.
+fun is_even(value: int) -> bool {
+    if (value == 0) {
+        return true;
+    }
+    return is_odd(value - 1);
+}
+
+fun is_odd(value: int) -> bool {
+    if (value == 0) {
+        return false;
+    }
+    return is_even(value - 1);
+}
+
+fun recursion() -> void {
+    heading("recursion");
+    io.println("even 10 " + str.from_bool(is_even(10)));
+    io.println("odd 10  " + str.from_bool(is_odd(10)));
+    return;
+}
+
+// -- memory -----------------------------------------------------------------
+
+fun collector() -> void {
+    heading("memory");
+
+    // Nothing is freed by hand. What no longer reaches a variable is collected,
+    // including a closure and the scope it holds that hold each other.
+    for (var round: int = 0; round < 500; round = round + 1) {
+        make_adder(round);
+        push(null, round);
+    }
+
+    var kept: *Node = push(push(null, 1), 2);
+    gc.collect();
+
+    io.println("kept    " + str.from_int(total(kept)));
+    io.println("swept   " + str.from_bool(gc.live() < 1000));
+    return;
+}
+
+fun main() -> int {
+    io.println(greeting);
+    numbers();
+    strings();
+    arrays();
+    structs();
+    closures();
+    control();
+    lists();
+    recursion();
+    collector();
+    return 0;
+}

@@ -1,0 +1,7 @@
+module no_implicit_conversion;
+
+fun main() -> int {
+    var whole: int = 3;
+    var exact: float64 = whole;
+    return 0;
+}

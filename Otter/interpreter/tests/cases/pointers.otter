@@ -1,0 +1,78 @@
+module pointers;
+
+import io;
+import str;
+
+struct Point {
+    x: int;
+    y: int;
+}
+
+// A struct holds itself through a pointer, which is what a list is made of.
+struct Node {
+    value: int;
+    next: *Node;
+}
+
+fun bump(slot: *int) -> void {
+    *slot = *slot + 1;
+    return;
+}
+
+fun push(list: *Node, value: int) -> *Node {
+    return &new Node { value: value, next: list };
+}
+
+fun render(list: *Node) -> string {
+    var text: string = "";
+    var walk: *Node = list;
+    while (walk != null) {
+        if (text != "") {
+            text = text + " -> ";
+        }
+        text = text + str.from_int(walk.value);
+        walk = walk.next;
+    }
+    return text;
+}
+
+fun length(list: *Node) -> int {
+    if (list == null) {
+        return 0;
+    }
+    return 1 + length(list.next);
+}
+
+fun main() -> int {
+    var value: int = 1;
+    bump(&value);
+    bump(&value);
+    io.println("bumped " + str.from_int(value));
+
+    // The address of a field reaches the field itself.
+    var point: Point = new Point { x: 1, y: 2 };
+    var slot: *int = &point.x;
+    *slot = 10;
+    io.println("field " + str.from_int(point.x));
+
+    // And so does the address of an element.
+    var values: array<int> = [1, 2, 3];
+    bump(&values[1]);
+    io.println("element " + str.from_int(values[1]));
+
+    // `.` follows a pointer to a struct without an explicit dereference.
+    var handle: *Point = &point;
+    handle.y = 20;
+    io.println("through " + str.from_int((*handle).y));
+
+    var list: *Node = null;
+    io.println("empty " + str.from_int(length(list)));
+    list = push(list, 3);
+    list = push(list, 2);
+    list = push(list, 1);
+    io.println("list " + render(list));
+    io.println("length " + str.from_int(length(list)));
+
+    io.println("null " + str.from_bool(list.next.next.next == null));
+    return 0;
+}

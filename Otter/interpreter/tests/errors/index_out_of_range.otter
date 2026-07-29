@@ -1,0 +1,6 @@
+module index_out_of_range;
+
+fun main() -> int {
+    var values: array<int> = [1, 2, 3];
+    return values[3];
+}

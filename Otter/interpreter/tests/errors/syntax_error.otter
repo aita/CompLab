@@ -1,0 +1,6 @@
+module syntax_error;
+
+fun main() -> int {
+    var count: int = ;
+    return count;
+}

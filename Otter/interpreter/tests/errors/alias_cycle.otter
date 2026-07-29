@@ -1,0 +1,9 @@
+module alias_cycle;
+
+type Left = Right;
+type Right = Left;
+
+fun main() -> int {
+    var value: Left = 0;
+    return value;
+}

@@ -1,0 +1,6 @@
+module break_outside_loop;
+
+fun main() -> int {
+    break;
+    return 0;
+}
