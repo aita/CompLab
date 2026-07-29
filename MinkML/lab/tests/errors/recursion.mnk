@@ -1,0 +1,4 @@
+#system dep
+(* `fun` does not bind its own name in this system: unbounded recursion would
+   prove anything. *)
+fun loop (n : nat) : nat = loop n

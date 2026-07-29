@@ -1,0 +1,4 @@
+#system linear
+fun server (c : chan (?int ; stop)) : unit =
+  let val (n, c) = recv c in close c end
+val bad = let val c = fork server in 0 end

@@ -1,0 +1,12 @@
+id : forall 'a. 'a -> 'a = <fun>
+compose : forall 'a 'b 'c. ('a -> 'c) -> ('b -> 'a) -> 'b -> 'c = <fun>
+twice : forall 'a. ('a -> 'a) -> 'a -> 'a = <fun>
+useTwice : (forall 'a. 'a -> 'a) -> int * bool = <fun>
+both : int * bool = (1, true)
+pair : forall 'a 'b. 'a -> 'b -> 'a * 'b = <fun>
+mixed : forall 'a. (int * bool) * ('a -> 'a) = ((1, true), <fun>)
+fact : int -> int = <fun>
+f6 : int = 720
+sumTo : int -> int = <fun>
+s10 : int = 55
+applied : int = 23

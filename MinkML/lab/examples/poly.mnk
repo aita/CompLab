@@ -1,0 +1,42 @@
+#system poly
+
+(* Higher-rank polymorphism, checked bidirectionally.
+
+   Nothing here is annotated except where an annotation carries information the
+   checker cannot invent -- and the third definition is exactly that case. *)
+
+val id = fn x => x
+
+fun compose f g x = f (g x)
+
+fun twice f x = f (f x)
+
+(* Rank 2: the argument is used at two different types, which is only possible
+   if its type is a forall.  There is no way to infer that from the body, so it
+   is written down, and the annotation is what makes the definition check. *)
+val useTwice : (forall 'a. 'a -> 'a) -> int * bool =
+  fn f => (f 1, f true)
+
+val both = useTwice id
+
+(* Rank 1 needs nothing written: the type is inferred and then generalised, so
+   `pair` may be used at any two types. *)
+fun pair x y = (x, y)
+
+val mixed = pair (pair 1 true) (id id)
+
+fun fact n = if n == 0 then 1 else n * fact (n - 1)
+
+val f6 = fact 6
+
+(* Let-bound polymorphism inside a function body, and a local recursive
+   function.  `go` is `fun`, so it may call itself; `step` is `val`, so it may
+   not. *)
+fun sumTo n =
+  let fun go i acc = if i > n then acc else go (i + 1) (acc + i)
+      val step = fn x => x + 1
+  in go (step 0) 0 end
+
+val s10 = sumTo 10
+
+val applied = twice (compose (fn x => x + 1) (fn x => x * 2)) 5

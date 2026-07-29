@@ -1,0 +1,2 @@
+#system refine
+fun bad (a : int) (b : int) : int = a div b

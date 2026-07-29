@@ -1,0 +1,51 @@
+#system row
+
+(* Row polymorphism: records and variants whose types say what they have, and
+   leave a variable for whatever else they might have. *)
+
+type point = { x : int, y : int }
+
+val origin : point = { x = 0, y = 0 }
+
+(* `getX` says nothing about the rest of the record, so it works on any record
+   with an `x`.  The `..'r` in the inferred type is the row variable. *)
+fun getX r = r.x
+
+val a = getX origin
+val b = getX { x = 5, name = 7, deep = { x = 1 } }
+
+(* Update is restriction followed by extension: remove the old field, put a new
+   one on top.  The row variable is what carries the other fields through. *)
+fun shiftX r dx = { x = r.x + dx, ..r \ x }
+
+val moved = shiftX origin 3
+val movedTwice = shiftX (shiftX { x = 1, y = 2, z = 3 } 1) 1
+
+(* Labels are scoped, so an extension may shadow a field instead of replacing
+   it, and the type shows both.  Restriction uncovers the one underneath. *)
+val shadowed = { x = true, ..origin }
+val outerX = shadowed.x
+val innerX = (shadowed \ x).x
+
+(* Variants are the dual, with the row on the other side of the arrow.  A
+   closed match fixes the row exactly. *)
+fun describe v =
+  case v of
+    `Int n => n
+  | `Bool b => if b then 1 else 0
+  | `Pair p => getX p
+
+val d1 = describe (`Int 41)
+val d2 = describe (`Bool true)
+val d3 = describe (`Pair { x = 7, y = 0 })
+
+(* A catch-all arm leaves the row open: `count` accepts any variant that *may*
+   carry `Some`, which is what the trailing row variable in its type means. *)
+fun count v =
+  case v of
+    `Some n => n
+  | other => 0
+
+val c1 = count (`Some 7)
+val c2 = count (`Nothing ())
+val c3 = count (`Anything { x = 1 })

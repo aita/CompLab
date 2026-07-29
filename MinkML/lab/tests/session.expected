@@ -1,0 +1,17 @@
+classify : chan (?int ; !bool ; stop) -> unit = <fun>
+asked : bool = true
+calculator : chan (&{ `add : ?int ; ?int ; !int ; stop, `quit : stop }) -> unit = <fun>
+sum : int = 42
+quitEarly : unit = ()
+ponger : chan (?int ; !int ; ?int ; !int ; stop) -> unit = <fun>
+1
+10
+2
+20
+pinged : unit = ()
+useOnce : int = 7
+addedOnce : int = 42
+worker : chan (?int ; !int ; stop) -> unit = <fun>
+broker : chan (?chan (!int ; ?int ; stop) ; stop) -> unit = <fun>
+42
+delegated : unit = ()

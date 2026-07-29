@@ -1,0 +1,3 @@
+#system row
+fun getX r = r.x
+val bad = getX { y = 1 }

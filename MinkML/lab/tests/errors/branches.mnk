@@ -1,0 +1,3 @@
+#system linear
+fun server (c : chan (&{ `yes : stop, `no : stop })) : unit =
+  branch c of `yes c => close c

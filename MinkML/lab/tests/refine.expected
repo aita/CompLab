@@ -1,0 +1,15 @@
+inc : { v : int | v >= 0 } -> { v : int | v > 0 } = <fun>
+three : { v : int | v > 0 } = 3
+safeDiv : int -> { v : int | v <> 0 } -> int = <fun>
+half : int = 5
+abs : int -> { v : int | v >= 0 } = <fun>
+a1 : { v : int | v >= 0 } = 5
+max : (a : int) -> (b : int) -> { v : int | v >= a andalso v >= b } = <fun>
+m : { v : int | v >= 3 andalso v >= 7 } = 7
+clamp : (lo : int) -> (hi : { v : int | v >= lo }) -> int -> { v : int | v >= lo andalso v <= hi } = <fun>
+c : { v : int | v >= 0 andalso v <= 10 } = 10
+positive : { v : int | v > 0 } = 7
+stillPositive : { v : int | v >= 0 } = 7
+next : { v : int | v > 0 } = 8
+quotient : { v : int | v > 0 } -> { v : int | v >= 0 } = <fun>
+q : { v : int | v >= 0 } = 25

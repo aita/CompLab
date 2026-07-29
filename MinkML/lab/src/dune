@@ -1,0 +1,27 @@
+; The systems are a library so that something other than the command line can
+; drive them: tests/systems.ml asks each checker about the same program.
+; `wrapped false` keeps the module names flat, so `Poly` is `Poly` from either
+; side.  `unix` is for smt.ml, which spawns an external solver; that is the
+; only part of this library that talks to anything outside the process.
+
+(library
+ (name minkml)
+ (wrapped false)
+ (libraries unix)
+ (modules
+  (:standard \ mink))
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
+
+(executable
+ (name mink)
+ (modules mink)
+ (libraries minkml)
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
+
+(ocamllex lexer)
+
+(menhir
+ (modules parser)
+ (flags --explain))

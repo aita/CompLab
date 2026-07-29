@@ -1,0 +1,6 @@
+#system dep
+val vec : Type -> nat -> Type =
+  fn a => fn n => natrec (fn _ => Type) unit (fn _ => fn rest => a * rest) n
+val head : (a : Type) -> (n : nat) -> vec a (suc n) -> a =
+  fn a => fn n => fn v => fst v
+val bad = head nat 0 tt

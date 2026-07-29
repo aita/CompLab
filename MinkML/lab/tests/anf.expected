@@ -1,0 +1,44 @@
+-- twice in A-normal form
+let t.3 = fun f ->
+  let f.1 = fun x ->
+    let t.2 = f x
+    tailcall f t.2
+
+  ret f.1
+
+ret t.3
+twice : forall 'a. ('a -> 'a) -> 'a -> 'a = <fun>
+-- classify in A-normal form
+let t.7 = fun n ->
+  let t.4 = >(n, 10)
+  if t.4 then
+    let t.6 = *(n, 2)
+    ret t.6
+  else
+    let t.5 = +(n, 1)
+    ret t.5
+
+ret t.7
+classify : int -> int = <fun>
+-- sumTo in A-normal form
+let t.14 = fun n ->
+  let rec go = fun i ->
+    let t.13 = fun acc ->
+      let t.9 = >(i, n)
+      if t.9 then
+        ret acc
+      else
+        let t.10 = +(i, 1)
+        let t.11 = go t.10
+        let t.12 = +(acc, i)
+        tailcall t.11 t.12
+
+    ret t.13
+  let t.8 = go 0
+  tailcall t.8 0
+
+ret t.14
+sumTo : int -> int = <fun>
+-- answer in A-normal form
+tailcall sumTo 4
+answer : int = 10

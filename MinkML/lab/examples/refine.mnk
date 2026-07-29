@@ -1,0 +1,53 @@
+#system refine
+
+(* Refinement types.  A base type may carry a predicate, and a function type may
+   name its argument so that the result can talk about it.  Everything a
+   function promises is verified where it is defined, and everything it demands
+   is verified where it is called.
+
+   Run with --dump-vc to see the implications this file generates. *)
+
+fun inc (n : { v : int | v >= 0 }) : { v : int | v > 0 } = n + 1
+
+val three : { v : int | v > 0 } = inc 2
+
+(* The divisor's type is what makes `div` safe: the obligation is discharged at
+   the call site, not inside. *)
+fun safeDiv (a : int) (b : { v : int | v <> 0 }) : int = a div b
+
+val half = safeDiv 10 2
+
+(* Path sensitivity: each branch is checked knowing which way the test went,
+   which is the only reason this satisfies its result type. *)
+fun abs (n : int) : { v : int | v >= 0 } = if n < 0 then -n else n
+
+val a1 = abs (-5)
+
+fun max (a : int) (b : int) : { v : int | v >= a andalso v >= b } =
+  if a >= b then a else b
+
+val m = max 3 7
+
+(* The result's refinement may mention several arguments, and the solver has to
+   put the branch condition together with the arithmetic to see it. *)
+fun clamp (lo : int) (hi : { v : int | v >= lo }) (x : int)
+        : { v : int | v >= lo andalso v <= hi } =
+  if x < lo then lo else if x > hi then hi else x
+
+val c = clamp 0 10 42
+
+(* Subtyping between refinements is implication, so a stronger type is
+   accepted where a weaker one is expected -- and `positive` below is stronger
+   than what `inc` demands. *)
+val positive : { v : int | v > 0 } = 7
+val stillPositive : { v : int | v >= 0 } = positive
+val next = inc positive
+
+(* A local binding keeps its refinement, so what is known about `d` at the end
+   comes from what was checked at the top. *)
+fun quotient (n : { v : int | v > 0 }) : { v : int | v >= 0 } =
+  let val d = n + 1
+      val q = safeDiv 100 d
+  in abs q end
+
+val q = quotient 3
