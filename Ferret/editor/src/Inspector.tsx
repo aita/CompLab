@@ -55,7 +55,11 @@ export default function Inspector({
           {shown.glyph}
         </span>
         <div>
-          <div className="inspector-title">{shown.title}</div>
+          {/* What kind of node this is, not what it has been called.  The
+              card names itself after its Name so that two Feedbacks can be
+              told apart at a glance; here the Name is a field a line below,
+              and what is worth saying at the top is which node this is. */}
+          <div className="inspector-title">{spec.title}</div>
           <div className="inspector-id">{node.id}</div>
         </div>
       </div>
