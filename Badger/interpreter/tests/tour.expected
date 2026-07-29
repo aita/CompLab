@@ -1,0 +1,12 @@
+grandchildren of tom:
+  ann
+  pat
+everyone below tom: [bob,liz,ann,pat,jim]
+total 10, shape several
+squares: [1-1,2-4,3-9,4-16,5-25]
+min(3,7) = 3
+greeted: [badger]
+point(1,2) is point/2, as a list [point,1,2]
+caught: evaluation_error(zero_divisor)
+nothing over five
+done

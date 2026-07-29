@@ -1,0 +1,1 @@
+:- throw(my_ball).

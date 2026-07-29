@@ -1,0 +1,149 @@
+; Golden tests: run a program, diff its output against the .expected file.
+; Update them all with `dune promote` after `dune test`.
+
+; features.pl prints one line per thing that is supposed to work, so a
+; regression shows up as a line changing rather than as a failure somewhere.
+
+(rule
+ (with-outputs-to
+  features.out
+  (run %{exe:../src/badger.exe} %{dep:features.pl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff features.expected features.out)))
+
+; Every example is a test: they are written to print, and what they print is
+; checked.
+
+(rule
+ (with-outputs-to
+  tour.out
+  (run %{exe:../src/badger.exe} %{dep:../examples/tour.pl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.out)))
+
+(rule
+ (with-outputs-to
+  cut.out
+  (run %{exe:../src/badger.exe} %{dep:../examples/cut.pl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff cut.expected cut.out)))
+
+(rule
+ (with-outputs-to
+  lists.out
+  (run %{exe:../src/badger.exe} %{dep:../examples/lists.pl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff lists.expected lists.out)))
+
+(rule
+ (with-outputs-to
+  dcg.out
+  (run %{exe:../src/badger.exe} %{dep:../examples/dcg.pl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff dcg.expected dcg.out)))
+
+(rule
+ (with-outputs-to
+  zebra.out
+  (run %{exe:../src/badger.exe} %{dep:../examples/zebra.pl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff zebra.expected zebra.out)))
+
+(rule
+ (with-outputs-to
+  queens.out
+  (run %{exe:../src/badger.exe} %{dep:../examples/queens.pl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff queens.expected queens.out)))
+
+(rule
+ (with-outputs-to
+  meta.out
+  (run %{exe:../src/badger.exe} %{dep:../examples/meta.pl})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff meta.expected meta.out)))
+
+; The toplevel, fed queries on standard input.  This is the only test of what
+; a query looks like coming back out.
+
+(rule
+ (with-outputs-to
+  queries.out
+  (with-stdin-from
+   %{dep:queries.in}
+   (run %{exe:../src/badger.exe}))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff queries.expected queries.out)))
+
+; Every program under errors/ is expected to fail.  Their diagnostics, stdout
+; and stderr together, go into one golden file.
+
+(rule
+ (with-outputs-to
+  errors.out
+  (progn
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/syntax.pl}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/undefined.pl}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/arity.pl}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/type.pl}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/instantiation.pl}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/zero_divisor.pl}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/list.pl}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/permission.pl}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/redefine.pl}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/no_file.pl}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/badger.exe} %{dep:errors/uncaught.pl})))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff errors.expected errors.out)))

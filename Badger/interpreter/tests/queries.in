@@ -1,0 +1,28 @@
+% What the toplevel does with a query, fed through standard input.  Each
+% answer is printed as it is found, separated by ;, and the last one ends the
+% line -- which is why the answers come out one behind the search.
+
+X = 1.
+X = 1, Y = f(X).
+member(X, [a,b,c]).
+between(1, 3, N), Square is N * N.
+append(Xs, Ys, [1,2]).
+fail.
+1 = 2.
+true.
+X = Y.
+X = f(Y), Y = 1.
+length([a,b], N).
+atom_length(hello, N).
+setof(X-Y, member(X-Y, [2-b, 1-a, 2-b]), Pairs).
+X is 1 + foo.
+no_such_thing(1).
+catch(throw(hello), Ball, true).
+write('quoted here'), nl.
+writeq('quoted here'), nl.
+X = 'a b', Y = "cd", Z = 0'e.
+X = (a :- b, c).
+op(700, xfx, ~~~).
+X = (l ~~~ r).
+this is not a term.
+X = after_the_syntax_error.

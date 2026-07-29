@@ -10,3 +10,7 @@
 - [`Ferret/`](Ferret) — a node-based visual editor in React Flow, and an OCaml
   compiler that turns the graph into WebAssembly bytes. The compiler runs in
   the browser through js_of_ocaml, so the page compiles and runs what you draw.
+- [`Badger/`](Badger) — a Prolog, in OCaml: unification with a trail,
+  backtracking on the host stack, the cut as an exception that names the frame
+  it cuts back to, and definite clause grammars. The book is in
+  [`Badger/doc/`](Badger/doc/index.md), a chapter per concern, in Japanese.

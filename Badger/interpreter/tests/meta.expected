@@ -1,0 +1,15 @@
+interpreted ancestor/2: [tom-bob,bob-ann,ann-jim,tom-ann,tom-jim,bob-jim]
+
+interpreted sum/2: 6
+
+a proof of ancestor(tom, jim):
+  ancestor(tom,jim)
+    parent(tom,bob)
+    ancestor(bob,jim)
+      parent(bob,ann)
+      ancestor(ann,jim)
+        parent(ann,jim)
+
+loops/1 found no proof within depth 20
+interpreting a cut: cut_not_supported
+inferences spent interpreting ancestor/2: 40

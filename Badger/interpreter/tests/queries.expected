@@ -1,0 +1,42 @@
+X = 1.
+X = 1,
+Y = f(1).
+X = a ;
+X = b ;
+X = c.
+N = 1,
+Square = 1 ;
+N = 2,
+Square = 4 ;
+N = 3,
+Square = 9.
+Xs = [],
+Ys = [1,2] ;
+Xs = [1],
+Ys = [2] ;
+Xs = [1,2],
+Ys = [].
+false.
+false.
+true.
+Y = X.
+X = f(1),
+Y = 1.
+N = 2.
+N = 5.
+Pairs = [1-a,2-b].
+ERROR: type_error(evaluable,foo/0) ('is/2')
+ERROR: existence_error(procedure,no_such_thing/1) ('no_such_thing/1')
+Ball = hello.
+quoted here
+true.
+'quoted here'
+true.
+X = 'a b',
+Y = [99,100],
+Z = 101.
+X = (a:-b,c).
+true.
+X = (l~~~r).
+<stdin>:27:13: operator expected before atom a
+X = after_the_syntax_error.

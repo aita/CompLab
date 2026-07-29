@@ -1,0 +1,226 @@
+ok    bind
+ok    both_ways
+ok    shared
+ok    no_match
+ok    arity
+ok    int_is_not_float
+ok    cyclic_without_check
+ok    occurs_check
+ok    not_unifiable
+ok    undone_on_failure
+
+ok    var
+ok    nonvar
+ok    atom
+ok    number
+ok    integer
+ok    float
+ok    atomic
+ok    compound
+ok    callable
+ok    is_list
+ok    ground
+
+ok    identical
+ok    var_first
+ok    number_before_atom
+ok    atom_before_compound
+ok    arity_first
+ok    float_before_int
+ok    compare
+ok    variant
+ok    not_variant
+standard_order              [1.0,1,a,b,f(x)]
+
+ok    plus
+ok    int_division_exact
+ok    int_division_inexact
+ok    truncating
+ok    flooring
+ok    mod_takes_divisor_sign
+ok    rem_takes_dividend_sign
+ok    int_power
+ok    float_power
+ok    bit_and
+ok    shift
+ok    min_max
+ok    abs_sign
+ok    gcd
+ok    sqrt
+ok    rounding
+ok    pi
+ok    char_code_arith
+ok    one_element_list
+ok    comparison_ops
+ok    succ_forward
+ok    succ_backward
+ok    succ_zero
+ok    plus3
+ok    zero_divisor
+ok    not_evaluable
+ok    unbound
+
+ok    functor_read
+ok    functor_atomic
+ok    functor_build
+ok    arg_index
+ok    arg_enumerate
+ok    univ_read
+ok    univ_build
+ok    univ_atomic
+ok    copy_term
+ok    term_variables
+ok    numbervars
+
+ok    atom_length
+ok    atom_chars
+ok    atom_chars_build
+ok    atom_codes
+ok    char_code
+ok    atom_number
+ok    atom_number_fails
+ok    number_codes
+ok    atom_concat
+ok    atom_concat_split
+ok    sub_atom_find
+ok    sub_atom_count
+ok    case
+ok    atomic_list_concat
+ok    atomic_list_concat_sep
+ok    atomic_list_concat_split
+ok    term_to_atom_write
+ok    term_to_atom_read
+ok    atom_to_term
+ok    code_type
+ok    char_type
+
+ok    true
+ok    fail
+ok    conjunction
+ok    disjunction
+ok    if_then_else_then
+ok    if_then_else_else
+ok    if_then_no_else
+ok    soft_cut
+ok    soft_cut_else
+ok    once
+ok    ignore_failure
+ok    forall
+ok    forall_counterexample
+ok    negation_keeps_nothing
+ok    call_extra_args
+ok    call_conjunction
+ok    not_callable
+ok    unbound_goal
+ok    between_check
+ok    between_enumerate
+ok    repeat_with_cut
+ok    length_measure
+ok    length_generate
+
+ok    cut_commits
+ok    cut_is_local_to_call
+ok    cut_is_local_to_condition
+ok    cut_in_a_disjunction_is_not
+ok    cut_is_local_to_negation
+ok    cut_is_local_to_findall
+
+ok    findall
+ok    findall_empty
+ok    findall_tail
+ok    bagof
+ok    bagof_fails_when_empty
+ok    bagof_groups_free_variables
+ok    bagof_caret
+ok    setof_sorts_and_dedupes
+ok    aggregate_count
+ok    aggregate_sum
+ok    aggregate_max_min
+ok    aggregate_set
+
+ok    assertz_then_call
+ok    asserta_order
+ok    retract_one
+ok    retract_fails
+ok    retractall
+ok    retractall_declares
+ok    clause
+ok    logical_update_view
+ok    current_predicate
+ok    current_predicate_enumerates
+ok    predicate_property_builtin
+ok    predicate_property_dynamic
+ok    cannot_assert_over_builtin
+ok    cannot_retract_builtin
+ok    unknown_procedure
+ok    unknown_can_fail_instead
+
+ok    throw_catch
+ok    catch_rethrows_unmatched
+ok    recovery_runs
+ok    catch_is_transparent_to_solutions
+ok    catch_does_not_catch_its_continuation
+ok    ball_survives_backtracking
+ok    error_context
+ok    unbound_ball
+
+ok    operators_read
+ok    left_associative
+ok    right_associative
+ok    precedence
+ok    negative_literal
+ok    prefix_minus_is_not_a_literal
+ok    list_cons
+ok    partial_list
+ok    curly
+ok    quoted_atom
+ok    quoted_operator
+ok    escape
+ok    char_code_syntax
+ok    double_quotes_are_codes
+ok    operator_from_a_directive
+ok    operator_at_runtime
+ok    current_op
+
+ok    f(a,b)                f(a,b)
+ok    1+2*3                 1+2*3
+ok    (1+2)*3               (1+2)*3
+ok    1-2-3                 1-2-3
+ok    1-(2-3)               1-(2-3)
+ok    - 1                   - 1
+ok    1- -1                 1- -1
+ok    - (1,2)               - (1,2)
+ok    [a,b|c]               [a,b|c]
+ok    {a,b}                 {a,b}
+ok    'hello world'         'hello world'
+ok    'don\'t'              'don\'t'
+ok    f(-,+)                f(-,+)
+ok    a:-b,c                a:-b,c
+ok    - - 1                 - - 1
+ok    '[]'(x)               [](x)
+ok    1.0                   1.0
+ok    -1.5e10               -15000000000.0
+ok    f('A',_)              f('A',A)
+
+w_q_a                       'a b \'a b\' a b'
+d_2d_D                      '42 12.34 1,234,567'
+f_e_g                       '3.14 1.500000e+00 0.5'
+s_c                         'abc and hi'
+column                      '[left     |]'
+column_stop                 '        x'
+star                        'a...b'
+tilde                       '100~'
+radix                       ff
+
+ok    phrase_tokens
+ok    phrase_codes
+ok    phrase_rest
+ok    phrase_body
+ok    phrase_braces
+ok    phrase_generates
+
+ok    msort_keeps_duplicates
+ok    sort_drops_duplicates
+ok    keysort_is_stable
+ok    predsort
+ok    predsort_drops_equal
