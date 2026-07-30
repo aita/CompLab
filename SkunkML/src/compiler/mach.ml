@@ -23,36 +23,41 @@ type reg =
   | R of int (* a real one, indexing [reg_name] *)
 
 (* The allocatable registers first, in the System V argument order so that a
-   call's operands often need no moves, then the three that are never handed
-   out: r10 is the scratch a spilled operand is loaded into, and rsp and rbp
-   belong to the frame. *)
+   call's operands often need no moves, then rsp and rbp, which belong to the
+   frame and are never handed out.
+
+   There is no scratch register.  Reserving one costs a colour, and the two
+   things that would have wanted it do not: a spilled value is rewritten to a
+   fresh virtual register with a load and a store around it, and the tail call
+   that has to read its target before the frame goes away can use any
+   caller-saved register, because nothing is live at a tail call except the
+   closure and its argument. *)
 let reg_name =
   [|
-    "rax"; "rcx"; "rdx"; "rsi"; "rdi"; "r8"; "r9"; "r11"; "rbx"; "r12"; "r13"; "r14"; "r15";
-    "r10"; "rsp"; "rbp";
+    "rax"; "rcx"; "rdx"; "rsi"; "rdi"; "r8"; "r9"; "r11"; "r10"; "rbx"; "r12"; "r13"; "r14";
+    "r15"; "rsp"; "rbp";
   |]
 
 (* The number the instruction encoding uses for each of them, which is not the
    order they are listed in. *)
-let x86 = [| 0; 1; 2; 6; 7; 8; 9; 11; 3; 12; 13; 14; 15; 10; 4; 5 |]
+let x86 = [| 0; 1; 2; 6; 7; 8; 9; 11; 10; 3; 12; 13; 14; 15; 4; 5 |]
 
 let rax = 0
 let rcx = 1
 let rdx = 2
 let rsi = 3
 let rdi = 4
-let scratch = 13
 let rsp = 14
 let rbp = 15
 
 (* How many colours the register allocator has. *)
-let nregs = 13
+let nregs = 14
 
 (* Which registers a call destroys.  The callee-saved ones survive it, which is
    what makes them worth having: a value live across a call wants to be in
    one. *)
-let caller_saved = [ 0; 1; 2; 3; 4; 5; 6; 7 ]
-let callee_saved = [ 8; 9; 10; 11; 12 ]
+let caller_saved = [ 0; 1; 2; 3; 4; 5; 6; 7; 8 ]
+let callee_saved = [ 9; 10; 11; 12; 13 ]
 
 type operand =
   | Reg of reg

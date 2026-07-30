@@ -40,16 +40,17 @@ let func st (f : M.func) =
             List.iter (A.instr st) (epilogue f);
             A.ret st
         | M.TailCall ->
-            (* The code address has to be read before the frame goes away, and
-               the scratch register is the one place it can wait: it is never
-               allocated, and popping the callee-saved ones cannot touch it. *)
+            (* The code address has to be read before the frame goes away.  Any
+               caller-saved register will do: nothing is live at a tail call
+               except the closure and its argument, and popping the
+               callee-saved ones cannot touch it. *)
             A.instr st
               (M.Mov
-                 ( M.Reg (M.R M.scratch),
+                 ( M.Reg (M.R M.rax),
                    M.Mem
                      { base = Some (M.R M.rdi); index = None; scale = 1; disp = 0; sym = None } ));
             List.iter (A.instr st) (epilogue f);
-            A.jmp_indirect st (M.R M.scratch)
+            A.jmp_indirect st (M.R M.rax)
         | M.Halt where ->
             A.instr st (M.Lea (M.R M.rdi, M.Mem { base = None; index = None; scale = 1; disp = 0;
                                                   sym = Some (Statics.str where) }));

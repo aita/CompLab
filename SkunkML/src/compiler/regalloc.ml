@@ -363,11 +363,18 @@ let apply (f : M.func) colours =
     | M.Storeb (a, b) -> M.Storeb (op a, of_reg b)
     | other -> other
   in
+  (* A move whose two ends were given the same colour is nothing.  Deleting it is
+     not coalescing -- it does not reduce pressure, it only removes what the
+     colouring made redundant -- but it is where the redundancy shows up. *)
+  let pointless = function
+    | M.Mov (a, b) -> a = b
+    | _ -> false
+  in
   let used = ref [] in
   let note r = match r with M.R c when List.mem c M.callee_saved && not (List.mem c !used) -> used := c :: !used | _ -> () in
   List.iter
     (fun (b : M.block) ->
-      b.M.code <- List.map instr b.M.code;
+      b.M.code <- List.filter (fun i -> not (pointless i)) (List.map instr b.M.code);
       b.M.term <- (match b.M.term with M.Ret o -> M.Ret (op o) | t -> t);
       List.iter
         (fun i ->
