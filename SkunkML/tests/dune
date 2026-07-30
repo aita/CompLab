@@ -153,6 +153,9 @@
     (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/bounds0.sk}))
    (with-accepted-exit-codes
     1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/subrange.sk}))
+   (with-accepted-exit-codes
+    1
     (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/syntax.sk})))))
 
 (rule

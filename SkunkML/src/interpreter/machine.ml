@@ -261,7 +261,11 @@ let call_prim w name (v : value) =
   | "String.substring" ->
       let s, i, n = triple () in
       let s = as_str s and i = as_int i and n = as_int n in
-      if i < 0 || n < 0 || i + n > String.length s then fault "String.substring: out of range"
+      (* `i + n > size` is the obvious test and it is wrong: both are program
+         values, so their sum can wrap round and let an out-of-range pair
+         through to `String.sub`, which raises where a runtime error was owed.
+         Subtracting cannot wrap, because `i` is already known non-negative. *)
+      if i < 0 || n < 0 || n > String.length s - i then fault "String.substring: out of range"
       else VStr (String.sub s i n)
   | "Array.array" ->
       let n, init = pair () in
