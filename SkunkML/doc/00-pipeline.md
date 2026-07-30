@@ -22,7 +22,16 @@
      ▼
    Flat.program          コードブロック＋捕獲＋join point。型はもうない
      ├──▶ machine.ml     CESK マシン                     → 値
-     └──▶ build.ml       値 SSA（[10章](10-ssa.md)）      → amd64 へ向かう途中
+     └──▶ build.ml       値 SSA（[10章](10-ssa.md)）
+            │  select.ml   命令選択（[12章](12-select.md)）
+            ▼
+          Mach.prog       amd64 のグラフ。仮想レジスタと φ
+            │  outofssa.ml + regalloc.ml   彩色（[13章](13-regalloc.md)）
+            ▼
+          Mach.prog       本物のレジスタとフレーム
+            │  emit.ml + asm.ml + link.ml + elf.ml（[14章](14-elf.md)）
+            ▼
+          静的 ELF64      libc なし。実行時ライブラリも amd64 で書いてある
 ```
 
 ## 1. 字句解析

@@ -113,15 +113,37 @@ already placed. The dominator tree is still built, and used to check the claim
 rather than assert it: every use dominated by its definition, on every program
 in the repository.
 
-It stops there for now. Lowering, DP instruction selection, SSA register
-allocation and amd64 emission are next.
+From there it goes all the way to a file. Instruction selection covers the value
+graph with amd64 tiles, choosing them with a dynamic program over the cost of
+producing each value as each kind of operand -- and the DP only has to run where
+the graph branches, which value SSA answers with a field rather than an
+analysis. The phis become copies, and then the interference graph is coloured:
+Chaitin's algorithm with Briggs' optimistic push, spilling to the frame and
+re-running until it fits.
+
+Then it writes the executable itself. There is no `as` and no `ld` after
+selection: the compiler encodes the instructions, assigns the addresses, patches
+the relocations and writes a static ELF64 -- and since there is no linker to
+hand a C object to, the runtime is written in amd64 too. `mmap` for the heap,
+`write` for output, `exit` at the end, and no libc.
+
+```sh
+$ ./_build/default/src/compiler/skunkc.exe -o /tmp/tour examples/tour.sk
+$ /tmp/tour | diff - <(./_build/default/src/interpreter/skunk.exe examples/tour.sk) && echo same
+same
+```
+
+That diff is the test the whole back end is aimed at, and `dune test` runs it for
+every example: the compiler may pick different instructions every time it
+changes, but it may not print anything different.
 
 The implementation is in [`src/`](src) and the book is in
 [`doc/`](doc/index.md): see [`src/README.md`](src/README.md) for the language,
 the two command lines and a map of the source, and
 [`doc/index.md`](doc/index.md) for a chapter per pass. Two to start with, in
 Japanese: [プログラムが通る道](doc/00-pipeline.md) と
-[パターンマッチを決定木にする](doc/05-matching.md)。
+[パターンマッチを決定木にする](doc/05-matching.md)。バックエンドなら
+[命令選択](doc/12-select.md) から [アセンブラ、リンカ、実行時](doc/14-elf.md) まで。
 
 ## What is deliberately missing
 

@@ -258,4 +258,4 @@ $ skunkc --no-verify …                  # 外せる。外す理由はいまの
 
 ---
 
-[← 10. 値 SSA を作る](10-ssa.md) ・ [目次](index.md)
+[← 10. 値 SSA を作る](10-ssa.md) ・ [12. 命令選択 →](12-select.md)

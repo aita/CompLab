@@ -1,13 +1,13 @@
 # The SkunkML implementation
 
 One language, one front end, and two back ends: a machine that runs the
-program, and a compiler that is on its way to amd64. This file is the language
-reference and the map of the source; the book in
+program, and a compiler that writes an amd64 executable. This file is the
+language reference and the map of the source; the book in
 [`../doc/`](../doc/index.md) explains how each pass works.
 
 ```
 src/interpreter/   the front end, and the CESK machine        -> skunk
-src/compiler/      SSA, and what will become the back end     -> skunkc
+src/compiler/      SSA, amd64, and the assembler and linker   -> skunkc
 ```
 
 The front end is a library the two share. By the time it is finished the
@@ -49,13 +49,25 @@ skunkc [options] file.sk
       --dump-ssa    print the SSA of the program (not of the basis)
       --dump-dom    print the dominator tree and the dominance frontiers
       --dump-flat   print the A-normal form it was built from
+      --dump-mach   print the amd64 graph after register allocation
       --no-verify   skip the check that every use is dominated by its definition
+  -o FILE           write the executable here (the default is a.out)
+      --selftest F  write a hand-built ELF to F: checks the assembler, the
+                    linker, the ELF writer and the runtime on their own
+      --dump-encoding
+                    print the bytes for the tricky addressing modes
   -h, --help
 ```
 
-`skunkc` stops at SSA for now: it builds the control-flow graph, checks it, and
-prints it. Lowering, instruction selection, register allocation and emission
-are not written yet.
+`skunkc` writes a static ELF64 with no libc and nothing dynamically linked:
+
+```sh
+./_build/default/src/compiler/skunkc.exe -o /tmp/tour examples/tour.sk
+/tmp/tour
+```
+
+Its output has to match `skunk`'s byte for byte, error messages included. That
+is the differential test, and `dune test` runs it for every example.
 
 Every binding is reported as it is run:
 
@@ -255,7 +267,18 @@ else a` is `int * int -> int`, exactly as in SML.
      |
      +--> machine.ml                    a value
      |
-     +--> build.ml                      value SSA, and then amd64 one day
+     +--> build.ml                      value SSA
+            |  select.ml                 amd64: lowering, and DP tiling
+            v
+          Mach           a graph of amd64 instructions, virtual registers, phis
+            |  outofssa.ml               phis become copies
+            |  regalloc.ml               the interference graph, coloured
+            v
+          Mach           real registers, a frame
+            |  emit.ml + asm.ml          bytes
+            |  link.ml + elf.ml          addresses, and a file
+            v
+          a static ELF64, with the runtime from rt.ml assembled into it
 ```
 
 | file | lines | what it does |
@@ -280,15 +303,26 @@ And the compiler, in `src/compiler/`:
 | file | lines | what it does |
 | --- | --- | --- |
 | `ssa.ml` | 269 | value SSA: values, blocks, phis, and the printer |
-| `build.ml` | 232 | Flat to SSA. A join point is a block with phi-functions |
+| `build.ml` | 235 | Flat to SSA. A join point is a block with phi-functions |
 | `dom.ml` | 241 | dominators, dominance frontiers, and the checks they are for |
-| `skunkc.ml` | 129 | the command line |
+| `mach.ml` | 199 | amd64 in a graph: instructions, operands, virtual registers |
+| `select.ml` | 517 | lowering, and the DP tiler that chooses the instructions |
+| `statics.ml` | 181 | descriptors, string literals, nullary constructors, globals |
+| `stubs.ml` | 89 | the basis, as static data plus one stub per function |
+| `outofssa.ml` | 151 | critical edges, parallel copies, and no more phis |
+| `regalloc.ml` | 398 | liveness, the interference graph, colouring, spilling |
+| `emit.ml` | 124 | the frame, the fall-throughs, and `skunk_program` |
+| `asm.ml` | 311 | the assembler: REX, ModRM, SIB, and the relocations |
+| `link.ml` | 62 | addresses, symbols, and patching the holes |
+| `elf.ml` | 103 | a static ELF64 with two segments |
+| `rt.ml` | 1263 | the runtime, in amd64: the heap, equality, strings, `show` |
+| `skunkc.ml` | 330 | the command line, and the hand-built self-test |
 
 ## Layout
 
 ```
 src/interpreter   the front end and the machine   -> skunk
-src/compiler      SSA and the back end            -> skunkc
+src/compiler      SSA, amd64, assembler, linker   -> skunkc
 examples          tour, matching, modules, store
 tests             golden tests, and errors/ for the messages
 ```
@@ -301,6 +335,14 @@ program that runs but that the decision-tree compiler has something to say
 about. Every program in `tests/errors/` is expected to fail with the message in
 `tests/errors.expected`, and every example has to build SSA that passes the
 verifier.
+
+Then the same examples are compiled, run, and diffed against the interpreter's
+output. `tests/selftest.sk` is diffed twice: once as the interpreter runs it, and
+once against a program `skunkc --selftest` writes by hand -- static blocks,
+hand-written descriptors, every runtime routine called once -- so that a failure
+in the assembler, the linker, the ELF writer or the runtime shows up without the
+compiler in the way. `skunkc --dump-encoding` is a golden file of instruction
+bytes, each of which was diffed against the system assembler once.
 
 ## What is deliberately missing
 
