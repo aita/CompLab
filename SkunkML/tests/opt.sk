@@ -22,6 +22,14 @@ fun throughAJoin b =
   in if n = 5 then "five" else "other"
   end
 
+(* Two zeros in one block, and the folded one comes first.  The builder defines
+   a constant where it is used, so the `0` this folds to is already in the block
+   -- below the record that now wants it.  Sharing the two has to bring the
+   shared one to the top, or the use stops being dominated by its definition and
+   the verifier says so. *)
+fun identity (n : int) = n
+val sharedZero = (100 mod 4, identity 0)
+
 val a = twice { x = 1, y = 2 }
 val b = wasteful 10
 val c = throughAJoin true

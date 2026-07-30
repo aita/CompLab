@@ -26,6 +26,11 @@ func throughAJoin$3:
     v1 = const "five"
     ret v1
 
+func identity$4:
+  b0:
+    v0 = param                             ; a1.22
+    ret v0
+
 -- val twice : { x : int, y : int } -> int
 func $twice:
   b0:
@@ -62,14 +67,29 @@ func $throughAJoin:
     v0 = mkclos throughAJoin$3, 0          ; throughAJoin
     ret v0
 
+-- val identity : int -> int
+func $identity:
+  b0:
+    v0 = mkclos identity$4, 0              ; identity
+    ret v0
+
+-- val sharedZero : int * int
+func $sharedZero:
+  b0:
+    v0 = const 0
+    v1 = global identity
+    v2 = call v1, v0                       ; t.83
+    v3 = record { 1 = v0, 2 = v2 }         ; t.84
+    ret v3
+
 -- val a : int
 func $a:
   b0:
     v0 = const 1
     v1 = const 2
-    v2 = record { x = v0, y = v1 }         ; t.82
+    v2 = record { x = v0, y = v1 }         ; t.85
     v3 = global twice
-    v4 = call v3, v2                       ; t.83
+    v4 = call v3, v2                       ; t.86
     ret v4
 
 -- val b : int
@@ -77,14 +97,14 @@ func $b.2:
   b0:
     v0 = const 10
     v1 = global wasteful
-    v2 = call v1, v0                       ; t.84
+    v2 = call v1, v0                       ; t.87
     ret v2
 
 -- val c : string
 func $c:
   b0:
-    v0 = con true/1                        ; t.85
+    v0 = con true/1                        ; t.88
     v1 = global throughAJoin
-    v2 = call v1, v0                       ; t.86
+    v2 = call v1, v0                       ; t.89
     ret v2
 

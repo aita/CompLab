@@ -112,13 +112,27 @@ let apply ctx (f : S.func) =
     f.S.blocks;
   Hashtbl.reset ctx.repl
 
+(* Hoisting one of these to the front of the entry block is what makes it usable
+   from anywhere in the function, and it costs nothing to do: a constant and a
+   nullary constructor have no arguments, so no position in the block is too
+   early for them.
+
+   It also has to be done to the one that is *already there*.  The builder
+   defines a constant in the block that uses it ([10章](../doc/10-ssa.md)), so
+   an equal one found in the entry block can perfectly well sit below the value
+   about to be pointed at it -- and within a block, later is not dominated. *)
+let to_front (b : S.block) (v : S.value) =
+  if not (match b.S.values with w :: _ -> w == v | [] -> false) then
+    b.S.values <- v :: List.filter (fun (w : S.value) -> not (w == v)) b.S.values;
+  v
+
 (* A constant lives at the top of the entry block, where it dominates
    everything, and is shared with any equal one already there. *)
 let entry_const ctx (f : S.func) (c : S.const) =
   let entry = f.S.entry in
   let same (v : S.value) = match v.S.op with S.Const c' -> c' = c | _ -> false in
   match List.find_opt same entry.S.values with
-  | Some v -> v
+  | Some v -> to_front entry v
   | None ->
       let v = { S.vid = ctx.next_vid; op = S.Const c; args = []; home = entry; uses = 0;
                 origin = "" } in
@@ -151,7 +165,7 @@ let entry_bool ctx (f : S.func) b =
     | _ -> false
   in
   match List.find_opt same entry.S.values with
-  | Some v -> v
+  | Some v -> to_front entry v
   | None ->
       let v = { S.vid = ctx.next_vid; op = S.Con c; args = []; home = entry; uses = 0; origin = "" } in
       ctx.next_vid <- ctx.next_vid + 1;
