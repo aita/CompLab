@@ -1,0 +1,20 @@
+; The compiler is a library so that a test can drive one pass, and an
+; executable so that a program can be compiled.  It depends on the
+; interpreter's library for everything up to and including Flat: the two share
+; a front end, and the compiler starts where closure conversion left off.
+
+(library
+ (name skunkc_lib)
+ (wrapped false)
+ (libraries skunkml)
+ (modules
+  (:standard \ skunkc))
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
+
+(executable
+ (name skunkc)
+ (modules skunkc)
+ (libraries skunkc_lib)
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))

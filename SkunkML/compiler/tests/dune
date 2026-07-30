@@ -1,0 +1,34 @@
+; The SSA the chapter-6 programs build.  It is the same file the interpreter
+; dumps Core for, so the two dumps can be read side by side.
+
+(rule
+ (with-stdout-to
+  join.out
+  (run %{exe:../src/skunkc.exe} --dump-ssa %{dep:../../interpreter/tests/join.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff join.expected join.out)))
+
+; Every program in the repository has to build SSA that passes the verifier:
+; each use dominated by its definition, each phi with one argument per
+; predecessor.  Nothing is printed, so the test is that skunkc exits zero.
+
+(rule
+ (with-stdout-to
+  verify.out
+  (progn
+   (run %{exe:../src/skunkc.exe} --dump-ssa %{dep:../../interpreter/examples/tour.sk})
+   (run %{exe:../src/skunkc.exe} --dump-ssa %{dep:../../interpreter/examples/matching.sk})
+   (run %{exe:../src/skunkc.exe} --dump-ssa %{dep:../../interpreter/examples/modules.sk})
+   (run %{exe:../src/skunkc.exe} --dump-ssa %{dep:../../interpreter/examples/store.sk})
+   (run %{exe:../src/skunkc.exe} --dump-ssa %{dep:../../interpreter/tests/core.sk})
+   (run %{exe:../src/skunkc.exe} --dump-ssa %{dep:../../interpreter/tests/flat.sk}))))
+
+(rule
+ (alias runtest)
+ (action
+  (with-stdout-to
+   verify.ok
+   (progn))))

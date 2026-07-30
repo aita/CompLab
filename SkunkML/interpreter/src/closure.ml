@@ -97,6 +97,9 @@ and make_closure st name param body =
   (label, List.map (fun x -> F.AVar x) caps)
 
 let program (globals : string list) (items : C.item list) : F.program =
+  (* Resetting the counter is safe across compilation units, and keeps the
+     dumps stable: the base of a label is a Core binder, and those are unique
+     for a whole run. *)
   counter := 0;
   let st = { codes = []; globals = Set.of_list globals } in
   let items =
