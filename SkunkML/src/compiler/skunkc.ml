@@ -84,7 +84,7 @@ let encodings () =
   in
   (* Indices into [Mach.reg_name], not x86 numbers. *)
   let rax = 0 and rcx = 1 and rdx = 2 and rsi = 3 and rdi = 4 in
-  let r8 = 5 and r11 = 7 and rbx = 8 and r12 = 9 and r13 = 10 and r15 = 12 in
+  let r8 = 5 and r11 = 7 and rbx = 9 and r12 = 10 and r13 = 11 and r15 = 13 in
   [
     M.Mov (r rax, M.Imm 1);
     M.Mov (r r15, M.Imm (-1));
