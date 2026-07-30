@@ -206,9 +206,6 @@ code twice$3 (a1.20) =
   *FPCA* 1985. もうひとつのやり方。
 - Maurer et al., "Compiling without Continuations", *PLDI* 2017, §3。join point を
   クロージャ変換しない、という判断の出典。
-- 同じ repo の MartenML の `compiler/src/closure.ml` は同じ変換をコンパイラの側で
-  やっています（`doc/closure.md`）。あちらには join point がないので、区別する相手が
-  いません。
 
 ## 実装の地図
 

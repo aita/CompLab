@@ -275,8 +275,6 @@ let joins =
   バックトラック法。決定木より木は小さく、実行は遅い。
 - Fabrice Le Fessant, Luc Maranget, "Optimizing Pattern Matching", *ICFP* 2001.
   OCaml の実装の話。
-- 同じ repo の MartenML も決定木を作ります（`compiler/src/match_compile.ml`、
-  `doc/matching.md`）。あちらは join point を持たないので、共有する腕を関数にします。
 
 ## 実装の地図
 

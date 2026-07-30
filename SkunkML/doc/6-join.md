@@ -27,13 +27,8 @@ let x = (switch xs of nil => ... | :: => ...) in rest
 - **`rest` を関数にして、両方の枝から呼ぶ。** 呼び出しなのでクロージャを作り、フレームを
   積みます。
 
-隣の [MinkML](../../MinkML) の `lab/src/anf.ml` は2番目をやっていて、コメントにこう
-書いてあります。
-
-> that function is what a compiler with join points would keep as a label
-> instead of a closure
-
-ここではその「ラベル」を持ちます。
+2番目は素直で、実際よく使われます。そしてそこで作られる関数は、**join point を持つ
+コンパイラならラベルとして残すもの**です。ここではラベルを持ちます。
 
 ```ocaml
 let with_join ty d f =

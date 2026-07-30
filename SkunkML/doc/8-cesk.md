@@ -21,39 +21,58 @@ K  kontinuation   フレームのリスト
 
 ## 1. なぜ S があるのか
 
-CEK なら環境が名前を値へ直接写せば済みます。この言語の値は**配列を除いて**一度作ったら
-変わらないので、それで足ります。
+CEK なら環境が名前を値へ直接写せば済みます。この言語の値は**可変なものを除いて**
+一度作ったら変わらないので、それで足ります。
 
-配列があると足りません。
+可変なものは2つ、`ref` と `array` です。
 
 ```sml
-val zeroes = Array.array (5, 0)
-val alias = zeroes
-val () = Array.update (alias, 2, 99)
-val throughTheOther = Array.sub (zeroes, 2)   (* 99 *)
+val counter = ref 0
+val alias = counter
+val () = alias := 100
+val throughTheOther = !counter     (* 100 *)
 ```
 
-`zeroes` と `alias` は同じ**場所**を指していなければなりません。値のコピーではなく。
+`counter` と `alias` は同じ**場所**を指していなければなりません。値のコピーではなく。
 
-そこで変数は場所を指し、ストアが中身を言う、という2段にします。配列は番地の連なりです。
+そこで変数は場所を指し、ストアが中身を言う、という2段にします。`ref` は1つの番地、
+配列は番地の連なりです。
 
 ```ocaml
+| VRef of int              (* 1つの番地 *)
 | VArray of int * int      (* 先頭番地、長さ *)
 ```
 
-`Array.update` はストアを1箇所書き換えるだけで、機械の他の部分は何も変わりません。
-**これが4つ目の要素の説明の全部です。**
+`:=` も `Array.update` もストアを1箇所書き換えるだけで、機械の他の部分は何も
+変わりません。**これが4つ目の要素の説明の全部です。**
+
+`ref` が構成子を1つ持つ直和型であること（[9章](9-language.md)の5節）は、機械の側では
+数行です。**確保するのはこの構成子だけ**で、`Payload` はセルを読みます。
+
+```ocaml
+| F.Con (c, Some a) when c.Types.cres.Types.tid = Types.ref_tc.Types.tid ->
+    let cell = alloc w 1 in
+    set w cell (atom w env a);
+    VRef cell
+```
+
+おかげで `ref x` はパターンとしても書けます。決定木は他の構成子と区別しません。
 
 ```
-$ skunk examples/arrays.sk
-val zeroes : int array = [|0, 0, 0, 0, 0|]
-val contents : int list = [10, 0, 0, 0, 40]
-val alias : int array = [|10, 0, 0, 0, 40|]
-val throughTheOther : int = 99
+$ skunk examples/store.sk
+val counter : int ref = ref 0
+val now : int = 2
+val bump : int ref -> int = fn
+val next : int = 3
+val alias : int ref = ref 3
+val throughTheOther : int = 100
+val same : bool = true
+val other : bool = false
 ```
 
-`zeroes` の行が全部ゼロなのは、その時点でまだ書き換えていないからです。報告は束縛の
-たびに出ます。
+`alias` の行が `ref 3` なのは、その時点でまだ 100 を書いていないからです。報告は
+束縛のたびに出ます。最後の2行は**可変なものの等値は同一性である**ことで、
+`counter = alias` は真、`counter = ref 100` は偽です。
 
 同じ理由で[2章](2-hm.md)の3節に値制限があります。**ストアがあるから値制限が要る**、
 というのは同じ事実の型側の言い方です。
@@ -202,8 +221,9 @@ errors/nomatch.sk:1:5: match failure: no pattern matched
 ```
 
 リストだけ特別扱いして `[1, 2, 3]` と出します。それ以外の直和型は
-`Node (Leaf, 1, Leaf)` のように構成子のまま。配列は `[|1, 2|]` で、中身はストアから
-読みます。関数は `fn`。
+`Node (Leaf, 1, Leaf)` のように構成子のまま。`ref` は `ref 3`、配列は `[|1, 2|]` で、
+どちらも中身はストアから読みます。レコードのラベルが 1..n なら `(1, true)`、
+そうでなければ `{ x = 1 }`。関数は `fn`。
 
 負の数は `~3` です。SML の綴りに合わせています。
 
@@ -214,7 +234,8 @@ errors/nomatch.sk:1:5: match failure: no pattern matched
   すべての状態を有限にします（抽象解釈の下準備）。ここでは K は OCaml のリストです。
 - **例外がありません。** 失敗はホストの例外で外まで飛び、プログラムが止まります。
   `handle` を入れるならフレームに2種類目が要ります。
-- **`=` は eqtype を見ません。** 関数を比べようとしたときに実行時に落ちます。
+- **`=` の実行時検査が残っています。** 関数は型検査で止まる（[2章](2-hm.md)の6節）ので
+  到達しないはずですが、`equal` はまだ落ちるように書いてあります。
 - **文字列の switch は線形探索です。**
 - **プリミティブに部分適用がありません。** すべて1引数なので必要ありません。
 
@@ -228,8 +249,6 @@ errors/nomatch.sk:1:5: match failure: no pattern matched
   ストアに継続まで入れる（CESK\*）と、機械がそのまま静的解析になる話。
 - Peter Landin, "The Mechanical Evaluation of Expressions", *Computer Journal*
   6(4), 1964. SECD。すべての祖先。
-- 隣の [MinkML](../../MinkML) の `lab/src/machine.ml` は CEK です。あちらは可変な値を
-  持たないので S が要りません。並べると S が何のためにあるかが分かります。
 
 ## 実装の地図
 

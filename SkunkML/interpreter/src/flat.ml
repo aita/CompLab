@@ -24,10 +24,8 @@ type rhs =
   | Capture of int (* the i'th capture of the running code block *)
   | Call of atom * atom
   | Prim of string * atom list
-  | Tuple of atom list
-  | Record of (string * atom) list
+  | Record of (string * atom) list (* a tuple has the labels 1..n *)
   | Con of Types.constr * atom option
-  | Proj of atom * int
   | Field of atom * string
   | Payload of atom
 
@@ -96,14 +94,15 @@ and rhs_str = function
   | Call (f, a) -> Printf.sprintf "%s %s" (atom_str f) (atom_str a)
   | Prim (op, ats) ->
       Printf.sprintf "%s(%s)" op (String.concat ", " (List.map atom_str ats))
-  | Tuple ats -> Printf.sprintf "(%s)" (String.concat ", " (List.map atom_str ats))
+  | Record fs when Types.tuple_shaped fs ->
+      Printf.sprintf "(%s)" (String.concat ", " (List.map (fun (_, a) -> atom_str a) fs))
+  | Record [] -> "()"
   | Record fs ->
       Printf.sprintf "{ %s }"
         (String.concat ", "
            (List.map (fun (l, a) -> Printf.sprintf "%s = %s" l (atom_str a)) fs))
   | Con (c, None) -> c.Types.cname
   | Con (c, Some a) -> Printf.sprintf "%s %s" c.Types.cname (atom_str a)
-  | Proj (a, i) -> Printf.sprintf "#%d %s" (i + 1) (atom_str a)
   | Field (a, l) -> Printf.sprintf "#%s %s" l (atom_str a)
   | Payload a -> Printf.sprintf "payload %s" (atom_str a)
 

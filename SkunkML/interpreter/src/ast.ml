@@ -1,11 +1,11 @@
 (* The surface syntax: Standard ML, cut down to what one interpreter can hold.
 
-   Unlike its neighbour MinkML, this tree has a *separate grammar of types*.
-   That is not a stylistic choice: the module language needs to talk about type
-   components on their own -- `type t` in a signature is a declaration with no
-   term anywhere near it -- and a signature has to be elaborated before the
-   structure it describes is looked at.  Terms and types are two sorts here
-   because the module language makes them two sorts.
+   This tree has a *separate grammar of types*, which is not a stylistic
+   choice: the module language needs to talk about type components on their
+   own -- `type t` in a signature is a declaration with no term anywhere near
+   it -- and a signature has to be elaborated before the structure it describes
+   is looked at.  Terms and types are two sorts here because the module
+   language makes them two sorts.
 
    Nothing in this file knows what a type means.  [Sem] reads these type
    expressions into [Types.ty] against an environment; until then `int list`
@@ -111,8 +111,10 @@ and spec = { sp : spec_desc; sploc : Loc.t }
 
 and spec_desc =
   | SpVal of string * ty
-  (* `type 'a t` is abstract, `type 'a t = ty` is transparent. *)
-  | SpType of string list * string * ty option
+  (* `type 'a t` is abstract and `eqtype 'a t` is abstract but comparable;
+     the bool says which.  `type 'a t = ty` is transparent. *)
+  | SpType of string list * string * bool
+  | SpDefType of string list * string * ty
   | SpData of databind list
   | SpStruct of string * sigexp
   | SpInclude of sigexp

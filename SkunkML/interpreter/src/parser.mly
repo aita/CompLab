@@ -38,8 +38,8 @@ let fun_bind startpos (clauses : (string * pat list * ty option * exp) list) =
 %token <string list * string> QID
 %token VAL FUN FN LET IN END IF THEN ELSE CASE OF AS
 %token DATATYPE TYPE AND ANDALSO ORELSE DIV MOD OPEN
-%token STRUCTURE SIGNATURE FUNCTOR STRUCT SIG WHERE INCLUDE
-%token DARROW ARROW CONS COLONGT COLON EQ NE LE GE LT GT
+%token STRUCTURE SIGNATURE FUNCTOR STRUCT SIG WHERE INCLUDE EQTYPE
+%token DARROW ARROW CONS COLONGT COLON ASSIGN EQ NE LE GE LT GT
 %token PLUS MINUS STAR CARET AT TILDE BAR COMMA SEMI DOTS UNDERSCORE
 %token LPAREN RPAREN LBRACK RBRACK LBRACE RBRACE EOF
 
@@ -58,7 +58,9 @@ let fun_bind startpos (clauses : (string * pat list * ty option * exp) list) =
 %nonassoc IF_PREC
 %right ORELSE
 %right ANDALSO
+%right ASSIGN
 %left EQ NE LT LE GT GE
+%nonassoc COLON
 %nonassoc AS
 %right CONS AT
 %left PLUS MINUS CARET
@@ -99,8 +101,6 @@ result_sig:
 dec:
   | VAL; p = pat; EQ; e = term
     { { d = DVal (p, e); dloc = Loc.of_lexing $startpos } }
-  | VAL; p = pat; COLON; t = ty; EQ; e = term
-    { { d = DVal ({ p with p = PAnn (p, t) }, e); dloc = Loc.of_lexing $startpos } }
   | FUN; fs = separated_nonempty_list(AND, fun_bind)
     { { d = DFun fs; dloc = Loc.of_lexing $startpos } }
   | TYPE; bs = separated_nonempty_list(AND, tybind)
@@ -169,9 +169,11 @@ spec:
   | VAL; x = LID; COLON; t = ty
     { { sp = SpVal (x, t); sploc = Loc.of_lexing $startpos } }
   | TYPE; vs = tyvars; n = LID
-    { { sp = SpType (vs, n, None); sploc = Loc.of_lexing $startpos } }
+    { { sp = SpType (vs, n, false); sploc = Loc.of_lexing $startpos } }
+  | EQTYPE; vs = tyvars; n = LID
+    { { sp = SpType (vs, n, true); sploc = Loc.of_lexing $startpos } }
   | TYPE; vs = tyvars; n = LID; EQ; t = ty
-    { { sp = SpType (vs, n, Some t); sploc = Loc.of_lexing $startpos } }
+    { { sp = SpDefType (vs, n, t); sploc = Loc.of_lexing $startpos } }
   | DATATYPE; bs = separated_nonempty_list(AND, databind)
     { { sp = SpData bs; sploc = Loc.of_lexing $startpos } }
   | STRUCTURE; x = UID; COLON; s = sigexp
@@ -215,6 +217,7 @@ ty_field:
 
 pat:
   | p = pat_app                     { p }
+  | p = pat; COLON; t = ty          { mkp $startpos (PAnn (p, t)) }
   | a = pat; CONS; b = pat          { mkp $startpos (PCon (ident "::", Some (mkp $startpos (PTuple [ a; b ])))) }
   | x = LID; AS; p = pat            { mkp $startpos (PAs (x, p)) }
 
@@ -235,7 +238,6 @@ pat_atom:
   | s = STRING                      { mkp $startpos (PStr s) }
   | LPAREN; RPAREN                  { mkp $startpos (PTuple []) }
   | LPAREN; p = pat; RPAREN         { p }
-  | LPAREN; p = pat; COLON; t = ty; RPAREN { mkp $startpos (PAnn (p, t)) }
   | LPAREN; p = pat; COMMA; ps = separated_nonempty_list(COMMA, pat); RPAREN
     { mkp $startpos (PTuple (p :: ps)) }
   | LBRACK; RBRACK                  { mkp $startpos (PList []) }
@@ -269,6 +271,7 @@ term:
   | a = term; SEMI; b = term        { mk $startpos (ESeq (a, b)) }
   | a = term; ORELSE; b = term      { mk $startpos (EOrelse (a, b)) }
   | a = term; ANDALSO; b = term     { mk $startpos (EAndalso (a, b)) }
+  | a = term; ASSIGN; b = term      { bin $startpos ":=" a b }
   | a = term; EQ; b = term          { bin $startpos "=" a b }
   | a = term; NE; b = term          { bin $startpos "<>" a b }
   | a = term; LT; b = term          { bin $startpos "<" a b }

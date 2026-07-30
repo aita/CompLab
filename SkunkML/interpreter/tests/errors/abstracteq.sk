@@ -1,0 +1,2 @@
+signature K = sig eqtype t val one : t end
+structure Bad : K = struct type t = int -> int fun one x = x end

@@ -55,7 +55,6 @@ let rec binders (p : C.pat) =
   | C.PAny (Some x) -> [ x ]
   | C.PAs (x, q) -> x :: binders q
   | C.PCon (_, Some q) -> binders q
-  | C.PTup ps -> List.concat_map binders ps
   | C.PRec fs -> List.concat_map (fun (_, q) -> binders q) fs
 
 (* ... and their types, read off the type of the value they match against. *)
@@ -68,10 +67,6 @@ let rec binder_types ty (p : C.pat) =
       match repr ty with
       | Tcon (_, args) -> (
           match con_arg c args with Some at -> binder_types at q | None -> [])
-      | _ -> [])
-  | C.PTup ps -> (
-      match repr ty with
-      | Ttuple ts -> List.concat (List.map2 binder_types ts ps)
       | _ -> [])
   | C.PRec fs -> (
       match repr ty with
@@ -145,30 +140,8 @@ let rec build (occs : (C.atom * ty) list) (rows : row list) : tree =
       let head = List.hd (List.hd rows).rpats in
       let tails r = List.tl r.rpats in
       (match head with
-      | C.PTup ps ->
-          (* One shape, so no test: bind the components and widen the matrix. *)
-          let n = List.length ps in
-          let tys = match repr oty with Ttuple ts -> ts | _ -> List.map (fun _ -> newvar ()) ps in
-          let names = List.map (fun _ -> C.fresh_name "p") ps in
-          let subs = List.map2 (fun x t -> (C.AVar x, t)) names tys in
-          let rows' =
-            List.map
-              (fun r ->
-                let cols =
-                  match List.hd r.rpats with
-                  | C.PTup qs -> qs
-                  | C.PAny None -> List.init n (fun _ -> C.PAny None)
-                  | _ -> assert false
-                in
-                { r with rpats = cols @ tails r })
-              rows
-          in
-          let inner = build (subs @ rest_occs) rows' in
-          List.fold_right2
-            (fun x (i, t) acc -> TBind (x, t, C.Proj (occ, i), acc))
-            names
-            (List.mapi (fun i t -> (i, t)) tys)
-            inner
+      (* A record -- and so a tuple -- has exactly one shape, so no test is
+         emitted: the column is expanded into one column per field. *)
       | C.PRec fs ->
           let labels = List.map fst fs in
           let tys =
@@ -179,7 +152,9 @@ let rec build (occs : (C.atom * ty) list) (rows : row list) : tree =
                 | _ -> newvar ())
               labels
           in
-          let names = List.map (fun l -> C.fresh_name l) labels in
+          let names =
+            List.map (fun l -> C.fresh_name (if is_numeric l then "p" else l)) labels
+          in
           let subs = List.map2 (fun x t -> (C.AVar x, t)) names tys in
           let rows' =
             List.map

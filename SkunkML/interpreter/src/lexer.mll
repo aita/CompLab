@@ -15,7 +15,7 @@ let keywords =
     ("let", LET); ("in", IN); ("end", END);
     ("if", IF); ("then", THEN); ("else", ELSE);
     ("case", CASE); ("of", OF); ("as", AS);
-    ("datatype", DATATYPE); ("type", TYPE); ("and", AND);
+    ("datatype", DATATYPE); ("type", TYPE); ("eqtype", EQTYPE); ("and", AND);
     ("andalso", ANDALSO); ("orelse", ORELSE);
     ("div", DIV); ("mod", MOD); ("open", OPEN);
     ("structure", STRUCTURE); ("signature", SIGNATURE); ("functor", FUNCTOR);
@@ -67,6 +67,9 @@ rule token = parse
   | "<="                  { LE }
   | ">="                  { GE }
   | "..."                 { DOTS }
+  | ":="                  { ASSIGN }
+  (* `!` is an ordinary identifier, so `!r` is an ordinary application. *)
+  | '!'                   { LID "!" }
   | ':'                   { COLON }
   | '='                   { EQ }
   | '<'                   { LT }

@@ -35,8 +35,9 @@ type pat =
   | PInt of int
   | PStr of string
   | PCon of Types.constr * pat option
-  | PTup of pat list
-  | PRec of (label * pat) list (* every field of the record type, sorted *)
+  (* Every field of the record type, sorted.  A tuple pattern is one of these
+     with the labels 1, 2, ... n. *)
+  | PRec of (label * pat) list
   | PAs of string * pat
 
 (* What a decision tree tests. *)
@@ -47,10 +48,8 @@ type rhs =
   | Lam of string * Types.ty * block
   | Call of atom * atom (* not in tail position: pushes a frame *)
   | Prim of string * atom list
-  | Tuple of atom list
-  | Record of (label * atom) list (* sorted by label *)
+  | Record of (label * atom) list (* sorted; a tuple has the labels 1..n *)
   | Con of Types.constr * atom option
-  | Proj of atom * int (* the i'th component of a tuple *)
   | Field of atom * label
   | Payload of atom (* what a constructor was applied to *)
 
@@ -141,10 +140,10 @@ and free_rhs = function
   | Atom a -> atom_var a
   | Lam (x, _, body) -> Vars.remove x (free_vars body)
   | Call (f, a) -> Vars.union (atom_var f) (atom_var a)
-  | Prim (_, ats) | Tuple ats -> atoms_var ats
+  | Prim (_, ats) -> atoms_var ats
   | Record fs -> atoms_var (List.map snd fs)
   | Con (_, None) -> Vars.empty
-  | Con (_, Some a) | Proj (a, _) | Field (a, _) | Payload a -> atom_var a
+  | Con (_, Some a) | Field (a, _) | Payload a -> atom_var a
 
 and free_tail = function
   | Ret a -> atom_var a
@@ -183,7 +182,9 @@ let rec pat_str = function
   | PStr s -> Printf.sprintf "%S" s
   | PCon (c, None) -> c.Types.cname
   | PCon (c, Some p) -> Printf.sprintf "%s %s" c.Types.cname (pat_str p)
-  | PTup ps -> Printf.sprintf "(%s)" (String.concat ", " (List.map pat_str ps))
+  | PRec fs when Types.tuple_shaped fs ->
+      Printf.sprintf "(%s)" (String.concat ", " (List.map (fun (_, p) -> pat_str p) fs))
+  | PRec [] -> "()"
   | PRec fs ->
       Printf.sprintf "{ %s }"
         (String.concat ", "
@@ -242,7 +243,10 @@ and print_flat r out =
   | Prim (op, ats) ->
       add out
         (Printf.sprintf "%s(%s)" op (String.concat ", " (List.map atom_str ats)))
-  | Tuple ats -> add out (Printf.sprintf "(%s)" (String.concat ", " (List.map atom_str ats)))
+  | Record fs when Types.tuple_shaped fs ->
+      add out
+        (Printf.sprintf "(%s)" (String.concat ", " (List.map (fun (_, a) -> atom_str a) fs)))
+  | Record [] -> add out "()"
   | Record fs ->
       add out
         (Printf.sprintf "{ %s }"
@@ -250,7 +254,6 @@ and print_flat r out =
               (List.map (fun (l, a) -> Printf.sprintf "%s = %s" l (atom_str a)) fs)))
   | Con (c, None) -> add out c.Types.cname
   | Con (c, Some a) -> add out (Printf.sprintf "%s %s" c.Types.cname (atom_str a))
-  | Proj (a, i) -> add out (Printf.sprintf "#%d %s" (i + 1) (atom_str a))
   | Field (a, l) -> add out (Printf.sprintf "#%s %s" l (atom_str a))
   | Payload a -> add out (Printf.sprintf "payload %s" (atom_str a))
 

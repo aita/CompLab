@@ -66,13 +66,21 @@ let binop_type loc op =
   match op with
   | "+" | "-" | "*" | "div" | "mod" -> (tint, tint, tint)
   | "^" -> (tstring, tstring, tstring)
-  | "<" | "<=" | ">" | ">=" -> (tint, tint, tbool)
+  | "<" | "<=" | ">" | ">=" ->
+      let a = newvar_gen ~ord:true () in
+      (a, a, tbool)
+  (* `=` demands a type that can be compared, `<` one that can be ordered.
+     Both are recorded on a fresh variable and settled by unification -- or,
+     for `<`, by defaulting to int when nothing settles it. *)
   | "=" | "<>" ->
-      let a = newvar () in
+      let a = newvar_gen ~eq:true () in
       (a, a, tbool)
   | "@" ->
       let a = tlist (newvar ()) in
       (a, a, a)
+  | ":=" ->
+      let a = newvar () in
+      (tref a, a, tunit)
   | _ -> Loc.type_error loc "no operator %s" op
 
 (* Non-expansive: safe to generalise.  Anything that can allocate -- which here
@@ -111,6 +119,7 @@ let ann_rigids : (string * tycon) list ref = ref []
 let read_ann env t =
   let mk name =
     let tc = newtycon name in
+    tc.teq <- eq_tyvar name;
     ann_rigids := (name, tc) :: !ann_rigids;
     Tcon (tc, [])
   in
@@ -130,7 +139,9 @@ let rigids_since mark =
    level is left, so that generalisation still sees them as local. *)
 let close_ann (mark, saved_table) =
   let mine = rigids_since mark in
-  let rw = List.map (fun (_, tc) -> (tc.tid, ([], newvar ()))) mine in
+  let rw =
+    List.map (fun (n, tc) -> (tc.tid, ([], newvar_gen ~eq:(eq_tyvar n) ()))) mine
+  in
   ann_rigids := mark;
   ann_table := saved_table;
   rw
@@ -181,9 +192,9 @@ let rec check_pat env (p : Ast.pat) (ty : ty) : binding list * C.pat =
       | None -> Loc.type_error loc "%s is not a constructor" (Ast.path_str path))
   | Ast.PTuple ps ->
       let ts = List.map (fun _ -> newvar ()) ps in
-      unify loc ty (Ttuple ts);
+      unify loc ty (ttuple ts);
       let bs, cps = List.split (List.map2 (check_pat env) ps ts) in
-      (List.concat bs, C.PTup cps)
+      (List.concat bs, C.PRec (tuple_fields cps))
   | Ast.PList ps ->
       let elt = newvar () in
       unify loc ty (tlist elt);
@@ -192,7 +203,7 @@ let rec check_pat env (p : Ast.pat) (ty : ty) : binding list * C.pat =
         | q :: rest ->
             let b1, c1 = check_pat env q elt in
             let b2, c2 = go rest in
-            (b1 @ b2, C.PCon (cons_con, Some (C.PTup [ c1; c2 ])))
+            (b1 @ b2, C.PCon (cons_con, Some (C.PRec (tuple_fields [ c1; c2 ]))))
       in
       go ps
   | Ast.PRecord (fs, flex) ->
@@ -276,9 +287,9 @@ let rec infer env (e : Ast.exp) (d : dest) : ty * C.block =
   | Ast.EVar path -> infer_var env loc path d
   | Ast.ETuple es ->
       let ts = List.map (fun _ -> newvar ()) es in
-      let ty = Ttuple ts in
+      let ty = ttuple ts in
       ( ty,
-        atoms env es ts (fun ats -> emit ty (C.Tuple ats) d) )
+        atoms env es ts (fun ats -> emit ty (C.Record (tuple_fields ats)) d) )
   | Ast.ERecord fs ->
       (match dup_label fs with
       | Some l -> Loc.type_error loc "the field %s appears twice" l
@@ -305,8 +316,8 @@ let rec infer env (e : Ast.exp) (d : dest) : ty * C.block =
                       let p = C.fresh_name "t" and c = C.fresh_name "t" in
                       C.Let
                         ( p,
-                          Ttuple [ elt; ty ],
-                          C.Tuple [ a; tail ],
+                          ttuple [ elt; ty ],
+                          C.Record (tuple_fields [ a; tail ]),
                           C.Let (c, ty, C.Con (cons_con, Some (C.AVar p)), k (C.AVar c)) ))
             in
             build ats (fun a -> ret d a ty)) )
@@ -339,7 +350,11 @@ let rec infer env (e : Ast.exp) (d : dest) : ty * C.block =
       ( ty,
         atoms env [ a; b ] [ elt; ty ] (fun ats ->
             let p = C.fresh_name "t" in
-            C.Let (p, Ttuple [ elt; ty ], C.Tuple ats, emit ty (C.Con (cons_con, Some (C.AVar p))) d)) )
+            C.Let
+              ( p,
+                ttuple [ elt; ty ],
+                C.Record (tuple_fields ats),
+                emit ty (C.Con (cons_con, Some (C.AVar p))) d )) )
   | Ast.EBin (op, a, b) ->
       let ta, tb, tr = binop_type loc op in
       (tr, atoms env [ a; b ] [ ta; tb ] (fun ats -> emit tr (C.Prim (op, ats)) d))
@@ -556,6 +571,7 @@ and elab_dec env (dc : Ast.dec) (k : Sem.env -> bound list -> C.block) : C.block
                leave_level ();
                let gen ty =
                  let ty = realise rw ty in
+                 default_ord ty;
                  if non_expansive e then generalise loc ty else mono ty
                in
                match (p.Ast.p, checked) with
@@ -606,7 +622,9 @@ and elab_dec env (dc : Ast.dec) (k : Sem.env -> bound list -> C.block) : C.block
       let env', bounds =
         List.fold_left
           (fun (env, acc) ((f : Ast.fundec), v, ty) ->
-            let sch = generalise f.Ast.floc (realise rw ty) in
+            let ty = realise rw ty in
+            default_ord ty;
+            let sch = generalise f.Ast.floc ty in
             ( S.add_val env f.Ast.fname sch { S.root = v; path = [] },
               acc @ [ BVal (f.Ast.fname, sch, v) ] ))
           (env, []) entries
@@ -623,7 +641,7 @@ and elab_dec env (dc : Ast.dec) (k : Sem.env -> bound list -> C.block) : C.block
         List.fold_left
           (fun (env, acc) (b : Ast.tybind) ->
             let ps =
-              List.map (fun _ -> ref (Unbound { id = 0; level = 0; must = [] })) b.Ast.tbparams
+              List.map (fun _ -> param_var ()) b.Ast.tbparams
             in
             let tvs = ref (List.map2 (fun n r -> (n, Tvar r)) b.Ast.tbparams ps) in
             let body = S.read_ty env tvs b.Ast.tbody in
@@ -659,7 +677,7 @@ and elab_fun env (f : Ast.fundec) (fty : ty) =
   let res = newvar () in
   unify loc fty (List.fold_right (fun (_, t) acc -> Tarrow (t, acc)) params res);
   let scrut_ty =
-    match params with [ (_, t) ] -> t | _ -> Ttuple (List.map snd params)
+    match params with [ (_, t) ] -> t | _ -> ttuple (List.map snd params)
   in
   let arms =
     List.map
@@ -671,7 +689,7 @@ and elab_fun env (f : Ast.fundec) (fty : ty) =
               let bs, cps =
                 List.split (List.map2 (fun p (_, t) -> check_pat env p t) ps params)
               in
-              (List.concat bs, C.PTup cps)
+              (List.concat bs, C.PRec (tuple_fields cps))
         in
         no_duplicates loc bs;
         let env' = bind_all env bs in
@@ -691,7 +709,7 @@ and elab_fun env (f : Ast.fundec) (fty : ty) =
         C.Let
           ( tup,
             scrut_ty,
-            C.Tuple (List.map (fun (v, _) -> C.AVar v) params),
+            C.Record (tuple_fields (List.map (fun (v, _) -> C.AVar v) params)),
             C.Tail (C.Case (C.AVar tup, scrut_ty, arms, loc)) )
   in
   let rec wrap i =
@@ -901,8 +919,8 @@ let program (env : S.env) (decs : Ast.topdec list) : S.env * C.item list =
                 let t = C.fresh_name "group" in
                 C.Let
                   ( t,
-                    Ttuple (List.map fst many),
-                    C.Tuple (List.map (fun (_, v) -> C.AVar v) many),
+                    ttuple (List.map fst many),
+                    C.Record (tuple_fields (List.map (fun (_, v) -> C.AVar v) many)),
                     C.Tail (C.Ret (C.AVar t)) ))
       in
       let env', bounds = Option.get !out in
@@ -965,7 +983,11 @@ let program (env : S.env) (decs : Ast.topdec list) : S.env * C.item list =
                   C.iname = name;
                   ibody =
                     Some
-                      (C.Let (x, ty, C.Proj (C.AVar g, i), C.Tail (C.Ret (C.AVar x))));
+                      (C.Let
+                         ( x,
+                           ty,
+                           C.Field (C.AVar g, string_of_int (i + 1)),
+                           C.Tail (C.Ret (C.AVar x)) ));
                   ilabel = label b;
                   ishow = (match b with BVal _ -> true | _ -> false);
                 })

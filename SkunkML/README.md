@@ -78,10 +78,10 @@ whole reason the two are told apart. A lambda's free variables are captured
 into a block; a join point's free variables stay free, because a jump can only
 come from inside the block that defines it.
 
-**The machine has a store** because the language has arrays. Everything else it
-builds is built once and never changes; an array is a run of addresses, so a
-variable denotes a place and the store says what is in it. That is the S that
-CEK does not have.
+**The machine has a store** because the language has `ref` and `array`.
+Everything else it builds is built once and never changes; a `ref` is one
+address and an array is a run of them, so a variable denotes a place and the
+store says what is in it. That is the S that CEK does not have.
 
 ## Modules
 
@@ -109,7 +109,7 @@ per pass. Two to start with, in Japanese:
 
 ## What is deliberately missing
 
-No exceptions, no `ref`, no characters or reals, no user-defined infix
-operators, no polymorphic recursion, no separate compilation, no optimiser and
-no garbage collector. Each chapter of the book ends with the list for its pass,
-and with why.
+No exceptions, no characters or reals, no user-defined infix operators, no
+polymorphic recursion, no separate compilation, no optimiser and no garbage
+collector. Each chapter of the book ends with the list for its pass, and with
+why.

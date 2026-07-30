@@ -10,7 +10,7 @@
 
 open Types
 
-let tv () = ref (Unbound { id = 0; level = 0; must = [] })
+let tv () = param_var ()
 let poly1 f = let a = tv () in { qvars = [ a ]; sbody = f (Tvar a) }
 let poly2 f = let a = tv () and b = tv () in { qvars = [ a; b ]; sbody = f (Tvar a) (Tvar b) }
 let m t = { qvars = []; sbody = t }
@@ -23,9 +23,9 @@ let int_sg =
     [
       ("toString", m (Tarrow (tint, tstring)));
       ("abs", m (Tarrow (tint, tint)));
-      ("min", m (Tarrow (Ttuple [ tint; tint ], tint)));
-      ("max", m (Tarrow (Ttuple [ tint; tint ], tint)));
-      ("compare", m (Tarrow (Ttuple [ tint; tint ], tint)));
+      ("min", m (Tarrow (ttuple [ tint; tint ], tint)));
+      ("max", m (Tarrow (ttuple [ tint; tint ], tint)));
+      ("compare", m (Tarrow (ttuple [ tint; tint ], tint)));
     ]
 
 (* structure String *)
@@ -33,8 +33,8 @@ let string_sg =
   sg_of
     [
       ("size", m (Tarrow (tstring, tint)));
-      ("compare", m (Tarrow (Ttuple [ tstring; tstring ], tint)));
-      ("substring", m (Tarrow (Ttuple [ tstring; tint; tint ], tstring)));
+      ("compare", m (Tarrow (ttuple [ tstring; tstring ], tint)));
+      ("substring", m (Tarrow (ttuple [ tstring; tint; tint ], tstring)));
     ]
 
 (* structure Array.  The type `'a array` is not a component of the structure:
@@ -43,18 +43,22 @@ let string_sg =
 let array_sg =
   sg_of
     [
-      ("array", poly1 (fun a -> Tarrow (Ttuple [ tint; a ], tarray a)));
+      ("array", poly1 (fun a -> Tarrow (ttuple [ tint; a ], tarray a)));
       ("fromList", poly1 (fun a -> Tarrow (tlist a, tarray a)));
       ("toList", poly1 (fun a -> Tarrow (tarray a, tlist a)));
       ("length", poly1 (fun a -> Tarrow (tarray a, tint)));
-      ("sub", poly1 (fun a -> Tarrow (Ttuple [ tarray a; tint ], a)));
-      ("update", poly1 (fun a -> Tarrow (Ttuple [ tarray a; tint; a ], tunit)));
+      ("sub", poly1 (fun a -> Tarrow (ttuple [ tarray a; tint ], a)));
+      ("update", poly1 (fun a -> Tarrow (ttuple [ tarray a; tint; a ], tunit)));
     ]
 
 let structures = [ ("Int", int_sg); ("String", string_sg); ("Array", array_sg) ]
 
 let toplevel_vals =
-  [ ("print", m (Tarrow (tstring, tunit))); ("not", m (Tarrow (tbool, tbool))) ]
+  [
+    ("print", m (Tarrow (tstring, tunit)));
+    ("not", m (Tarrow (tbool, tbool)));
+    ("!", poly1 (fun a -> Tarrow (tref a, a)));
+  ]
 
 let env () =
   let e = Sem.empty_env in
@@ -69,9 +73,10 @@ let env () =
         ("unit", Sem.TyAlias ([], tunit));
         ("list", Sem.TyName list_tc);
         ("array", Sem.TyName array_tc);
+        ("ref", Sem.TyName ref_tc);
       ]
   in
-  let e = List.fold_left Sem.add_con e (list_tc.tcons @ bool_tc.tcons) in
+  let e = List.fold_left Sem.add_con e (list_tc.tcons @ bool_tc.tcons @ ref_tc.tcons) in
   let e =
     List.fold_left
       (fun e (n, sch) -> Sem.add_val e n sch { Sem.root = n; path = [] })

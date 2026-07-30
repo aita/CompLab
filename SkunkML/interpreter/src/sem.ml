@@ -136,7 +136,7 @@ let lookup_str env loc (p : Ast.path) =
    twice.  [mk] is what decides whether a written `'a` is a promise or a wish:
    an ordinary variable can be unified with `int`, and a rigid constant
    cannot. *)
-let rec read_ty ?(mk = fun (_ : string) -> newvar ()) env
+let rec read_ty ?(mk = fun name -> newvar_gen ~eq:(eq_tyvar name) ()) env
     (tvs : (string * ty) list ref) (t : Ast.ty) : ty =
   let read_ty env tvs t = read_ty ~mk env tvs t in
   match t with
@@ -148,7 +148,7 @@ let rec read_ty ?(mk = fun (_ : string) -> newvar ()) env
           tvs := (v, fresh) :: !tvs;
           fresh)
   | Ast.TyArrow (a, b) -> Tarrow (read_ty env tvs a, read_ty env tvs b)
-  | Ast.TyTuple ts -> Ttuple (List.map (read_ty env tvs) ts)
+  | Ast.TyTuple ts -> ttuple (List.map (read_ty env tvs) ts)
   | Ast.TyRecord fs ->
       let fs = List.map (fun (l, t) -> (l, read_ty env tvs t)) fs in
       (match dup_label fs with
@@ -190,7 +190,7 @@ let declare_datatypes env (binds : Ast.databind list) =
   let made =
     List.map
       (fun (b : Ast.databind) ->
-        let params = List.map (fun _ -> ref (Unbound { id = 0; level = 0; must = [] })) b.dbparams in
+        let params = List.map (fun _ -> param_var ()) b.dbparams in
         let tc = newtycon ~params b.dbname in
         (b, tc))
       binds
@@ -277,14 +277,15 @@ and elab_spec env sg holes (sp : Ast.spec) =
   | Ast.SpVal (x, t) ->
       let sch = read_scheme env t in
       ({ sg with sg_vals = sg.sg_vals @ [ (x, sch) ] }, holes, env)
-  | Ast.SpType (params, name, None) ->
-      let ps = List.map (fun _ -> ref (Unbound { id = 0; level = 0; must = [] })) params in
+  | Ast.SpType (params, name, eq) ->
+      let ps = List.map (fun _ -> param_var ()) params in
       let tc = newtycon ~params:ps name in
+      tc.teq <- eq;
       ( { sg with sg_tys = sg.sg_tys @ [ (name, TyName tc) ] },
         holes @ [ tc ],
         add_ty env name (TyName tc) )
-  | Ast.SpType (params, name, Some body) ->
-      let ps = List.map (fun _ -> ref (Unbound { id = 0; level = 0; must = [] })) params in
+  | Ast.SpDefType (params, name, body) ->
+      let ps = List.map (fun _ -> param_var ()) params in
       let tvs = ref (List.map2 (fun n r -> (n, Tvar r)) params ps) in
       let body = read_ty env tvs body in
       let tf = TyAlias (ps, body) in
@@ -374,8 +375,16 @@ let rec match_sig loc ~what (actual : sg) (target : sg) (holes : tycon list) =
       | TyName tc when hole tc ->
           let args = List.map (fun r -> Tvar r) tc.tparams in
           rw := (tc.tid, (tc.tparams, apply_tyfun got args)) :: !rw;
-          (* A datatype specification also fixes the constructors. *)
-          if tc.tcons <> [] then match_datatype loc ~what name tc got
+          (* A datatype specification also fixes the constructors, and an
+             `eqtype` specification demands that the type really can be
+             compared. *)
+          if tc.tcons <> [] then match_datatype loc ~what name tc got;
+          if tc.teq && tc.tcons = [] then
+            let fresh = List.map (fun _ -> newvar_gen ~eq:true ()) tc.tparams in
+            (try require_eq loc [] (apply_tyfun got fresh)
+             with Loc.Error { msg; _ } ->
+               Loc.module_error loc
+                 "the signature declares %s as an eqtype, but %s" name msg)
       | _ ->
           let args = List.map (fun _ -> newvar ()) (List.init (tyfun_arity tf) (fun _ -> ()))in
           let want = realise !rw (apply_tyfun tf args) in
@@ -433,7 +442,14 @@ and match_datatype loc ~what name (spec : tycon) (got : tyfun) =
    the one we have with unknowns, and see whether they can be made equal. *)
 and more_general (have : scheme) (want : scheme) =
   let skolems =
-    List.map (fun _ -> Tcon (newtycon "?rigid", [])) want.qvars
+    List.map
+      (fun v ->
+        let tc = newtycon "?rigid" in
+        (* A skolem standing for `''a` has to admit equality, or a structure
+           that compares its argument could never match the signature. *)
+        (match !v with Unbound u when u.eq -> tc.teq <- true | _ -> ());
+        Tcon (tc, []))
+      want.qvars
   in
   let target =
     copy { no_rewrite with rvars = List.combine want.qvars skolems } want.sbody

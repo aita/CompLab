@@ -63,10 +63,8 @@ and conv_rhs (r : C.rhs) : F.rhs =
   | C.Lam _ -> assert false (* handled above: a lambda only ever binds a name *)
   | C.Call (f, a) -> F.Call (atom f, atom a)
   | C.Prim (op, ats) -> F.Prim (op, List.map atom ats)
-  | C.Tuple ats -> F.Tuple (List.map atom ats)
   | C.Record fs -> F.Record (List.map (fun (l, a) -> (l, atom a)) fs)
   | C.Con (c, a) -> F.Con (c, Option.map atom a)
-  | C.Proj (a, i) -> F.Proj (atom a, i)
   | C.Field (a, l) -> F.Field (atom a, l)
   | C.Payload a -> F.Payload (atom a)
 

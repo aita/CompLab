@@ -238,10 +238,11 @@ $ skunk --trace examples/modules.sk
 ```
 
 `patmat.ml` も `closure.ml` も `machine.ml` も、モジュールという語を一度も使いません。
-これは MartenML が同じ結論に別の道で着いたところでもあります — あちらはファンクタを
-適用ごとに本体ごと複製して名前解決だけで済ませ（defunctorization）、こちらは本体を
-1回検査してレコードと関数に落とす。前者は実行時表現がゼロになり、後者は本体が
-1回しか検査されません。
+
+同じ結論に別の道で着く方法もあります。**defunctorization** — ファンクタを適用ごとに
+本体ごと複製して、名前解決だけで済ませてしまうやり方で、MLton がそれをやっています。
+あちらはモジュールが実行時表現を一切持たず、こちらは本体が1回しか検査されません。
+どちらを取るかは、だいたい「分割コンパイルがあるか」で決まります。
 
 ## していないこと
 
@@ -268,7 +269,7 @@ $ skunk --trace examples/modules.sk
   「構造はレコード、ファンクタは関数、封印は存在型の pack」を型理論として最後まで
   やったもの。7節がやっていることの、型の付いた版です。
 - Martin Elsman, "Static Interpretation of Modules", *ICFP* 1999. MLton の
-  defunctorization の正しさ。MartenML `doc/modules.md` が採ったのはこちら。
+  defunctorization の正しさ。7節のもう一方の道。
 
 ## 実装の地図
 

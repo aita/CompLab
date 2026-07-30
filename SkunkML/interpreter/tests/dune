@@ -38,13 +38,13 @@
 
 (rule
  (with-stdout-to
-  arrays.out
-  (run %{exe:../src/skunk.exe} %{dep:../examples/arrays.sk})))
+  store.out
+  (run %{exe:../src/skunk.exe} %{dep:../examples/store.sk})))
 
 (rule
  (alias runtest)
  (action
-  (diff arrays.expected arrays.out)))
+  (diff store.expected store.out)))
 
 ; The two intermediate languages, which a change can quietly break.
 
@@ -111,6 +111,15 @@
    (with-accepted-exit-codes
     1
     (run %{exe:../src/skunk.exe} %{dep:errors/rigid.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/skunk.exe} %{dep:errors/eqtype.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/skunk.exe} %{dep:errors/ordered.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/skunk.exe} %{dep:errors/abstracteq.sk}))
    (with-accepted-exit-codes
     1
     (run %{exe:../src/skunk.exe} %{dep:errors/toospecific.sk}))

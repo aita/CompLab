@@ -28,7 +28,7 @@ type value =
   | VInt of int
   | VStr of string
   | VUnit
-  | VTuple of value array
+  (* One product: a tuple is a record whose labels are 1, 2, ... n. *)
   | VRecord of (string * value) list
   | VCon of Types.constr * value option
   (* A closure is a code label and a run of addresses holding its captures. *)
@@ -37,6 +37,7 @@ type value =
      tuple where it needs more, which is how SML's basis is shaped too. *)
   | VPrim of string
   | VArray of int * int (* base address, length *)
+  | VRef of int (* one address *)
 
 type env = { vars : int Map.t; joins : jp Map.t; caps : int }
 and jp = { jparams : string list; jbody : F.block; jenv : env }
@@ -86,8 +87,9 @@ let rec show w v =
   | VInt n -> if n < 0 then Printf.sprintf "~%d" (-n) else string_of_int n
   | VStr s -> Printf.sprintf "%S" s
   | VUnit -> "()"
-  | VTuple vs ->
-      Printf.sprintf "(%s)" (String.concat ", " (Array.to_list (Array.map (show w) vs)))
+  | VRecord [] -> "()"
+  | VRecord fs when Types.tuple_shaped fs ->
+      Printf.sprintf "(%s)" (String.concat ", " (List.map (fun (_, v) -> show w v) fs))
   | VRecord fs ->
       Printf.sprintf "{ %s }"
         (String.concat ", " (List.map (fun (l, v) -> Printf.sprintf "%s = %s" l (show w v)) fs))
@@ -95,6 +97,7 @@ let rec show w v =
   | VCon (c, None) -> c.Types.cname
   | VCon (c, Some v) -> Printf.sprintf "%s %s" c.Types.cname (show w v)
   | VClos _ | VPrim _ -> "fn"
+  | VRef a -> Printf.sprintf "ref %s" (show w (get w a))
   | VArray (base, len) ->
       Printf.sprintf "[|%s|]"
         (String.concat ", "
@@ -104,7 +107,7 @@ and show_list w v =
   let rec items v =
     match v with
     | VCon (c, None) when c.Types.cname = "nil" -> []
-    | VCon (_, Some (VTuple [| hd; tl |])) -> show w hd :: items tl
+    | VCon (_, Some (VRecord [ (_, hd); (_, tl) ])) -> show w hd :: items tl
     | _ -> [ "?" ]
   in
   Printf.sprintf "[%s]" (String.concat ", " (items v))
@@ -114,11 +117,6 @@ let rec equal w a b =
   | VInt a, VInt b -> a = b
   | VStr a, VStr b -> a = b
   | VUnit, VUnit -> true
-  | VTuple a, VTuple b ->
-      Array.length a = Array.length b
-      && (let ok = ref true in
-          Array.iteri (fun i x -> if not (equal w x b.(i)) then ok := false) a;
-          !ok)
   | VRecord a, VRecord b ->
       List.length a = List.length b
       && List.for_all2 (fun (l1, v1) (l2, v2) -> l1 = l2 && equal w v1 v2) a b
@@ -128,7 +126,9 @@ let rec equal w a b =
          | None, None -> true
          | Some x, Some y -> equal w x y
          | _ -> false)
-  | VArray (a, _), VArray (b, _) -> a = b (* arrays are equal when identical *)
+  (* A mutable thing is equal to itself and to nothing else. *)
+  | VArray (a, _), VArray (b, _) -> a = b
+  | VRef a, VRef b -> a = b
   | (VClos _ | VPrim _), _ | _, (VClos _ | VPrim _) ->
       fault "functions cannot be compared"
   | _ -> false
@@ -136,15 +136,24 @@ let rec equal w a b =
 let as_int = function VInt n -> n | _ -> fault "expected an integer"
 let as_str = function VStr s -> s | _ -> fault "expected a string"
 
+(* A pair is a record with the labels 1 and 2. *)
+let pair_value a b = VRecord [ ("1", a); ("2", b) ]
+
 let nil_con = List.find (fun c -> c.Types.cname = "nil") Types.list_tc.Types.tcons
 let cons_con = List.find (fun c -> c.Types.cname = "::") Types.list_tc.Types.tcons
 
 let rec append w a b =
   match a with
   | VCon (c, None) when c.Types.cidx = nil_con.Types.cidx -> b
-  | VCon (_, Some (VTuple [| hd; tl |])) ->
-      VCon (cons_con, Some (VTuple [| hd; append w tl b |]))
+  | VCon (_, Some (VRecord [ (_, hd); (_, tl) ])) ->
+      VCon (cons_con, Some (pair_value hd (append w tl b)))
   | _ -> fault "expected a list"
+
+let order a b =
+  match (a, b) with
+  | VInt a, VInt b -> compare a b
+  | VStr a, VStr b -> compare a b
+  | _ -> fault "these cannot be ordered"
 
 let vbool b =
   VCon
@@ -173,24 +182,40 @@ let prim w name (args : value list) =
   | "~" -> one (fun a -> VInt (-as_int a))
   | "^" -> two (fun a b -> VStr (as_str a ^ as_str b))
   | "@" -> two (fun a b -> append w a b)
-  | "<" -> two (fun a b -> vbool (as_int a < as_int b))
-  | "<=" -> two (fun a b -> vbool (as_int a <= as_int b))
-  | ">" -> two (fun a b -> vbool (as_int a > as_int b))
-  | ">=" -> two (fun a b -> vbool (as_int a >= as_int b))
+  (* Ordered types are int and string; which one is decided by the value,
+     because the type that decided it is gone by now. *)
+  | "<" -> two (fun a b -> vbool (order a b < 0))
+  | "<=" -> two (fun a b -> vbool (order a b <= 0))
+  | ">" -> two (fun a b -> vbool (order a b > 0))
+  | ">=" -> two (fun a b -> vbool (order a b >= 0))
+  | ":=" ->
+      two (fun r x ->
+          match r with
+          | VRef a ->
+              set w a x;
+              VUnit
+          | _ -> fault "expected a ref")
   | "=" -> two (fun a b -> vbool (equal w a b))
   | "<>" -> two (fun a b -> vbool (not (equal w a b)))
   | _ -> fault "no primitive %s" name
 
 (* A basis function, applied to its one argument. *)
 let call_prim w name (v : value) =
-  let pair () = match v with VTuple [| a; b |] -> (a, b) | _ -> fault "%s wants a pair" name in
+  let pair () =
+    match v with
+    | VRecord [ (_, a); (_, b) ] -> (a, b)
+    | _ -> fault "%s wants a pair" name
+  in
   let triple () =
-    match v with VTuple [| a; b; c |] -> (a, b, c) | _ -> fault "%s wants a triple" name
+    match v with
+    | VRecord [ (_, a); (_, b); (_, c) ] -> (a, b, c)
+    | _ -> fault "%s wants a triple" name
   in
   match name with
   | "print" ->
       print_string (as_str v);
       VUnit
+  | "!" -> ( match v with VRef a -> get w a | _ -> fault "expected a ref")
   | "not" -> vbool (match v with VCon (c, None) -> c.Types.cname = "false" | _ -> fault "not")
   | "Int.toString" -> VStr (show w v)
   | "Int.abs" -> VInt (abs (as_int v))
@@ -224,7 +249,7 @@ let call_prim w name (v : value) =
   | "Array.fromList" ->
       let rec items = function
         | VCon (c, None) when c.Types.cidx = nil_con.Types.cidx -> []
-        | VCon (_, Some (VTuple [| hd; tl |])) -> hd :: items tl
+        | VCon (_, Some (VRecord [ (_, hd); (_, tl) ])) -> hd :: items tl
         | _ -> fault "expected a list"
       in
       let vs = items v in
@@ -235,8 +260,9 @@ let call_prim w name (v : value) =
   | "Array.toList" -> (
       match v with
       | VArray (base, len) ->
-          let rec go i = if i >= len then VCon (nil_con, None)
-            else VCon (cons_con, Some (VTuple [| get w (base + i); go (i + 1) |]))
+          let rec go i =
+            if i >= len then VCon (nil_con, None)
+            else VCon (cons_con, Some (pair_value (get w (base + i)) (go (i + 1))))
           in
           go 0
       | _ -> fault "expected an array")
@@ -390,6 +416,7 @@ let rec run w (st : state) : value =
           let matches (k : Core.key) =
             match (k, v) with
             | Core.Ktag c, VCon (c', _) -> c.Types.cidx = c'.Types.cidx
+            | Core.Ktag c, VRef _ -> c.Types.cres.Types.tid = Types.ref_tc.Types.tid
             | Core.Kint n, VInt m -> n = m
             | Core.Kstr s, VStr t -> s = t
             | _ -> false
@@ -427,13 +454,13 @@ and eval w env (rhs : F.rhs) : value =
       List.iteri (fun i a -> set w (base + i) (atom w env a)) caps;
       VClos (label, base, List.length caps)
   | F.Prim (op, ats) -> prim w op (List.map (atom w env) ats)
-  | F.Tuple ats -> VTuple (Array.of_list (List.map (atom w env) ats))
   | F.Record fs -> VRecord (List.map (fun (l, a) -> (l, atom w env a)) fs)
+  (* The one constructor that allocates. *)
+  | F.Con (c, Some a) when c.Types.cres.Types.tid = Types.ref_tc.Types.tid ->
+      let cell = alloc w 1 in
+      set w cell (atom w env a);
+      VRef cell
   | F.Con (c, a) -> VCon (c, Option.map (atom w env) a)
-  | F.Proj (a, i) -> (
-      match atom w env a with
-      | VTuple vs -> vs.(i)
-      | _ -> fault "expected a tuple")
   | F.Field (a, l) -> (
       match atom w env a with
       | VRecord fs -> (
@@ -443,6 +470,7 @@ and eval w env (rhs : F.rhs) : value =
       | _ -> fault "expected a record")
   | F.Payload a -> (
       match atom w env a with
+      | VRef cell -> get w cell
       | VCon (_, Some v) -> v
       | VCon (c, None) -> fault "%s has no argument" c.Types.cname
       | _ -> fault "expected a constructed value")

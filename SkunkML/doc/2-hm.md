@@ -4,8 +4,9 @@
 置換は返しません。単一化変数は可変セルで、単一化はセルを破壊的につなぎ、一般化は環境を
 走査するかわりに整数をひとつ比べます。
 
-隣の [MinkML](../../MinkML) の `hm.ml` が「紙のとおりの Algorithm W」なので、同じ推論の2通りの書き方を
-並べて読むことができます。あちらは置換を合成して回し、こちらは何も返しません。
+紙の上の Algorithm W では、単一化が**置換を返し**、それを合成して環境に適用しながら
+回します。ここでは単一化は何も返しません。同じ推論の2通りの書き方で、違いは全部
+「未知の型をどこに置くか」から出てきます。
 
 ## 用語
 
@@ -18,6 +19,9 @@
 | 一般化 / 具体化 | 単型を型スキームにする / 型スキームから単型を作る |
 | 値制限 (value restriction) | 右辺が値でなければ一般化しない、という規則 |
 | rigid な型変数 | 書かれた `'a`。何とも単一化しない定数として扱う |
+| 等値型 (equality type) | `=` で比べられる型。`''a` はそういう型だけを表す型変数 |
+| オーバーロード | 1つの綴りが複数の型で違う意味を持つこと。`<` がそれ |
+| 既定型 (default type) | オーバーロードが解けなかったときに選ぶ型。ここでは `int` |
 
 ## 1. 型の表現
 
@@ -29,14 +33,26 @@ type ty =
   | Ttuple of ty list          (* 空タプルが unit *)
   | Trecord of (string * ty) list   (* ラベル順にソート *)
 
-and tv = Link of ty | Unbound of { id : int; level : int; must : (string * ty) list }
+and tv =
+  | Link of ty
+  | Unbound of {
+      id : int; level : int;
+      must : (string * ty) list;   (* #lab が要求するフィールド（5節） *)
+      eq : bool;                   (* = が要求する（6節） *)
+      ord : bool;                  (* < が要求する（7節） *)
+    }
 ```
 
-`unit` を独立した型構成子にせず `Ttuple []` にしてあるのは SML に合わせたものです
-（SML の `unit` は空レコード）。おかげでパターン `()` も値 `()` も特別扱いが要りません。
+**積は1つしかありません。** タプルは「ラベルが 1, 2, ... n のレコード」で、`unit` は
+フィールドのないレコードです。Definition がそう決めていて、そのおかげで `#1` がタプルに
+効き、決定木もタプルとレコードを区別しません（[5章](5-matching.md)の1節）。
 
-レコードは**ラベル順にソート**して持ちます。`{ y = 1, x = 2 }` と `{ x = 2, y = 1 }` が
-同じ型で同じ値になるのはこのためで、単一化はラベル列を比べるだけで済みます。
+レコードは**ラベル順にソート**して持ちます。数字のラベルは値の順で、文字のラベルより
+前。`{ y = 1, x = 2 }` と `{ x = 2, y = 1 }` が同じ型で同じ値になるのはこのためで、
+単一化はラベル列を比べるだけで済みます。
+
+変数が持っている `must`・`eq`・`ord` は、それぞれ「`#lab` が要求するフィールド」
+「`=` が要求すること」「`<` が要求すること」で、5節から7節がその3つです。
 
 型構成子には**名前とは別に識別子**があります。
 
@@ -86,13 +102,13 @@ type scheme = { qvars : tv ref list; sbody : ty }
 関数はひとつしかなく、具体化にも、構成子の引数型を求めるのにも、ファンクタ適用の
 realisation にも同じ `copy` を使います。
 
-## 3. 値制限 — 配列があるから要る
+## 3. 値制限 — 可変なものがあるから要る
 
 ```sml
-val cell = Array.array (1, [])
+val cell = ref []
 ```
 
-これを一般化すると `'a list array` になり、`int list` を書き込んでから `bool list` として
+これを一般化すると `'a list ref` になり、`int list` を書き込んでから `bool list` として
 読み出せます。だから**右辺が「値」でなければ一般化しない**。
 
 ```ocaml
@@ -120,8 +136,8 @@ val () = Array.update (cell, 0, [1])      (* ここで int list に決まる *)
 val () = Array.update (cell, 0, [true])   (* もう遅い *)
 ```
 
-配列がなければこの規則は要りません。**この処理系に値制限があるのは、ストアがあるのと
-同じ理由です**（[8章](8-cesk.md)）。
+`ref` も配列もなければこの規則は要りません。**この処理系に値制限があるのは、ストアが
+あるのと同じ理由です**（[8章](8-cesk.md)）。
 
 ## 4. 書かれた `'a` は約束である
 
@@ -196,13 +212,113 @@ errors/flexrecord.sk:2:5: type error: this record's type is not determined here:
 ```
 
 これは SML そのままの挙動です。`fun getX r = #x r` は SML でも通りません。行多相を
-入れればこの制限は消えますが、それは別の型システムであって、MinkML の `row` が
-そちらを扱っています。
+入れればこの制限は消えますが、それは行多相という別の型システムです。
 
 閉じたレコードパターンには制限がありません。`{ x, y }` は「フィールドはこの2つで全部」と
 言っているので、型がその場で決まります。`...` を付けたときだけ決めてもらう必要があります。
 
-## 6. 何が単一化しないかを言う
+## 6. 等値型 — `f = g` は型エラーである
+
+`=` はどんな型にも付くわけではありません。関数は比べられないからです。実行時に落とす
+という手もありますが（OCaml がそうです）、SML は型で止めます。
+
+やり方は5節と同じで、**変数に要求を持たせます**。
+
+```ocaml
+| Unbound of {
+    id : int; level : int;
+    must : (string * ty) list;   (* #lab が要求するフィールド *)
+    eq : bool;                   (* = が要求する *)
+    ord : bool;                  (* < が要求する *)
+  }
+```
+
+`=` は `eq` を立てた新しい変数を両辺に置きます。その変数が何かと単一化されるとき、
+相手が等値を認めるかを確かめる。
+
+```ocaml
+and require_eq loc seen t =
+  match repr t with
+  | Tvar ({ contents = Unbound u } as r) -> r := Unbound { u with eq = true }
+  | Trecord fs -> List.iter (fun (_, t) -> require_eq loc seen t) fs
+  | Tarrow _ -> Loc.type_error loc "a function cannot be compared: ..."
+  | Tcon (tc, args) ->
+      if tc.teq || List.mem tc.tid seen then ()
+      else if tc.tcons = [] then
+        Loc.type_error loc "%s is abstract, so it does not admit equality" tc.tname
+      else List.iter (fun c -> ... require_eq loc (tc.tid :: seen) ...) tc.tcons
+```
+
+読みどころは3つです。
+
+**`teq` は型構成子が自分で答える場合。** `int`・`bool`・`string` は機械が比べられるから、
+`array` と `ref` は**同一性で**比べられるから。中身が何であっても関係ありません。
+
+**直和型は構成子から計算します。** `int list` が等値型なのは `::` の引数
+`int * int list` が等値型だから。そこに `int list` が出てくるので、素直に書くと
+止まりません。`seen` がそれで、**いま調べている型は等値を認めると仮定する**。
+帰納的な定義に対する当たり前の手ですが、これがないと `list` で無限ループします。
+
+**抽象型は認めません。** 何も分かっていないので。SML はそのために `eqtype` を持って
+いて、この処理系も持っています。
+
+```sml
+signature K = sig eqtype t val one : t end
+structure Bad : K = struct type t = int -> int fun one x = x end
+```
+
+```
+$ skunk tests/errors/abstracteq.sk
+errors/abstracteq.sk:2:19: signature error: the signature declares t as an eqtype,
+  but a function cannot be compared: int -> int does not admit equality
+```
+
+一般化まで残った `eq` の要求は、**そのまま量化されます**。それが `''a` です。
+
+```
+$ skunk eq.sk
+val member : ''a * ''a list -> bool = fn
+```
+
+具体化するときも要求は残ります。`instantiate` が `''a` を写す先は「等値を要求する
+新しい変数」で、そうしないと関数を渡せてしまいます。
+
+```
+$ skunk tests/errors/eqtype.sk
+errors/eqtype.sk:2:11: type error: a function cannot be compared:
+  '_7 -> '_7 does not admit equality
+```
+
+## 7. 順序型 — オーバーロードと既定型
+
+`<` は `int` と `string` の両方で意味を持ちます。SML はここに `char` と `real` も
+入れますが、どちらにしてもこれは**オーバーロード**で、HM の中には居場所がありません。
+
+同じ機構をもう1つ使います。`<` は `ord` を立てた変数を置き、単一化のときに
+「順序を持つのは int と string だけ」を確かめる。
+
+違うのは**解けなかったときです**。
+
+```ocaml
+let rec default_ord t =
+  match repr t with
+  | Tvar { contents = Unbound u } when u.ord -> unify Loc.unknown t tint
+  ...
+```
+
+宣言が終わる時点で決まっていなければ `int` にします。SML の既定型の規則で、
+結果はこうなります。
+
+```sml
+fun biggest (a, b) = if a < b then b else a          (* int * int -> int *)
+fun strMax (a : string, b) = if a < b then b else a  (* string * string -> string *)
+```
+
+`biggest` は多相ではありません。`biggest ("a", "b")` は型エラーです。**オーバーロード
+された演算子は多相を作らない** — これが `=` との違いで、`=` のほうは `''a` として
+量化されます。
+
+## 8. 何が単一化しないかを言う
 
 型が違うと言うだけのエラーは、モジュールがあるとほとんど役に立ちません。
 
@@ -231,10 +347,10 @@ errors/generative.sk:5:12: type error: cannot unify A.box with B.box
 - **多相再帰がありません。** `fun` は自分の名前を単型として見ながら本体を検査します。
   注釈を付けても変わりません（注釈は rigid になりますが、再帰呼び出しの型は環境の
   単型から取ります）。
-- **オーバーロードがありません。** `<` は `int` のみです。SML は `int`/`string`/`char`/`real`
-  にオーバーロードして既定型を持ちますが、それは HM の外側にもう1つ機構が要ります。
-- **等値型 (eqtype) がありません。** `=` はどんな型にも付き、関数を比べようとしたときだけ
-  実行時に落ちます。健全ではありますが、静的に止めるのが SML です。
+- **オーバーロードは `<` だけで、型も2つだけです。** SML は `char` と `real` も含み、
+  `+` や `abs` もオーバーロードします。ここは `<` `<=` `>` `>=` を `int` と `string` に
+  限っています。
+
 - **弱い型変数を印字で区別していません。** 値制限で一般化されなかった変数は `'_31` と
   出ます。SML の `'_a` と同じ意味です。
 
@@ -246,18 +362,18 @@ errors/generative.sk:5:12: type error: cannot unify A.box with B.box
   Types", INRIA RR-1766, 1992. レベルによる一般化。実装はここから。
 - Andrew Wright, "Simple Imperative Polymorphism", *LISP and Symbolic
   Computation* 8(4), 1995. 値制限が今の形になった論文。
+- *The Definition of Standard ML (Revised)*, 1997, §4.4 と付録 C。等値型がどう決まるか、
+  オーバーロードがどう既定されるか。6節と7節はここを写したものです。
 - Oleg Kiselyov, "Efficient and Insightful Generalization". レベル法の解説として
   いちばん短い。
-- 隣の [MinkML](../../MinkML) の `lab/src/hm.ml` が、同じ推論を置換で書いたものです。
-  置換を手で合成する版とレベル版を並べて読めます。
 
 ## 実装の地図
 
 | ファイル | 何が |
 |---|---|
-| `src/types.ml` | `newvar`/`enter_level`/`leave_level`（2節）、`copy`（2節）、`unify`/`occurs`（1・2節）、`require_fields`（5節）、`generalise`（2・5節）、`show_scheme`（印字） |
+| `src/types.ml` | `newvar_gen`/`enter_level`/`leave_level`（2節）、`copy`/`instantiate`（2・6節）、`unify`/`occurs`（1・2節）、`require_fields`（5節）、`require_eq`（6節）、`require_ord`/`default_ord`（7節）、`generalise`（2・5節）、`show_scheme`（印字） |
 | `src/elab.ml` | `non_expansive`（3節）、`read_ann`/`open_ann`/`close_ann`（4節） |
-| `src/sem.ml` | `read_ty` の `?mk`（4節）、`read_scheme`（シグネチャの `val`） |
+| `src/sem.ml` | `read_ty` の `?mk`（4・6節）、`read_scheme`（シグネチャの `val`）、`more_general` の skolem（6節）、`elab_spec` の `eqtype`（6節） |
 
 ---
 

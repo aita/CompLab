@@ -30,7 +30,7 @@ val () = print (greeting ^ "\n")
 | 真偽値 | `true`、`false`。予約語ではなく `bool` の構成子です |
 | 小文字識別子 | `[a-z_][A-Za-z0-9_']*`。変数、型、フィールド、構成子にもなれる |
 | 大文字識別子 | `[A-Z][A-Za-z0-9_']*`。構造・シグネチャ・ファンクタ、構成子 |
-| 型変数 | `'a`。`x'` は識別子 |
+| 型変数 | `'a`。`''a` は等値型だけを表す（[2章](2-hm.md)の6節）。`x'` は識別子 |
 | 修飾名 | `List.map`、`A.B.x`。**1つのトークン**です（[1章](1-syntax.md)） |
 | フィールド選択 | `#x`。これも1トークン |
 | ワイルドカード | `_` |
@@ -39,7 +39,7 @@ val () = print (greeting ^ "\n")
 
 ```
 val  fun  fn  let  in  end  if  then  else  case  of  as
-datatype  type  and  andalso  orelse  div  mod  open
+datatype  type  eqtype  and  andalso  orelse  div  mod  open
 structure  signature  functor  struct  sig  where  include
 ```
 
@@ -50,13 +50,14 @@ structure  signature  functor  struct  sig  where  include
 - **`-x` はありません。** 単項マイナスは `~x`
 - **`op` はありません。** `foldl op + 0 xs` は `foldl (fn (a, b) => a + b) 0 xs`
 - 演算子を定義する構文はありません
+- `!` はふつうの識別子です。`!r` は関数適用で、`List.map !` と書けます
 
 ## 3. 型
 
 ```
-型 ::= 'a
+型 ::= 'a | ''a
      | int | bool | string | unit
-     | 型 * 型 * ...              タプル
+     | 型 * 型 * ...              タプル。{ 1 : 型, 2 : 型 } の別の書き方
      | { l : 型, ... }            レコード
      | 型 -> 型
      | 型 型構成子                後置適用: int list
@@ -66,6 +67,10 @@ structure  signature  functor  struct  sig  where  include
 ```
 
 適用は後置で左結合、`*` は `->` より強く、`->` は右結合です。
+
+**タプルはレコードです。** `int * bool` は `{ 1 : int, 2 : bool }` の書き方のひとつで、
+`unit` はフィールドのないレコードです。だから `#1` はタプルにも効きます。数字のラベルは
+値の順に並び、文字のラベルより前に来ます。
 
 型を書ける場所は3つあり、どれも同じ意味です。
 
@@ -87,6 +92,7 @@ val m = (someExpression : int)           (* 式。括弧が要ります *)
 式 ::= リテラル | 変数 | パス.変数
      | ( 式, 式, ... )              タプル。( ) は unit
      | { l = 式, ... }              レコード。{ } は unit
+     | ! 式 | 式 := 式              参照の読み書き
      | [ 式, 式, ... ]              リスト
      | #l 式                        フィールド選択
      | 式 式                        適用。左結合
@@ -112,8 +118,9 @@ val m = (someExpression : int)           (* 式。括弧が要ります *)
 | 6 | `+` `-` | 左結合、`int` |
 | 6 | `^` | 左結合、`string` の連結 |
 | 5 | `::` `@` | 右結合。cons とリストの連結 |
-| 4 | `=` `<>` | 構造的等価。関数を比べると実行時に落ちます |
-| 4 | `<` `<=` `>` `>=` | `int` のみ |
+| 4 | `=` `<>` | 構造的等価。等値型のみ（`''a`）。関数は**型エラー** |
+| 4 | `<` `<=` `>` `>=` | `int` と `string`。決まらなければ `int` に既定 |
+| 3 | `:=` | 右結合。`'a ref * 'a -> unit` |
 | — | `andalso` / `orelse` | 上の全部より弱い。右結合 |
 | — | `;` | 一番弱い |
 
@@ -124,13 +131,13 @@ val m = (someExpression : int)           (* 式。括弧が要ります *)
 
 ```
 パターン ::= _ | x | 42 | ~1 | "s"
-          | 構成子 | 構成子 パターン
+          | 構成子 | 構成子 パターン        (* ref p もこれ *)
           | パターン :: パターン
           | [ パターン, ... ]
           | ( パターン, ... )
           | { l = パターン, ... } | { l, ... } | { l = パターン, ... , ... }
           | x as パターン
-          | ( パターン : 型 )
+          | パターン : 型
 ```
 
 裸の名前は、環境が構成子だと言えば構成子、そうでなければ変数です。`nil`・`true`・
@@ -181,6 +188,7 @@ val m = (someExpression : int)           (* 式。括弧が要ります *)
 
 仕様 ::= val x : 型
        | type 'a t
+       | eqtype 'a t
        | type 'a t = 型
        | datatype 'a t = C | ...
        | structure X : シグネチャ
@@ -188,7 +196,8 @@ val m = (someExpression : int)           (* 式。括弧が要ります *)
 ```
 
 `:` は透明で、シグネチャが `type t` と言っていても外からは実際の型が見えます。
-`:>` は不透明で、`t` は抽象型になります。
+`:>` は不透明で、`t` は抽象型になります。抽象型は等値を認めないので、`=` で比べたい
+なら `eqtype` と書きます。
 
 ファンクタは**生成的**です。2回適用すれば2つの違う型ができます。
 
@@ -203,7 +212,7 @@ functor MakeSet (O : ORD) :> SET where type elem = O.t = struct ... end
 
 ## 8. 基盤ライブラリ
 
-トップレベル: `print : string -> unit`、`not : bool -> bool`。
+トップレベル: `print : string -> unit`、`not : bool -> bool`、`! : 'a ref -> 'a`。
 
 `Int`、`String`、`Array` は OCaml で書かれています。機械がやるしかないからです。
 
@@ -212,6 +221,17 @@ functor MakeSet (O : ORD) :> SET where type elem = O.t = struct ... end
 | `Int` | `toString`、`abs`、`min`、`max`、`compare` |
 | `String` | `size`、`compare`、`substring` |
 | `Array` | `array`、`fromList`、`toList`、`length`、`sub`、`update` |
+
+参照は基盤ライブラリではなく言語の一部です。`ref` は構成子1つの直和型なので、
+`ref x` は式でもパターンでもあります。
+
+```sml
+val counter = ref 0
+val () = counter := !counter + 1
+fun bump (r as ref n) = (r := n + 1; !r)
+```
+
+`ref` と `array` の等値は**同一性**です。中身ではなく、同じ場所かどうかを見ます。
 
 `compare` は `~1`／`0`／`1` を返します（`order` 型はありません）。
 `Array.array (n, x)` は `n` 個の `x`、`Array.sub (a, i)`、
@@ -238,14 +258,10 @@ datatype 'a option = NONE | SOME of 'a
 **型と値**
 
 - 例外がありません。`raise` も `handle` も。マッチの失敗はプログラムを止めます
-- `ref` がありません。可変なのは `Array` だけです（[8章](8-cesk.md)）
 - 文字と実数がありません
-- 等値型 (eqtype) がありません。`=` はどんな型にも付き、関数のときだけ実行時に落ちます
-- 比較演算子は `int` のみです。オーバーロードがありません
+- `<` は `int` と `string` だけです。SML は `char` と `real` も含みます
 - 多相再帰がありません
 - 行多相がありません。`fun getX r = #x r` は通りません（[2章](2-hm.md)の5節）
-- `#1` はタプルの1番目ではなく `1` という名前のフィールドです。SML と違って
-  タプルはレコードではありません
 
 **構文**
 

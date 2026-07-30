@@ -4,9 +4,11 @@ val greeting = "hello"
 val answer = 6 * 7
 val negative = ~3
 
-(* Tuples, records, lists.  A record's fields are sorted, so { y, x } and
-   { x, y } are one type and one value. *)
+(* Tuples, records, lists.  A tuple is a record whose labels are 1 and 2, so
+   #1 works on one; a record's fields are sorted, so { y, x } and { x, y } are
+   one type and one value. *)
 val pair = (1, true)
+val firstOfPair = #1 pair
 val origin = { x = 0, y = 0 }
 val moved = { x = #x origin + 3, y = #y origin }
 val small = [1, 2, 3]
@@ -41,12 +43,24 @@ and odd 0 = false
 
 val e10 = even 10
 
+(* `=` is only for equality types, and a variable that has to be compared
+   prints with two quotes. *)
+fun count (_, []) = 0
+  | count (x, y :: ys) = (if x = y then 1 else 0) + count (x, ys)
+
+val twos = count (2, [1, 2, 2, 3])
+
 (* The list part of the basis is written in SkunkML itself. *)
 val doubled = List.map (fn n => n * 2) small
 val total = List.foldl (fn (a, b) => a + b) 0 doubled
 val evens = List.filter even [1, 2, 3, 4, 5, 6]
 
-(* Arrays live in the machine's store, and are the reason there is one. *)
+(* `ref` and arrays live in the machine's store, and are the reason there is
+   one.  There is more of this in examples/store.sk. *)
+val counter = ref 0
+val () = counter := !counter + 1
+val ticked = !counter
+
 val cells = Array.array (3, 0)
 val () = Array.update (cells, 1, 42)
 val readBack = Array.sub (cells, 1)
