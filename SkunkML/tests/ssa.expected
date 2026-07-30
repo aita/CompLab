@@ -1,57 +1,57 @@
 func answer$1:
   b0:
     v0 = param                             ; a1.19
-    v1 = const "yes"
-    v2 = const "no"
     switch v0 [true -> b2, false -> b1]
   b1:                             ; preds b0
-    ret v2
-  b2:                             ; preds b0
+    v1 = const "no"
     ret v1
+  b2:                             ; preds b0
+    v2 = const "yes"
+    ret v2
 
 func describe$2:
   b0:
     v0 = param                             ; a1.20
     v1 = global answer
-    v2 = const "it is "
-    v3 = call v1, v0                       ; t.60
-    v4 = prim ^ v2, v3                     ; t.61
+    v2 = call v1, v0                       ; t.60
+    v3 = const "it is "
+    v4 = prim ^ v3, v2                     ; t.61
     ret v4
 
 func inline$3:
   b0:
     v0 = param                             ; a1.21
-    v1 = const "yes"
-    v2 = const "no"
-    v3 = const "it is "
     switch v0 [true -> b2, false -> b1]
   b1:                             ; preds b0
+    v1 = const "no"
     jump b3
   b2:                             ; preds b0
+    v2 = const "yes"
     jump b3
   b3:                             ; preds b2 b1
-    v4 = phi [b2: v1, b1: v2]              ; v
-    v5 = prim ^ v3, v4                     ; t.62
+    v3 = phi [b2: v2, b1: v1]              ; v
+    v4 = const "it is "
+    v5 = prim ^ v4, v3                     ; t.62
     ret v5
 
 func both$4:
   b0:
     v0 = param                             ; a1.22
-    v1 = const "yes"
-    v2 = const "no"
-    v3 = field v0, 1(0)                    ; p.57
-    v4 = field v0, 2(1)                    ; p.58
-    switch v3 [true -> b2, _ -> b1]
+    v1 = field v0, 1(0)                    ; p.57
+    v2 = field v0, 2(1)                    ; p.58
+    switch v1 [true -> b2, _ -> b1]
   b1:                             ; preds b0
     jump b4
   b2:                             ; preds b0
-    switch v4 [1 -> b5, _ -> b3]
+    switch v2 [1 -> b5, _ -> b3]
   b3:                             ; preds b2
     jump b4
   b4:                             ; preds b3 b1
-    ret v2
+    v3 = const "no"
+    ret v3
   b5:                             ; preds b2
-    ret v1
+    v4 = const "yes"
+    ret v4
 
 -- val answer : bool -> string
 func $answer:
@@ -80,20 +80,20 @@ func $both:
 -- val shown : string * string * string * string
 func $shown:
   b0:
-    v0 = global answer
-    v1 = global describe
-    v2 = global inline
-    v3 = const 1
-    v4 = global both
-    v5 = con true/1                        ; t.63
-    v6 = call v0, v5                       ; t.64
-    v7 = con false/0                       ; t.65
-    v8 = call v1, v7                       ; t.66
-    v9 = con true/1                        ; t.67
-    v10 = call v2, v9                      ; t.68
-    v11 = con true/1                       ; t.69
-    v12 = record { 1 = v11, 2 = v3 }       ; t.70
-    v13 = call v4, v12                     ; t.71
-    v14 = record { 1 = v6, 2 = v8, 3 = v10, 4 = v13 } ; t.72
+    v0 = con true/1                        ; t.63
+    v1 = global answer
+    v2 = call v1, v0                       ; t.64
+    v3 = con false/0                       ; t.65
+    v4 = global describe
+    v5 = call v4, v3                       ; t.66
+    v6 = con true/1                        ; t.67
+    v7 = global inline
+    v8 = call v7, v6                       ; t.68
+    v9 = con true/1                        ; t.69
+    v10 = const 1
+    v11 = record { 1 = v9, 2 = v10 }       ; t.70
+    v12 = global both
+    v13 = call v12, v11                    ; t.71
+    v14 = record { 1 = v2, 2 = v5, 3 = v8, 4 = v13 } ; t.72
     ret v14
 

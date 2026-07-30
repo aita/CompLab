@@ -21,12 +21,12 @@ func fact$2:
   b0:
     v0 = param                             ; a1.20
     v1 = const 1
-    v2 = global fact
-    v3 = prim <= v0, v1                    ; t.62
-    switch v3 [true -> b2, false -> b1]
+    v2 = prim <= v0, v1                    ; t.62
+    switch v2 [true -> b2, false -> b1]
   b1:                             ; preds b0
-    v4 = prim - v0, v1                     ; t.63
-    v5 = call v2, v4                       ; t.64
+    v3 = prim - v0, v1                     ; t.63
+    v4 = global fact
+    v5 = call v4, v3                       ; t.64
     v6 = prim * v0, v5                     ; t.65
     ret v6
   b2:                             ; preds b0
@@ -36,30 +36,31 @@ func classify$3:
   b0:
     v0 = param                             ; a1.21
     v1 = const 0
-    v2 = const 2
-    v3 = const 1
     jump b1
   b1:                             ; preds b0 b3 b4
-    v4 = phi [b0: v0, b3: v11, b4: v14]    ; a1.21
-    v5 = field v4, 1(0)                    ; p.61
-    v6 = field v4, 2(1)                    ; p.62
-    v7 = prim = v5, v1                     ; t.66
-    switch v7 [true -> b5, false -> b2]
+    v2 = phi [b0: v0, b3: v11, b4: v15]    ; a1.21
+    v3 = field v2, 1(0)                    ; p.61
+    v4 = field v2, 2(1)                    ; p.62
+    v5 = prim = v3, v1                     ; t.66
+    switch v5 [true -> b5, false -> b2]
   b2:                             ; preds b1
-    v8 = prim mod v5, v2                   ; t.67
-    v9 = prim = v8, v1                     ; t.68
-    switch v9 [true -> b4, false -> b3]
+    v6 = const 2
+    v7 = prim mod v3, v6                   ; t.67
+    v8 = prim = v7, v1                     ; t.68
+    switch v8 [true -> b4, false -> b3]
   b3:                             ; preds b2
-    v10 = prim - v5, v3                    ; t.72
-    v11 = record { 1 = v10, 2 = v6 }       ; t.73
+    v9 = const 1
+    v10 = prim - v3, v9                    ; t.72
+    v11 = record { 1 = v10, 2 = v4 }       ; t.73
     jump b1
   b4:                             ; preds b2
-    v12 = prim - v5, v3                    ; t.69
-    v13 = prim + v6, v3                    ; t.70
-    v14 = record { 1 = v12, 2 = v13 }      ; t.71
+    v12 = const 1
+    v13 = prim - v3, v12                   ; t.69
+    v14 = prim + v4, v12                   ; t.70
+    v15 = record { 1 = v13, 2 = v14 }      ; t.71
     jump b1
   b5:                             ; preds b1
-    ret v6
+    ret v4
 
 -- val sum : int list * int -> int
 func $sum:
@@ -82,23 +83,23 @@ func $classify:
 -- val a : int
 func $a:
   b0:
-    v0 = const 4
-    v1 = const 3
-    v2 = const 2
-    v3 = const 1
-    v4 = const 0
-    v5 = global sum
-    v6 = con nil/0                         ; t.74
-    v7 = record { 1 = v0, 2 = v6 }         ; t.75
-    v8 = con ::/1, v7                      ; t.76
-    v9 = record { 1 = v1, 2 = v8 }         ; t.77
-    v10 = con ::/1, v9                     ; t.78
-    v11 = record { 1 = v2, 2 = v10 }       ; t.79
-    v12 = con ::/1, v11                    ; t.80
-    v13 = record { 1 = v3, 2 = v12 }       ; t.81
-    v14 = con ::/1, v13                    ; t.82
-    v15 = record { 1 = v14, 2 = v4 }       ; t.83
-    v16 = call v5, v15                     ; t.84
+    v0 = con nil/0                         ; t.74
+    v1 = const 4
+    v2 = record { 1 = v1, 2 = v0 }         ; t.75
+    v3 = con ::/1, v2                      ; t.76
+    v4 = const 3
+    v5 = record { 1 = v4, 2 = v3 }         ; t.77
+    v6 = con ::/1, v5                      ; t.78
+    v7 = const 2
+    v8 = record { 1 = v7, 2 = v6 }         ; t.79
+    v9 = con ::/1, v8                      ; t.80
+    v10 = const 1
+    v11 = record { 1 = v10, 2 = v9 }       ; t.81
+    v12 = con ::/1, v11                    ; t.82
+    v13 = const 0
+    v14 = record { 1 = v12, 2 = v13 }      ; t.83
+    v15 = global sum
+    v16 = call v15, v14                    ; t.84
     ret v16
 
 -- val b : int
@@ -114,8 +115,8 @@ func $c:
   b0:
     v0 = const 10
     v1 = const 0
-    v2 = global classify
-    v3 = record { 1 = v0, 2 = v1 }         ; t.86
-    v4 = call v2, v3                       ; t.87
+    v2 = record { 1 = v0, 2 = v1 }         ; t.86
+    v3 = global classify
+    v4 = call v3, v2                       ; t.87
     ret v4
 

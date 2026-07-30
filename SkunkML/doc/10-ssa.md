@@ -34,28 +34,27 @@ fun inline b = "it is " ^ (if b then "yes" else "no")
 $ skunk --dump-core tests/join.sk        $ skunkc --dump-ssa tests/join.sk
 let inline = fn a1.21 : bool =>          func inline$3:
   let b.3 : bool = a1.21                   b0:
-                                             v0 = param              ; a1.21
-                                             v1 = const "yes"
-                                             v2 = const "no"
-                                             v3 = const "it is "
-  join k (v : string) =                      switch v0 [true -> b2, false -> b1]
-    let t.62 = ^("it is ", v)              b1:              ; preds b0
-    ret t.62                                 jump b3
-  switch b.3 of                            b2:              ; preds b0
-  | true =>                                  jump b3
-      jump k ("yes")                       b3:              ; preds b2 b1
-  | false =>                                 v4 = phi [b2: v1, b1: v2]   ; v
-      jump k ("no")                          v5 = prim ^ v3, v4          ; t.62
+                                             v0 = param               ; a1.21
+                                             switch v0 [true -> b2, false -> b1]
+                                           b1:                        ; preds b0
+                                             v1 = const "no"
+  join k (v : string) =                      jump b3
+    let t.62 = ^("it is ", v)              b2:                        ; preds b0
+    ret t.62                                 v2 = const "yes"
+  switch b.3 of                              jump b3
+  | true =>                                b3:                        ; preds b2 b1
+      jump k ("yes")                         v3 = phi [b2: v2, b1: v1] ; v
+  | false =>                                 v4 = const "it is "
+      jump k ("no")                          v5 = prim ^ v4, v3       ; t.62
                                              ret v5
 ```
 
 指で追えます。`join k (v)` が `b3` と `v4 = phi […]` に、`jump k ("yes")` が
 「b2 から b3 への辺」と「φ の第1引数」に。木が graph になっただけです。
 
-1つだけ引っかかるところがあるはずです。**`"yes"` は `true` の腕でしか要らないのに、
-`v1` が `b0` にある。** ソースは `jump k ("yes")` と書いてあるのだから、素直には `b2`
-に置きたい。なぜそうなっていないか、そしてそれが**本当に損をしている**ことは
-[3節の「素直でないところ、その1」](#素直でないところその1--定数)で扱います。
+`"yes"` が `b2` にあることに注意してください。ソースが `jump k ("yes")` と書いている
+ところです。定数は**使うブロックで定義します** — そうしなくても正しいのですが、そう
+する理由は3節にあります。
 
 ダンプの `preds` は**先行ブロック**、つまりそのブロックへ来る辺の出どころで、
 φ の引数はこの並びと位置で対応します。
@@ -177,7 +176,7 @@ type state = {
   mutable blocks : S.block list;
   mutable names : S.value Map.t;             (* Flat の名前 -> 値 *)
   mutable joins : (string * S.block) list;   (* join の名前 -> ブロック *)
-  mutable head : S.value list;               (* 入口に置くもの: 引数と定数 *)
+  mutable head : S.value list;               (* 入口に置くもの: 引数だけ *)
   globals : (string, unit) Hashtbl.t;
 }
 ```
@@ -223,61 +222,44 @@ let goto (from : S.block) (target : S.block) args =
   from.S.term <- S.Jump target
 ```
 
-### 素直でないところ、その1 — 定数
+### 定数はどこに置くか
 
 Flat のオペランドはアトムで、リテラルはその場に書かれています。値 SSA では何もかもが
 値なので、リテラルは `Const` 値になります。ではどのブロックに置くか。
 
-**入口ブロック**です。入口はすべてのブロックを支配する（[11章](11-dom.md)）ので、
-どこから使っても「定義が使用を支配する」が成り立ちます。ついでにハッシュコンスして
-あるので、プログラム中の `0` はいくつのブロックが使っても1つの値です。
+**使うブロック**です。
 
 ```ocaml
-let constant st entry (c : S.const) =
+let constant st (blk : S.block) (c : S.const) =
   let same v = match v.S.op with S.Const c' -> c' = c | _ -> false in
-  match List.find_opt same st.head with
+  match List.find_opt same blk.S.values with
   | Some v -> v
-  | None -> emit_head st entry (S.Const c)
+  | None -> emit st blk (S.Const c)
 ```
 
-入口に積むものだけ別のリスト (`head`) に貯めてあるのは、**あとから作られた定数も
-入口の先頭側に入る**ようにするためです。そうしないと、入口ブロックの中で「定義より前で
-使う」ことが起こりえます。
+**入口ブロックに全部積んでも正しい。** 入口はすべてのブロックを支配する
+（[11章](11-dom.md)）ので、どこから使っても「定義が使用を支配する」が成り立つ。
+ハッシュコンスすればプログラム中の `0` が1つの値になって、共有まで付いてくる。
 
-#### これは損をしています
+それをやめた理由が2つあります。
 
-1節のダンプで `"yes"` が `b0` にあったのがこれです。ソースは `true` の腕でしか
-`"yes"` を要らないのに、値は入口にある。「入口が全部を支配するから」は**置いてよい
-理由**であって、**置くべき理由**ではありません。
+**プログラムがそう書いていない。** `"yes"` は `true` の腕にしか現れないのに、入口に
+定義があるダンプは指で追えなくなります。1節の左右が行ごとに対応しているのは、これを
+やめたからです。
 
-そして代償は本物です。整数の定数なら命令になりません — 命令選択が使う場所で即値に
-畳むので（[12章](12-select.md)の3節）、`b0` では何も起きない。ところが文字列の定数は
-静的な塊のアドレスなので `lea` 1命令になり、**それが `b0` で走ります**。
+**そして損をする。** 整数の定数なら命令になりません — 命令選択が使う場所で即値に畳む
+（[12章](12-select.md)の3節）。ところが文字列の定数は静的な塊のアドレスなので `lea`
+1命令になり、入口に置くと**走った道では捨てられる `lea`** を払います。この関数なら
+2本です。
 
-```
-$ skunkc --dump-mach tests/join.sk
-func code_inline_243:
-  b0:
-    ...
-    lea str_49(%rip), %rdx      ; "it is " ── どの道でも要る
-    lea str_50(%rip), %rcx      ; "no"     ── false の腕でしか要らない
-    lea str_51(%rip), %rsi      ; "yes"    ── true の腕でしか要らない
-    cmp $1, %rax
-    je b2 else b4
-```
+共有はどうなるか。**同じブロックの中では効きます** — そこの定義は後続の使用を全部支配
+するので、`List.find_opt` で足りる。ブロックをまたぐ共有は[16章](16-opt.md)の GVN の
+仕事で、支配木を降りながら「共有してよいか」を知っているのはあちらです。**このパスが
+推測する必要はありません。**
 
-3本のうち2本は、走った道では捨てられます。欲しいのは**再具体化（rematerialisation）**
-— 引数を持たない値は、置かれた場所ではなく**使われる場所で**作ればよい — あるいは
-同じことを逆から見た**沈め（sinking）**です。どちらも入っていません。
+入口に残るのは引数だけです（`head`）。
 
-ここで厄介なのは、`"yes"` の使用箇所が φ の引数だということです。φ の引数は
-「その先行ブロックの終わりで用意されているもの」なので、沈める先は使用ブロックではなく
-**先行ブロック**になります。命令選択はブロックを順に見ていくので、`b3` の φ を見る
-時点で `b2` はもう閉じている — 素直に書ける場所がありません。φ の引数を先行ブロックの
-末尾へ落とすのは、[13章](13-regalloc.md)の1節で SSA を出るときにやっていることなので、
-入れる場所としてはそこが自然でしょう。
-
-### 素直でないところ、その2 — 循環する定義
+### 素直でないところ — 循環する定義
 
 ```sml
 fun parity n =
@@ -327,8 +309,9 @@ amd64 までは [12章](12-select.md) からの3章です。
 
 ## していないこと
 
-- **再具体化も沈めもありません。** 定数は入口に置かれ、そこで作られます。整数なら
-  即値になって消えますが、文字列は使わない道でも `lea` 1本を払います（3節）。
+- **値を動かしません。** 定数は使うブロックに作られるので入口に浮きませんが、
+  それ以上のことはしません。ある値を「使うところまで沈める」一般の仕組み（sinking）や、
+  引数のない値を使う場所で作り直す再具体化（rematerialisation）はありません。
 - **このパスは最適化をしません。** 定数の共有だけはしますが、それは表を作る都合です。
   定数畳み込み・CSE・DCE は[16章](16-opt.md)で、値 SSA だとどれも短く書けます —
   この章で「そういう表現だ」と言ったことの帰結です。

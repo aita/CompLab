@@ -17,13 +17,13 @@ func wasteful$2:
 func throughAJoin$3:
   b0:
     v0 = param                             ; a1.21
-    v1 = const "five"
     switch v0 [true -> b2, false -> b1]
   b1:                             ; preds b0
     jump b3
   b2:                             ; preds b0
     jump b3
   b3:                             ; preds b2 b1
+    v1 = const "five"
     ret v1
 
 -- val twice : { x : int, y : int } -> int
@@ -67,9 +67,9 @@ func $a:
   b0:
     v0 = const 1
     v1 = const 2
-    v2 = global twice
-    v3 = record { x = v0, y = v1 }         ; t.82
-    v4 = call v2, v3                       ; t.83
+    v2 = record { x = v0, y = v1 }         ; t.82
+    v3 = global twice
+    v4 = call v3, v2                       ; t.83
     ret v4
 
 -- val b : int
@@ -83,8 +83,8 @@ func $b.2:
 -- val c : string
 func $c:
   b0:
-    v0 = global throughAJoin
-    v1 = con true/1                        ; t.85
-    v2 = call v0, v1                       ; t.86
+    v0 = con true/1                        ; t.85
+    v1 = global throughAJoin
+    v2 = call v1, v0                       ; t.86
     ret v2
 

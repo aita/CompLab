@@ -36,7 +36,8 @@ type state = {
      nothing is ever shadowed. *)
   mutable names : S.value Map.t;
   mutable joins : (string * S.block) list;
-  (* Parameters and constants, which live at the top of the entry block. *)
+  (* The parameter, which lives at the top of the entry block.  Nothing else
+     does: a constant is defined in the block that uses it. *)
   mutable head : S.value list;
   globals : (string, unit) Hashtbl.t;
 }
@@ -68,19 +69,28 @@ let emit_head st ?(origin = "") entry op =
   st.head <- st.head @ [ v ];
   v
 
-let constant st entry (c : S.const) =
+(* A constant is defined in the block that uses it.  Putting them all at the top
+   of the entry block would also be correct -- the entry dominates everything --
+   but it is not what the program says, and it costs: a string constant is the
+   address of a static block, so it is an instruction, and hoisting it makes the
+   arm that does not want it pay for it anyway.
+
+   Sharing within the block is free, because a definition there dominates every
+   later use in it.  Sharing *across* blocks is what [16章] gvn is for, and it
+   knows where dominance allows it; this pass does not have to guess. *)
+let constant st (blk : S.block) (c : S.const) =
   let same v = match v.S.op with S.Const c' -> c' = c | _ -> false in
-  match List.find_opt same st.head with
+  match List.find_opt same blk.S.values with
   | Some v -> v
-  | None -> emit_head st entry (S.Const c)
+  | None -> emit st blk (S.Const c)
 
-let global st entry name =
+let global st (blk : S.block) name =
   let same v = match v.S.op with S.Global g -> g = name | _ -> false in
-  match List.find_opt same st.head with
+  match List.find_opt same blk.S.values with
   | Some v -> v
-  | None -> emit_head st entry (S.Global name)
+  | None -> emit st blk (S.Global name)
 
-let atom st entry : F.atom -> S.value = function
+let atom st blk : F.atom -> S.value = function
   (* A local binding first: a top-level `val x = ...` binds `x` locally inside
      its own body before it becomes the global of that name, and the local is
      what the body means. *)
@@ -88,11 +98,11 @@ let atom st entry : F.atom -> S.value = function
       match Map.find_opt x st.names with
       | Some v -> v
       | None ->
-          if Hashtbl.mem st.globals x then global st entry x
+          if Hashtbl.mem st.globals x then global st blk x
           else failwith ("build: unbound " ^ x))
-  | F.AInt n -> constant st entry (S.CInt n)
-  | F.AStr s -> constant st entry (S.CStr s)
-  | F.AUnit -> constant st entry S.CUnit
+  | F.AInt n -> constant st blk (S.CInt n)
+  | F.AStr s -> constant st blk (S.CStr s)
+  | F.AUnit -> constant st blk S.CUnit
 
 let bind st x v = st.names <- Map.add x v st.names
 
@@ -110,8 +120,8 @@ let op_of (r : F.rhs) : S.op =
   | F.Field (_, l, i) -> S.Field (l, i)
   | F.Payload _ -> S.Payload
 
-let args_of st entry (r : F.rhs) =
-  let a x = atom st entry x in
+let args_of st blk (r : F.rhs) =
+  let a x = atom st blk x in
   match r with
   | F.Atom _ | F.Closure _ | F.Capture _ | F.Con (_, None) -> []
   | F.Call (f, x) -> [ a f; a x ]
@@ -125,7 +135,7 @@ let goto (from : S.block) (target : S.block) args =
   from.S.term <- S.Jump target
 
 let rec go st entry (blk : S.block) (b : F.block) =
-  let atom a = atom st entry a in
+  let atom a = atom st blk a in
   match b with
   | F.Let (x, r, rest) ->
       (match r with
@@ -137,7 +147,7 @@ let rec go st entry (blk : S.block) (b : F.block) =
             caps
       | F.Atom a -> bind st x (atom a)
       | _ ->
-          let args = args_of st entry r in
+          let args = args_of st blk r in
           bind st x (emit st ~origin:x ~args blk (op_of r)));
       go st entry blk rest
   | F.Fix (defs, rest) ->
