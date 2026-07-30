@@ -357,6 +357,59 @@ LiquidHaskell がこの系譜で、さらに遡ると F*・Dafny・Why3・ESC/Ja
 - **完全な整数算術。** 上に書いたとおり、組み込み手続きは整数について不完全です。
   `--smt` がその答えです。
 
+## 発展 — 篩型とソルバの系譜
+
+型に述語を載せる話と、その述語を機械が判定できるようにする話は、別々に発展して2008年に
+合流しました。
+
+### 型の側
+
+```
+1969  Hoare 論理                   前条件・後条件。事前/事後という語の出どころ
+1991  Freeman–Pfenning             refinement types。ML の型を部分集合に絞る
+1998  Xi–Pfenning (DML)            添字付き型。配列の境界検査を型で消す
+2006  Flanagan (hybrid checking)   証明できない述語は実行時検査に落とす
+2008  Rondon–Kawaguchi–Jhala       Liquid Types。修飾子から述語を推論する
+2014  Vazou ら                     Liquid Haskell。実際の言語に載せる
+2016  Swamy ら (F*)                依存型と篩型と効果を1つの言語に
+```
+
+**1991 の Freeman–Pfenning** が「篩型 (refinement type)」という名前の出どころで、当時は
+データ型を部分集合に絞る（`list` を `nonempty list` に）方向でした。述語が算術になったのは
+**1998 の DML** からで、そこでの目標は配列の境界検査を消すことでした。
+
+**2008 の Liquid Types** が入れたのは**推論**です。修飾子（qualifier）の集合を与えると、
+述語の候補を Horn 制約として解いて当てはめます。MinkML の `refine` はここを**入れていません**
+——関数は自分の約束を書き、検査器は確かめるだけです（下の「意図的に入れていないもの」）。
+推論を入れると、通るかどうかが修飾子の選び方に依存するようになり、「なぜ通らないのか」が
+説明しにくくなります。教材としてはその代償が大きいという判断です。
+
+**2006 の hybrid checking** は3つめの道です。証明できなかった述語を実行時検査に変えて先へ進む
+——契約（contract）系の言語（Racket、TypeScript の実行時検証）の考え方です。MinkML は
+「証明できなければ落ちる」を選んでいます。
+
+### ソルバの側
+
+```
+1826  Fourier / 1936 Motzkin      線形不等式の変数消去 ← 組み込み手続きの中身
+1929  Presburger                  加法だけの整数論は決定可能
+1962  Davis–Putnam–Logemann–Loveland  DPLL。命題論理の探索
+1972  Cooper                      Presburger 算術の実用的な決定手続き
+1979  Nelson–Oppen                理論の組み合わせ
+1991  Pugh (Omega test)           整数線形算術の実用手続き
+2006  Dutertre–de Moura           Simplex を SMT に組み込む（Z3 の LIA）
+2006  Nieuwenhuis ら              DPLL(T)。論理の探索と理論の判定を噛み合わせる
+```
+
+MinkML の `solver.ml` は**この表の1826年と1962年だけ**を実装しています。命題構造は素朴な
+場合分け、算術は Fourier–Motzkin。整数については有理数緩和のぶん不完全で、そこは
+「証明できなかった」と報告します。
+
+現代のソルバは同じ場所を、**DPLL(T)** で（命題の探索と理論の判定を交互に動かし、理論から
+学んだ節を命題側に返す）、**Simplex ＋ 分枝限定**で（整数の完全性）、**Nelson–Oppen** で
+（配列・ビットベクタ・非線形を組み合わせる）埋めています。`--smt "z3 -in"` はまさにその差を
+見るためのスイッチです。**同じ VC を投げて、答えが変わるのを見られます。**
+
 ## 参考文献
 
 - P. M. Rondon, M. Kawaguchi, R. Jhala, [*Liquid types*][liquid], PLDI 2008。修飾子・κ・
@@ -373,6 +426,23 @@ LiquidHaskell がこの系譜で、さらに遡ると F*・Dafny・Why3・ESC/Ja
   Fourier–Motzkin 消去と、有理数緩和が整数解について何を言えるか。
 - C. Barrett, A. Stump, C. Tinelli, [*The SMT-LIB standard*][smtlib], version 2.0, 2010。
   `--dump-vc` が出す言語。
+
+- T. Freeman, F. Pfenning, *Refinement types for ML*, PLDI 1991。「篩型」という名前の起点。
+- H. Xi, F. Pfenning, *Dependent types in practical programming*, POPL 1999。
+  DML。添字付き型で境界検査を消す。
+- C. Flanagan, *Hybrid type checking*, POPL 2006。証明できない述語を実行時検査に落とす道。
+- N. Vazou, E. L. Seidel, R. Jhala, D. Vytiniotis, S. Peyton Jones,
+  *Refinement types for Haskell*, ICFP 2014。Liquid Haskell。
+- N. Swamy ら, *Dependent types and multi-monadic effects in F\**, POPL 2016。
+  篩型・依存型・効果を1つに。
+- M. Davis, G. Logemann, D. Loveland, *A machine program for theorem-proving*,
+  CACM 5(7), 1962。DPLL。命題側の探索。
+- D. C. Cooper, *Theorem proving in arithmetic without multiplication*,
+  Machine Intelligence 7, 1972。Presburger 算術の決定手続き。
+- W. Pugh, *The Omega test: a fast and practical integer programming algorithm for dependence
+  analysis*, Supercomputing 1991。整数線形算術の実用手続き。
+- B. Dutertre, L. de Moura, *A fast linear-arithmetic solver for DPLL(T)*, CAV 2006。
+  Simplex を SMT に組み込む。組み込み手続きが諦めるところを埋めている。
 
 [liquid]: https://doi.org/10.1145/1375581.1375602
 [rt-tutorial]: https://arxiv.org/abs/2010.07763

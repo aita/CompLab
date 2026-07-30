@@ -226,6 +226,40 @@ rank-2 を「注釈で受け取る」ために双方向型検査が必要にな�
 - **効率。** 置換の合成と環境走査を素直にやるので、深い `let` の入れ子では `row` より遅く
   なります。それが次章の主題です。
 
+## 発展 — HM の系譜
+
+Algorithm W は1978年の形で、その前後に長い列があります。
+
+```
+1958  Curry の型付け             コンビネータ論理の主要型
+1969  Hindley                   主要型スキームの存在
+1978  Milner                    Algorithm W と ML。let 多相
+1982  Damas–Milner              W の健全性・完全性と主要型の証明
+1988  Wright/Cardelli 以降       参照との相互作用が発見される
+1992  Rémy                      レベルによる一般化（環境走査の除去）
+1995  Wright                    値制限。可変性と多相の両立
+1999  HM(X) (Odersky ら)         制約として定式化し、拡張の枠を作る
+2005  Pottier–Rémy (ATTAPL)     制約ベースの提示の標準的な教科書化
+2011  OutsideIn(X) (GHC)        型クラス・GADT と共存する推論
+```
+
+**1978 → 1982** が「動く手続き」から「正しい手続き」への移動です。W が主要型を出すこと、
+つまり推論した型がその項の持ちうる型のうち最も一般的であることが、ここで証明されました。
+MinkML の `hm` はこの1982年の提示を写しています。
+
+**1992 のレベル**は、この章の `generalize` が毎回やっている環境走査を消す工夫です。効果は
+実装の速さだけで、受理する言語は変わりません——だから[5章](5-rows.md)の `row` と `hm` は
+同じ型を出します。実用の HM 実装（OCaml、Haskell）は例外なくレベル側です。
+
+**1995 の値制限**は MinkML には要りません。参照も可変性もないからです。`ref` を1つ入れると
+`let r = ref [] in …` が多相のまま2つの型で使えてしまい、実行時に壊れます。SML はこれを
+「右辺が構文的に値でなければ一般化しない」と直しました。**MinkML が値制限を持たないのは、
+危険を持たないからです**。
+
+**1999 以降**は、HM を拡張の枠として書き直す方向です。型クラス・GADT・レコードのような
+追加を、その都度アルゴリズムを書き換えるのではなく制約の言語に載せます。GHC の実装
+（OutsideIn(X)）はその延長で、この章の素朴な W からはかなり遠いところにいます。
+
 ## 参考文献
 
 - R. Milner, [*A theory of type polymorphism in programming*][milner78], JCSS 17(3), 1978。
@@ -238,6 +272,18 @@ rank-2 を「注釈で受け取る」ために双方向型検査が必要にな�
   INRIA RR-1766, 1992。環境走査をレベルに置き換える方。実装は[5章](5-rows.md)にあります。
 - O. Kiselyov, [*Efficient and Insightful Generalization*][oleg]、2013。レベル方式の解説として
   読みやすく、この章との対応が付けやすい。
+
+- R. Hindley, *The principal type-scheme of an object in combinatory logic*,
+  Transactions of the AMS 146, 1969。主要型の存在。W より9年早い。
+- A. K. Wright, *Simple imperative polymorphism*, LISP and Symbolic Computation 8(4), 1995。
+  値制限。MinkML に参照を足すなら最初に必要になるもの。
+- M. Odersky, M. Sulzmann, M. Wehr, *Type inference with constrained types*,
+  Theory and Practice of Object Systems 5(1), 1999。HM(X)。制約としての HM。
+- F. Pottier, D. Rémy, *The essence of ML type inference*, in *Advanced Topics in Types and
+  Programming Languages*, MIT Press 2005, ch. 10。制約ベースの標準的な提示。
+- D. Vytiniotis, S. Peyton Jones, T. Schrijvers, M. Sulzmann,
+  *OutsideIn(X): modular type inference with local assumptions*, JFP 21(4-5), 2011。
+  型クラスと GADT と共存させるとどうなるか。
 
 [milner78]: https://doi.org/10.1016/0022-0000(78)90014-4
 [dm82]: https://doi.org/10.1145/582153.582176

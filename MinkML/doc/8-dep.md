@@ -295,6 +295,50 @@ rightUnit : (n : nat) -> Eq nat (plus n 0) n = fn n => natrec (fn k => Eq nat (n
   `natrec` で族を作るのが代わりです。
 - **停止性検査。** 再帰がないので要りません。
 
+## 発展 — 依存型と NbE の系譜
+
+依存型の理論と、その型検査を実際に動かす技術は、別々に育って NbE で出会いました。
+
+### 理論の側
+
+```
+1967  de Bruijn (AUTOMATH)       依存型を持つ最初の証明チェッカ
+1972  Martin-Löf                 直観主義型理論。Π・Σ・等式
+1984  Martin-Löf (Bibliopolis)   この章が写した体系の標準的な提示
+1988  Coquand–Huet               Calculus of Constructions。Coq の土台
+1994  Dybjer                     帰納族（inductive families）。Vec を直接書く道
+2013  Univalent Foundations      等式を空間として見る（HoTT）
+2018  Cohen ら                   Cubical 型理論。等式の計算的な扱い
+```
+
+MinkML の `dep` は **1984年の体系の小さな部分**です。Π・Σ・`nat`・`Eq`・宇宙だけで、
+帰納族はありません。だから `vec` を大きな除去（large elimination）で作っています
+——**1994 の Dybjer 以降の言語（Agda、Coq、Idris、Lean）なら `data Vec` と書けます**。
+
+`Eq` と `J` については、この章の選択が古い方だと知っておく価値があります。`refl` と `J` は
+Martin-Löf の等式で、「等しさの証明は1つしかない」（UIP）を仮定するかどうかで分かれます。
+**2013 以降の HoTT / Cubical** は仮定しない方向へ行き、等式を空間として扱います。関数の外延性
+（`f = g` を各点の等式から導く）が MinkML で証明できないのは、この選択の帰結です。
+
+### 実装の側
+
+```
+1991  Berger–Schwichtenberg      NbE。評価してから読み戻す
+1996  Coquand                    依存型の型検査アルゴリズム（意味論的な変換検査）
+2005+ Abel ら                    NbE で依存型・宇宙・非述語性を扱う
+2010s Agda / Idris / Lean        メタ変数・暗黙引数・単一化を備えた実装
+2019+ Kovács (elaboration zoo)   その実装を段階ごとに読める形にしたもの
+```
+
+**代入の代わりに評価する**という発想が NbE で、この章の `eval`/`quote`/`conv` はその最小形です。
+素朴な実装は型を比べるたびに構文へ代入して正規化しますが、それは遅く、捕獲の回避が面倒です。
+NbE はクロージャを使うことで両方を避けます。
+
+`dep` に足りていないものは、そのまま **elaboration zoo が段ごとに足していくもの**です:
+メタ変数（穴 `_` を置いて推論させる）、暗黙引数（`id 3` と書ける）、パターン単一化、
+宇宙多相、そして停止性検査。**MinkML の `dep` はその第0段で、依存型の骨格だけを見るための
+大きさに留めてあります。**
+
 ## 参考文献
 
 - P. Martin-Löf, *Intuitionistic type theory*, Bibliopolis 1984。Π・Σ・`nat`・`Eq` と、
@@ -307,6 +351,16 @@ rightUnit : (n : nat) -> Eq nat (plus n 0) n = fn n => natrec (fn k => Eq nat (n
   Habilitationsschrift 2013。依存型に対する NbE と変換検査の、いま使われている形。
 - A. Kovács, [*Elaboration zoo*][zoo]。メタ変数・暗黙引数・単一化まで含めた実装の見本。
   この章が「入れていない」ものが、そこにあります。
+
+- N. G. de Bruijn, *AUTOMATH, a language for mathematics*, 1968。
+  依存型を持つ最初の実装。
+- T. Coquand, G. Huet, *The calculus of constructions*, Information and Computation 76(2-3), 1988。
+- P. Dybjer, *Inductive families*, Formal Aspects of Computing 6(4), 1994。
+  `vec` を大きな除去で作らずに済ませる道。
+- T. Coquand, *An algorithm for type-checking dependent types*,
+  Science of Computer Programming 26(1-3), 1996。意味論的な変換検査。
+- C. Cohen, T. Coquand, S. Huber, A. Mörtberg, *Cubical type theory: a constructive
+  interpretation of the univalence axiom*, TYPES 2015 / 2018。等式のもう一つの道。
 
 [nbe]: https://doi.org/10.1109/LICS.1991.151645
 [abel13]: https://www.cse.chalmers.se/~abela/habil.pdf

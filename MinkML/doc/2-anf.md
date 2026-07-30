@@ -227,6 +227,40 @@ four : int = 4
 引数を `{ v : int | v > 0 }` に変えれば `refine` だけが呼び出し側に証明を要求し、他の3つは
 その型を読むことすらできません。
 
+## 発展 — 中間表現の系譜
+
+この章の ANF と CEK マシンは、60年かけて短くなってきたものの現在の形です。
+
+```
+1964  SECD (Landin)                  制御・環境・スタック・ダンプの4つ組
+1972  定義的インタプリタ (Reynolds)    メタ言語で意味を与える。CPS の発見
+1975  CBV λ計算 (Plotkin)             値呼びの等式理論。ANF が正しい理由の土台
+1986  CEK (Felleisen–Friedman)        ダンプを継続フレーム列に置き換える
+1992  CPS でコンパイル (Appel)         継続を第一級にして最適化の土台にする
+1993  ANF ≡ CPS (Flanagan ら)         CPS の administrative redex を消せば ANF
+1998  SSA は関数型 (Appel)            命令型 IR との対応
+2017  join point (Maurer ら)          合流点をクロージャではなくラベルに戻す
+1999  CBPV (Levy)                     値と計算を型で分ける
+```
+
+読みどころは **1986 と 1993** です。SECD の D（ダンプ）は「あとで戻る状態」を丸ごと積む場所
+でしたが、CEK はそれを「値を待っている枠」の列に分解しました。そして ANF に落とすと、その枠が
+1種類（`let`）しか要らなくなる——だから `machine.ml` のフレームは `KLet` だけです。
+
+Appel の CPS は「継続を書き下せば最適化しやすい」路線で、Flanagan らはそれに対して
+「**CPS で得られるものの大半は ANF で得られる**」と示しました。この本が ANF を選んだのはその
+結果に乗っているだけです。
+
+2017 の join point は、この章の `with_join` が作るクロージャを**ラベルに戻す**提案です。逆向きの
+歴史に見えますが、そうではありません。「合流点は関数だが、その関数は決してエスケープしない」と
+いう情報を型に載せる話で、GHC はそれで割り当てを消しています。MinkML は割り当て1つを払って
+IR の概念を1つ減らしています。
+
+現代のコンパイラの選択はおおむね3つに分かれます。**ANF/CPS 系**（GHC Core、Scheme 系、
+MLton の SSA）、**CBPV 系**（研究寄りだが、効果型と噛み合うので増えている）、
+**バイトコード直行**（OCaml の Zinc、CPython）。この本が ANF を採ったのは実行速度ではなく、
+「末尾位置が構文で見える」という**読める性質**のためです。
+
 ## 参考文献
 
 - C. Flanagan, A. Sabry, B. F. Duba, M. Felleisen, [*The essence of compiling with
@@ -239,6 +273,15 @@ four : int = 4
 - L. Maurer, P. Downen, S. Peyton Jones, [*Compiling without continuations*][joinpoints],
   PLDI 2017。join point を IR の一級市民にする側。ここではクロージャで代用しています。
 - P. B. Levy, [*Call-by-push-value: a subsuming paradigm*][cbpv], TLCA 1999。上の表の CBPV。
+
+- J. C. Reynolds, *Definitional interpreters for higher-order programming languages*,
+  ACM Annual Conference 1972（再録 HOSC 11(4), 1998）。メタ循環インタプリタと CPS。
+- G. D. Plotkin, *Call-by-name, call-by-value and the λ-calculus*, TCS 1(2), 1975。
+  値呼びの等式理論。ANF の変換が意味を保つ根拠。
+- A. W. Appel, *Compiling with Continuations*, Cambridge University Press 1992。
+  CPS を IR に据える路線。
+- A. W. Appel, *SSA is functional programming*, SIGPLAN Notices 33(4), 1998。
+  命令型 IR と ANF の対応。
 
 [anf]: https://doi.org/10.1145/155090.155113
 [landin]: https://doi.org/10.1093/comjnl/6.4.308

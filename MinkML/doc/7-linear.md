@@ -244,6 +244,56 @@ pinged : unit = ()
 - **`fst`/`snd`。** 対は `let val (x, y) = p` で分解します。射影は線形な対を壊すので、
   この体系には置けません。
 
+## 発展 — 線形型とセッション型の系譜
+
+線形論理が1987年に出て、その計算的な意味を探す過程でセッション型が生まれ、2010年前後に
+「セッション型は線形論理そのものだった」と分かる、という筋書きです。
+
+### 資源としての型
+
+```
+1987  Girard                     線形論理。弱化と縮約を落とす
+1990  Wadler                     "Linear types can change the world!" 破壊的更新の型付け
+1993  Abramsky                   線形論理の計算的解釈
+2005  Walker (ATTAPL ch.1)       lin/un 修飾子による教科書的な提示 ← この章
+2014  Bounded/graded 系          使用回数を数える（coeffect, graded modal types）
+2018  Bernardy ら                Linear Haskell。既存の言語に後付けする
+2019  Orchard ら (Granule)       graded modal types を持つ実験言語
+```
+
+**1990 の Wadler** が「線形型は配列の破壊的更新を安全にする」と示した仕事で、実用の動機は
+ここから来ています。**2005 の Walker の章**（この章が写したもの）は、それを `lin`/`un` の
+2値の修飾子と文脈分割にまとめた最小の形です。
+
+**2014 以降の graded 系**は「1回か何回か」の2値を、**使用回数の代数**に一般化します
+（0回、1回、n回、任意回…）。`lin`/`un` はその特別な場合です。Rust の所有権はまた別の切り口で、
+アフィン型（0回か1回）＋借用で、`lin` の「ちょうど1回」より緩い側にいます。
+
+### 会話としての型
+
+```
+1993  Honda                      セッション型。二者間の対話に型を付ける
+1998  Honda–Vasconcelos–Kubo     プログラミング言語への統合。双対性
+2005  Gay–Hole                   セッション型の部分型付け
+2010  Caires–Pfenning            直観主義線形論理との対応
+2012  Wadler                     "Propositions as sessions"。古典線形論理との対応
+2008  Honda–Yoshida–Carbone      マルチパーティ・セッション型（3者以上）
+2016+ 実装                       Links, FreeST, Scribble, Rust のライブラリ群
+```
+
+**2010–2012 が転回点**です。それまでセッション型は「便利な型付け規則の集まり」でしたが、
+Caires–Pfenning と Wadler が**線形論理の命題そのものだ**と示しました。`!A ; S` は線形論理の
+⊗ に、`&{…}` は & に、双対性は否定に対応します。この章が「線形性が支えていて、セッション固有の
+考えは双対性だけ」と言えるのは、その結果を踏まえてのことです。
+
+**マルチパーティ**は MinkML にありません（2者間だけ）。3者以上になると「全体のプロトコル
+（global type）を各参加者の視点（local type）に射影する」という段が増え、それ自体が
+1つの章になります。
+
+現代の実装で見るなら、**Rust** のセッション型ライブラリ（型状態として書く）、**Links** と
+**FreeST**（言語に組み込み）、**Scribble**（プロトコルを別言語で書いてコードを生成）の3系統です。
+MinkML は真ん中、言語に組み込む側の最小形です。
+
 ## 参考文献
 
 - J.-Y. Girard, [*Linear logic*][ll], Theoretical Computer Science 50(1), 1987。
@@ -257,6 +307,21 @@ pinged : unit = ()
   双対性を含む、いま使われている形。
 - P. Wadler, [*Propositions as sessions*][wadler12], ICFP 2012。セッション型と線形論理が
   同じものだという読み。上の「健全性を支えているのは線形性」を正面から述べたものです。
+
+- P. Wadler, *Linear types can change the world!*, Programming Concepts and Methods, 1990。
+  線形型の実用的な動機。
+- S. Abramsky, *Computational interpretations of linear logic*, TCS 111(1-2), 1993。
+- S. J. Gay, M. Hole, *Subtyping for session types in the pi calculus*,
+  Acta Informatica 42(2-3), 2005。セッション型の部分型付け。MinkML にはない部分。
+- L. Caires, F. Pfenning, *Session types as intuitionistic linear propositions*, CONCUR 2010。
+  セッション型と線形論理の対応の片側。
+- K. Honda, N. Yoshida, M. Carbone, *Multiparty asynchronous session types*, POPL 2008。
+  3者以上。global type から local type への射影。
+- J.-P. Bernardy, M. Boespflug, R. R. Newton, S. Peyton Jones, A. Spiwack,
+  *Linear Haskell: practical linearity in a higher-order polymorphic language*, POPL 2018。
+  既存の言語に線形性を後付けする設計。
+- D. Orchard, V. B. Liepelt, H. Eades III, *Quantitative program reasoning with graded modal
+  types*, ICFP 2019。`lin`/`un` を使用回数の代数に一般化した先。
 
 [ll]: https://doi.org/10.1016/0304-3975(87)90045-4
 [honda]: https://doi.org/10.1007/3-540-57208-2_35

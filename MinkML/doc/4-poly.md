@@ -237,6 +237,44 @@ tests/errors/rank2.mnk:4:32: type error: cannot make bool a subtype of int
 - **型別名（`type`）。** `poly` では拒否します。行や篩と違い、多相の話に別名は要らないからです。
 - **レコード・ヴァリアント・チャネル・依存型。** それぞれ担当システムのエラーになります。
 
+## 発展 — 高階多相と双方向型検査の系譜
+
+「注釈をどこまで減らせるか」の歴史です。
+
+```
+1972  System F (Girard)               多相λ計算。型の言語に forall が入る
+1974  Reynolds                        独立に同じ体系。パラメトリシティ
+1994  Kfoury–Wells                    rank-2 の推論は決定可能
+1994  Wells                           System F の型推論は決定不能（rank-3 以上）
+1996  Odersky–Läufer                  注釈を置く場所を決めて rank-N を通す
+2003  MLF (Le Botlan–Rémy)            主要型を保つ多相の順序を設計する
+2007  Peyton Jones ら                 実用的な arbitrary-rank 推論（GHC の基礎）
+2013  Dunfield–Krishnaswami           順序付き文脈による完全で簡単な定式化 ← この章
+2020  Quick Look (Serrano ら)         非述語的な具体化を実用的な範囲で
+2021  Dunfield–Krishnaswami (survey)  双方向型検査の総説
+```
+
+**1994 の2つ**が分岐点です。System F 全体の推論は決定不能、しかし rank-2 なら決定可能——
+つまり「どこまでを推論に任せ、どこから注釈を要求するか」は設計の問題になりました。
+
+**1996 と 2007** は「注釈のある場所では注釈を使う」路線を実用に持っていった仕事で、GHC の
+`RankNTypes` はこの系譜です。**2013 の DK'13**（この章）はそれを最小の道具立てで書き直したもので、
+順序付き文脈と3つの判断（部分型・具体化・型付け）しか使いません。**健全かつ完全**であることが
+証明されていて、しかも実装が数百行で済む——教材としてこれが選ばれる理由です。
+
+**2003 の MLF** は別の答えです。注釈を要求する代わりに型の言語を拡張し（束縛付き量化）、
+多相の順序そのものを設計して主要型を保ちます。強力ですが型が読みにくくなり、主流には
+なりませんでした。
+
+**2020 の Quick Look** は、述語性の制限（`â` が単型しか受け取らない、この章の
+`instantiate_l` の制限）を実用的な範囲で外す提案です。GHC 9 系に入っています。MinkML の
+`poly` は述語的なままなので、`id id` が通るのは「具体化の結果が単型だから」であって、
+非述語的な具体化をしているのではありません。
+
+双方向型検査そのものは、この章より広い道具です。2021 年の総説は、依存型（[8章](8-dep.md)）・
+篩型（[6章](6-refine.md)）・部分型付けまで含めて「合成と検査の2モード」がどこで使われているかを
+まとめています。**MinkML で `poly`・`refine`・`dep` の3つが双方向なのは偶然ではありません。**
+
 ## 参考文献
 
 - J. Dunfield, N. R. Krishnaswami, [*Complete and Easy Bidirectional Typechecking for
@@ -247,6 +285,19 @@ tests/errors/rank2.mnk:4:32: type error: cannot make bool a subtype of int
   決定不能であること。「推論をあきらめる場所を決める」の根拠です。
 - D. Le Botlan, D. Rémy, [*MLF: raising ML to the power of System F*][mlf], ICFP 2003。
   別の答え——注釈を型の中に持ち込んで、非述語的な多相まで推論する道。こちらは採っていません。
+
+- J. C. Reynolds, *Towards a theory of type structure*, Programming Symposium 1974。
+  System F の独立な発見。
+- A. J. Kfoury, J. B. Wells, *A direct algorithm for type inference in the rank-2 fragment of
+  the second-order λ-calculus*, LFP 1994。rank-2 は決定可能という側。
+- M. Odersky, K. Läufer, *Putting type annotations to work*, POPL 1996。
+  注釈の置き場所を決める路線の起点。
+- S. Peyton Jones, D. Vytiniotis, S. Weirich, M. Shields,
+  *Practical type inference for arbitrary-rank types*, JFP 17(1), 2007。GHC の基礎。
+- A. Serrano, J. Hage, S. Peyton Jones, D. Vytiniotis, *A quick look at impredicativity*,
+  ICFP 2020。非述語性を実用的な範囲で入れる。
+- J. Dunfield, N. R. Krishnaswami, *Bidirectional typing*, ACM Computing Surveys 54(5), 2021。
+  双方向型検査の総説。どの型システムでどう使われているかの地図。
 
 [dk13]: https://doi.org/10.1145/2500365.2500582
 [wells]: https://doi.org/10.1016/S0168-0072(98)00047-5

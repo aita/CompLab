@@ -243,6 +243,41 @@ count : [ `Some : int, ..'a ] -> int
 - **多相な `case` の網羅性検査。** 開いた行に対する網羅性は落穂拾いの腕の有無だけで決まり、
   決定木も生成しません（それは MartenML の主題です）。
 
+## 発展 — 行の系譜
+
+レコードを構造的に型付ける試みは、行変数の発明で一段落しました。
+
+```
+1987  Wand                       行変数。レコードの型に「残り」を書く
+1989  Rémy                       絶対制約（lacks）付きの行。ML への統合
+1991  Cardelli–Mitchell          レコードの操作（拡張・制限・更新）の整理
+1992  Rémy                       ソート付き等式理論としての行。レベルもここ
+1996  Gaster–Jones               限定型（qualified types）として。TREX / Trex
+2000  Garrigue                   多相ヴァリアント（OCaml の `` ` `` 記法）
+2005  Leijen                     scoped labels。制約を捨てて重複を許す ← この章
+```
+
+**1987 の Wand** が行変数そのもので、「レコードの型に、まだ分からない残りを変数として書く」
+という発想はここから来ています。ただし当時の定式化には主要型が存在しない場合がありました。
+
+**1989–1992 の Rémy** がそれを ML に統合できる形にしました。代償が絶対制約です。
+`{ x : int | 'r }` の `'r` に「`x` を含まない」という条件を付けて回るので、行変数はいつも
+制約付きで、単一化もその制約を維持しなければなりません。
+
+**1996 の Gaster–Jones** は制約を型クラスの仕組み（限定型）に載せる方向で、Haskell の
+拡張可能レコードの提案はおおむねこの系譜です。型の表示に制約が出てきます
+（`(r \ x) => { x :: Int | r } -> Int` のような形）。
+
+**2005 の Leijen** は逆を行きました。**重複を禁止するのをやめれば制約が要らない**。
+残るのは `rewrite`（ラベルを先頭に出す）1つだけで、単一化はふつうの単一化に戻ります。
+MinkML がこれを採ったのは、行の話をするのに制約の話を先にしなくて済むからです。
+
+実際の言語の選択は割れています。**PureScript** は Rémy 系（重複を許さない、行を型クラスの
+制約で扱う）、**Elm** は限定的なレコード多相、**OCaml** はオブジェクトと多相ヴァリアントで
+行に相当するものを持ち（Garrigue の系譜）、**TypeScript / Go の構造的型付け**は行変数を持たない
+部分型付けです。「行多相か部分型付けか」は今も分かれていて、行を採ると
+**主要型が保てる**（[3章](3-hm.md)）のが最大の利点です。
+
 ## 参考文献
 
 - L. Damas, R. Milner, [*Principal type-schemes for functional programs*][dm82], POPL 1982。
@@ -256,6 +291,14 @@ count : [ `Some : int, ..'a ] -> int
   重複ラベルを許す `rewrite` 1つで済ませる流派。
 - O. Kiselyov, R. Lämmel, K. Schupke, [*Strongly typed heterogeneous
   collections*][hlist], Haskell Workshop 2004。行を型クラスで再現する側の代表。比較用。
+
+- M. Wand, *Complete type inference for simple objects*, LICS 1987。行変数の起点。
+- L. Cardelli, J. C. Mitchell, *Operations on records*, MFPS 1989 / MSCS 1(1), 1991。
+  拡張・制限・更新という操作の整理。
+- B. R. Gaster, M. P. Jones, *A polymorphic type system for extensible records and variants*,
+  Technical Report NOTTCS-TR-96-3, University of Nottingham, 1996。限定型として。
+- J. Garrigue, *Code reuse through polymorphic variants*, FOSE 2000。
+  OCaml の多相ヴァリアント。この章のヴァリアントと同じ形。
 
 [dm82]: https://doi.org/10.1145/582153.582176
 [robinson]: https://doi.org/10.1145/321250.321253
