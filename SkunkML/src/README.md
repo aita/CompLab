@@ -9,6 +9,7 @@ language reference and the map of the source; the book in
 src/front/         the front end, shared by both              -> a library
 src/interpreter/   the CESK machine                           -> skunk
 src/compiler/      SSA, amd64, and the assembler and linker   -> skunkc
+src/runtime/       the runtime, in freestanding C             -> linked in
 ```
 
 The front end is its own directory because that is what it is: neither back end
@@ -341,8 +342,19 @@ In `src/compiler/`:
 | `link.ml` | 62 | addresses, symbols, and patching the holes |
 | `elf.ml` | 155 | an ELF64: two segments, and three more headers when dynamic |
 | `dyn.ml` | 144 | the tables `ld.so` reads, and one GOT word per libc function |
-| `rt.ml` | 1660 | the runtime, in amd64: the heap and the collector, equality, strings, `show` |
-| `skunkc.ml` | 360 | the command line, and the hand-built self-test |
+| `obj.ml` | 192 | reading an ELF relocatable, so that the runtime can be C |
+| `rt.ml` | 209 | `_start`, the nullary constructors, and the shape of a descriptor |
+| `skunkc.ml` | 256 | the command line |
+
+And the runtime, in `src/runtime/`:
+
+| file | lines | what it does |
+| --- | --- | --- |
+| `runtime.c` | 742 | the heap and the collector, equality, the string routines, `show` |
+
+Freestanding: no headers, no libc, and three syscalls of inline assembly.  It is
+compiled by `cc -c`, carried inside the compiler as a string, and linked by
+`obj.ml` -- so `cc` is used as a compiler and never as a linker.
 
 ## Layout
 
