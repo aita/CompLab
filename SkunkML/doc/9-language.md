@@ -282,4 +282,4 @@ datatype 'a option = NONE | SOME of 'a
 
 ---
 
-[← 8. CESK マシン](8-cesk.md) ・ [目次](index.md)
+[← 8. CESK マシン](8-cesk.md) ・ [10. SSA →](10-ssa.md)

@@ -1,8 +1,18 @@
-# The SkunkML interpreter
+# The SkunkML implementation
 
-One language, four intermediate forms and a machine. This file is the language
-reference and the map of the implementation; the book in
+One language, one front end, and two back ends: a machine that runs the
+program, and a compiler that is on its way to amd64. This file is the language
+reference and the map of the source; the book in
 [`../doc/`](../doc/index.md) explains how each pass works.
+
+```
+src/interpreter/   the front end, and the CESK machine        -> skunk
+src/compiler/      SSA, and what will become the back end     -> skunkc
+```
+
+The front end is a library the two share. By the time it is finished the
+program has no modules, no patterns and no nested functions left, so neither
+back end has heard of any of them.
 
 ## Building and running
 
@@ -11,15 +21,16 @@ It was developed with OCaml 5.4 and dune 3.21.
 
 ```sh
 dune build
-dune exec src/skunk.exe examples/tour.sk
+dune exec src/interpreter/skunk.exe examples/tour.sk
 dune test                     # golden tests (dune promote to accept new output)
 ```
 
 ```sh
-./_build/default/src/skunk.exe examples/modules.sk
+./_build/default/src/interpreter/skunk.exe examples/modules.sk
+./_build/default/src/compiler/skunkc.exe --dump-ssa tests/join.sk
 ```
 
-## The command line
+## The command lines
 
 ```
 skunk [options] file.sk
@@ -31,6 +42,19 @@ skunk [options] file.sk
       --no-prelude  do not load the part of the basis written in SkunkML
   -h, --help
 ```
+
+```
+skunkc [options] file.sk
+
+      --dump-ssa    print the SSA of the program (not of the basis)
+      --dump-flat   print the A-normal form it was built from
+      --no-verify   skip the check that every use is dominated by its definition
+  -h, --help
+```
+
+`skunkc` stops at SSA for now: it builds the control-flow graph, checks it, and
+prints it. Lowering, instruction selection, register allocation and emission
+are not written yet.
 
 Every binding is reported as it is run:
 
@@ -227,9 +251,10 @@ else a` is `int * int -> int`, exactly as in SML.
      |  closure.ml
      v
    Flat           A-normal form + explicit join points + explicit closures
-     |  machine.ml
-     v
-   a value
+     |
+     +--> machine.ml                    a value
+     |
+     +--> build.ml                      value SSA, and then amd64 one day
 ```
 
 | file | lines | what it does |
@@ -249,20 +274,32 @@ else a` is `int * int -> int`, exactly as in SML.
 | `basis.ml` | 162 | the initial environment, and the prelude source |
 | `skunk.ml` | 148 | the command line |
 
+And the compiler, in `src/compiler/`:
+
+| file | lines | what it does |
+| --- | --- | --- |
+| `ssa.ml` | 269 | value SSA: values, blocks, phis, and the printer |
+| `build.ml` | 232 | Flat to SSA. A join point is a block with phi-functions |
+| `dom.ml` | 149 | dominators, and the check that every use is dominated |
+| `skunkc.ml` | 122 | the command line |
+
 ## Layout
 
 ```
-src        the implementation
-examples   tour, matching, modules, store
-tests      golden tests, and errors/ for the messages
+src/interpreter   the front end and the machine   -> skunk
+src/compiler      SSA and the back end            -> skunkc
+examples          tour, matching, modules, store
+tests             golden tests, and errors/ for the messages
 ```
 
 The examples are the tests: `dune test` runs them all and diffs their output.
-Three more files test the machinery — `tests/core.sk` dumps the typed Core,
-`tests/flat.sk` dumps the flat IR, and `tests/warn.sk` is a program that runs
-but that the decision-tree compiler has something to say about. Every program
-in `tests/errors/` is expected to fail with the message in
-`tests/errors.expected`.
+Four more files test the machinery — `tests/core.sk` dumps the typed Core,
+`tests/flat.sk` dumps the flat IR, `tests/join.sk` is dumped by both `skunk`
+and `skunkc` so the two IRs can be read side by side, and `tests/warn.sk` is a
+program that runs but that the decision-tree compiler has something to say
+about. Every program in `tests/errors/` is expected to fail with the message in
+`tests/errors.expected`, and every example has to build SSA that passes the
+verifier.
 
 ## What is deliberately missing
 

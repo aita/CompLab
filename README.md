@@ -21,6 +21,8 @@
 - [`SkunkML/`](SkunkML) — a Standard ML with modules and functors, in OCaml:
   Hindley-Milner with levels, semantic signatures and generative functors, and
   four intermediate languages — typed A-normal form, pattern matching compiled
-  to decision trees, explicit join points, explicit closures — over a CESK
-  machine. The book is in [`SkunkML/doc/`](SkunkML/doc/index.md), a chapter per
-  pass, in Japanese.
+  to decision trees, explicit join points, explicit closures. Two back ends
+  share them: a CESK machine, and a compiler that turns those join points into
+  the phi-functions of value SSA without ever computing a dominance frontier.
+  The book is in [`SkunkML/doc/`](SkunkML/doc/index.md), a chapter per pass, in
+  Japanese.

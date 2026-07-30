@@ -1,0 +1,192 @@
+; Golden tests: run a program, diff its output against the .expected file.
+; `dune test` checks them and `dune promote` accepts new output after a change.
+;
+; The examples are the tests for the language, and three files here are the
+; tests for the machinery: core.sk dumps the typed A-normal form, flat.sk dumps
+; the flat IR after closure conversion, and warn.sk is a program that runs but
+; that the decision-tree compiler has something to say about.
+
+(rule
+ (with-stdout-to
+  tour.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:../examples/tour.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.out)))
+
+(rule
+ (with-stdout-to
+  matching.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:../examples/matching.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff matching.expected matching.out)))
+
+(rule
+ (with-stdout-to
+  modules.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:../examples/modules.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff modules.expected modules.out)))
+
+(rule
+ (with-stdout-to
+  store.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:../examples/store.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff store.expected store.out)))
+
+; The two intermediate languages, which a change can quietly break.
+
+(rule
+ (with-stdout-to
+  core.out
+  (run %{exe:../src/interpreter/skunk.exe} --dump-core %{dep:core.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff core.expected core.out)))
+
+(rule
+ (with-stdout-to
+  join.out
+  (run %{exe:../src/interpreter/skunk.exe} --dump-core %{dep:join.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff join.expected join.out)))
+
+(rule
+ (with-stdout-to
+  flat.out
+  (run %{exe:../src/interpreter/skunk.exe} --dump-flat %{dep:flat.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff flat.expected flat.out)))
+
+; Warnings go to standard error, and the program still runs.
+
+(rule
+ (with-outputs-to
+  warn.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:warn.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff warn.expected warn.out)))
+
+; Every program under errors/ is expected to fail; their messages, stdout and
+; stderr together, are collected into one golden file.
+
+(rule
+ (with-outputs-to
+  errors.out
+  (progn
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/mismatch.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/unbound.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/occurs.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/nested.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/conarity.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/flexrecord.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/valrestriction.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/rigid.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/eqtype.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/ordered.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/abstracteq.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/toospecific.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/missing.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/generative.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/nomatch.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/divzero.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/bounds.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/syntax.sk})))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff errors.expected errors.out)))
+
+; The compiler, as far as it goes.  join.sk is the same file the interpreter
+; dumps Core for, so the two dumps can be read side by side.
+
+(rule
+ (with-stdout-to
+  ssa.out
+  (run %{exe:../src/compiler/skunkc.exe} --dump-ssa %{dep:join.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff ssa.expected ssa.out)))
+
+; Every program here has to build SSA that passes the verifier: each use
+; dominated by its definition, each phi with one argument per predecessor.
+; Nothing is compared -- the test is that skunkc exits zero on all of them.
+
+(rule
+ (with-stdout-to
+  verify.out
+  (progn
+   (run %{exe:../src/compiler/skunkc.exe} --dump-ssa %{dep:../examples/tour.sk})
+   (run %{exe:../src/compiler/skunkc.exe} --dump-ssa %{dep:../examples/matching.sk})
+   (run %{exe:../src/compiler/skunkc.exe} --dump-ssa %{dep:../examples/modules.sk})
+   (run %{exe:../src/compiler/skunkc.exe} --dump-ssa %{dep:../examples/store.sk})
+   (run %{exe:../src/compiler/skunkc.exe} --dump-ssa %{dep:core.sk})
+   (run %{exe:../src/compiler/skunkc.exe} --dump-ssa %{dep:flat.sk}))))
+
+(rule
+ (alias runtest)
+ (deps verify.out)
+ (action
+  (progn)))

@@ -20,9 +20,8 @@
      │  closure.ml       クロージャ変換。join point は変換しない
      ▼
    Flat.program          コードブロック＋捕獲＋join point。型はもうない
-     │  machine.ml       CESK マシン
-     ▼
-   値
+     ├──▶ machine.ml     CESK マシン                     → 値
+     └──▶ build.ml       値 SSA（[10章](10-ssa.md)）      → amd64 へ向かう途中
 ```
 
 ## 1. 字句解析

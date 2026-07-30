@@ -17,8 +17,9 @@ Standard ML の処理系の解説です。1章が1つのパスに対応し、ど
   ▼
 ANF ＋ 明示的な join point   コードブロック、捕獲、そして閉じない labels
   │
-  ▼
-CESK マシン
+  ├──▶ CESK マシン            skunk。値になる
+  │
+  └──▶ 値 SSA                 skunkc。join point が φ になる。amd64 へ向かう途中
 ```
 
 **なぜ面が4つあるのか**が本文のほぼ全部です。3つだけ先に言っておきます。
@@ -32,9 +33,12 @@ CESK マシン
 - **クロージャ変換は join point を変換しません。** それが両者を区別する理由そのもの
   です。ラムダの自由変数は捕獲され、join point の自由変数は自由なままでよい
   （[7章](7-closure.md)）。
+- **join point は φ 関数でした。** バックエンドが2つあり、片方は ANF をそのまま走らせ、
+  もう片方は SSA にします。後者で「φ をどこに置くか」を計算する必要がないのは、
+  置き場所が join point として既に書いてあるからです（[10章](10-ssa.md)）。
 
-言語の対応範囲と使い方は [interpreter/README.md](../interpreter/README.md) に
-まとまっています。ここはその中身の話です。
+言語の対応範囲と使い方は [src/README.md](../src/README.md) にまとまっています。
+ここはその中身の話です。
 
 ## 目次
 
@@ -65,17 +69,24 @@ CESK マシン
 |---|---|---|
 | 9 | [言語リファレンス](9-language.md) | 書ける形の一覧と、していないことの一覧 |
 
+### もうひとつのバックエンド — コンパイラ
+
+| | | |
+|---|---|---|
+| 10 | [SSA — join point は φ だった](10-ssa.md) | `ssa.ml`・`build.ml`・`dom.ml`。値 SSA、支配木、そして支配辺境アルゴリズムを走らせない理由 |
+
 ## 読み方
 
-**言語を使いたいだけなら** [interpreter/README.md](../interpreter/README.md) です。
-この本は中身の話しかしません。
+**言語を使いたいだけなら** [src/README.md](../src/README.md) です。この本は中身の話
+しかしません。
 
 **通して読むなら** 0章から順に。前半（1〜3章）は「プログラムを受け取って型を付ける」、
 後半（4〜8章）は「型が付いたプログラムを走る形にする」話で、境目は
 [4章](4-core.md)の中、`Ast` が `Core` になるところ — **書かれたプログラムと走る
 プログラムが別物になる**ところです。
 
-**1つだけ読むなら** [6章の join point](6-join.md) です。同じ `if` が、末尾に置いたか
+**1つだけ読むなら** [6章の join point](6-join.md) です。読んだあと
+[10章](10-ssa.md)を読むと、そこで作ったものに別の名前が付いているのが見えます。同じ `if` が、末尾に置いたか
 式の途中に置いたかで別のコードになる — そこから始めて、**2つの別々の理由で必要に
 なったものが同じ形をしていた**というところまで行きます。5章と7章がその両側です。
 
@@ -85,16 +96,18 @@ CESK マシン
 **手元で確かめるなら** 各章のダンプは次のコマンドで再現できます。
 
 ```sh
-cd interpreter
 dune build
+S=./_build/default/src/interpreter/skunk.exe
+C=./_build/default/src/compiler/skunkc.exe
 
-./_build/default/src/skunk.exe examples/tour.sk               # 走らせる（0章）
-./_build/default/src/skunk.exe --dump-core tests/core.sk      # 型付き Core（4・5章）
-./_build/default/src/skunk.exe --dump-core tests/join.sk      # join point（6章）
-./_build/default/src/skunk.exe --dump-flat tests/flat.sk      # 平らな IR（7章）
-./_build/default/src/skunk.exe --trace --steps examples/tour.sk   # 機械の1手ずつ（8章）
+$S examples/tour.sk                    # 走らせる（0章）
+$S --dump-core tests/core.sk           # 型付き Core（4・5章）
+$S --dump-core tests/join.sk           # join point（6章）
+$S --dump-flat tests/flat.sk           # 平らな IR（7章）
+$S --trace --steps examples/tour.sk    # 機械の1手ずつ（8章）
+$C --dump-ssa tests/join.sk            # SSA（10章）
 
-dune test                                                     # golden テスト
+dune test                              # golden テスト
 ```
 
 ダンプに出てくる `t.65` や `'_31` の数字は、**それまでにいくつ名前や型変数を作ったか**で

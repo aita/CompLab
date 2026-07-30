@@ -30,10 +30,10 @@ val words : StringSet.set = ["apple", "pear"]
 ```
 
 ```
-$ cd interpreter
 $ dune build
 $ dune test
-$ ./_build/default/src/skunk.exe examples/tour.sk
+$ ./_build/default/src/interpreter/skunk.exe examples/tour.sk
+$ ./_build/default/src/compiler/skunkc.exe --dump-ssa tests/join.sk
 ```
 
 The point of the exercise is the road from the source to the value, and the
@@ -99,12 +99,28 @@ new identities at every application, which is what makes functors generative.
 None of that survives into Core. A structure is a record, a functor is a
 function, and the passes after elaboration have never heard of either.
 
-The implementation is in [`interpreter/`](interpreter) and the book is in
-[`doc/`](doc/index.md): see
-[`interpreter/README.md`](interpreter/README.md) for the language, the command
-line and a map of the source, and [`doc/index.md`](doc/index.md) for a chapter
-per pass. Two to start with, in Japanese:
-[プログラムが通る道](doc/0-pipeline.md) と
+## And a compiler
+
+There is a second back end in [`src/compiler/`](src/compiler), sharing the
+front end. It starts from Flat — where there are no modules, no patterns and no
+nested functions left — and builds **value SSA**: a value is an operation
+together with the values it uses, not a name something was assigned to.
+
+Building it is a change of shape and almost nothing else, because *a join point
+with parameters is a block with phi-functions*. The famous construction —
+placing phi-functions on dominance frontiers — is never run: the phis arrived
+already placed. The dominator tree is still built, and used to check the claim
+rather than assert it: every use dominated by its definition, on every program
+in the repository.
+
+It stops there for now. Lowering, DP instruction selection, SSA register
+allocation and amd64 emission are next.
+
+The implementation is in [`src/`](src) and the book is in
+[`doc/`](doc/index.md): see [`src/README.md`](src/README.md) for the language,
+the two command lines and a map of the source, and
+[`doc/index.md`](doc/index.md) for a chapter per pass. Two to start with, in
+Japanese: [プログラムが通る道](doc/0-pipeline.md) と
 [パターンマッチを決定木にする](doc/5-matching.md)。
 
 ## What is deliberately missing
