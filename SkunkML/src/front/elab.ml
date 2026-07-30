@@ -67,7 +67,17 @@ let atom_of_access (acc : S.access) ty (k : C.atom -> C.block) =
    their meaning lives in the machine. *)
 let binop_type loc op =
   match op with
-  | "+" | "-" | "*" | "div" | "mod" -> (tint, tint, tint)
+  (* `+` `-` `*` overload over int and real, so their type is one variable
+     demanding arithmetic and used three times: both operands and the result
+     are the same type, whichever of the two it turns out to be.  `div` and
+     `mod` stay int-only and `/` is real-only, which is why those three are not
+     overloaded at all -- SML spells the two divisions differently precisely so
+     that neither has to be. *)
+  | "+" | "-" | "*" ->
+      let a = newvar_gen ~num:true () in
+      (a, a, a)
+  | "/" -> (treal, treal, treal)
+  | "div" | "mod" -> (tint, tint, tint)
   | "^" -> (tstring, tstring, tstring)
   | "<" | "<=" | ">" | ">=" ->
       let a = newvar_gen ~ord:true () in
@@ -90,7 +100,8 @@ let binop_type loc op =
    means anything that can call a function -- is expansive. *)
 let rec non_expansive (e : Ast.exp) =
   match e.Ast.e with
-  | Ast.EVar _ | Ast.EInt _ | Ast.EStr _ | Ast.ESelect _ | Ast.EFn _ -> true
+  | Ast.EVar _ | Ast.EInt _ | Ast.EReal _ | Ast.EStr _ | Ast.ESelect _ | Ast.EFn _ ->
+      true
   | Ast.ETuple es | Ast.EList es -> List.for_all non_expansive es
   | Ast.ERecord fs -> List.for_all (fun (_, e) -> non_expansive e) fs
   | Ast.EAnn (e, _) -> non_expansive e
@@ -285,6 +296,7 @@ let rec infer env (e : Ast.exp) (d : dest) : ty * C.block =
   let loc = e.Ast.eloc in
   match e.Ast.e with
   | Ast.EInt n -> (tint, ret d (C.AInt n) tint)
+  | Ast.EReal r -> (treal, ret d (C.AReal r) treal)
   | Ast.EStr s -> (tstring, ret d (C.AStr s) tstring)
   | Ast.ETuple [] -> (tunit, ret d C.AUnit tunit)
   | Ast.EVar path -> infer_var env loc path d
@@ -365,7 +377,10 @@ let rec infer env (e : Ast.exp) (d : dest) : ty * C.block =
   | Ast.EBin (op, a, b) ->
       let ta, tb, tr = binop_type loc op in
       (tr, atoms env [ a; b ] [ ta; tb ] (fun ats -> emit tr (C.Prim (op, ats)) d))
-  | Ast.ENeg a -> (tint, atoms env [ a ] [ tint ] (fun ats -> emit tint (C.Prim ("~", ats)) d))
+  (* `~` is overloaded like `+`, over the same two types. *)
+  | Ast.ENeg a ->
+      let t = newvar_gen ~num:true () in
+      (t, atoms env [ a ] [ t ] (fun ats -> emit t (C.Prim ("~", ats)) d))
   | Ast.EAnn (e, t) ->
       let want = read_ann env t in
       let got, blk = infer env e d in
@@ -578,7 +593,7 @@ and elab_dec env (dc : Ast.dec) (k : Sem.env -> bound list -> C.block) : C.block
                leave_level ();
                let gen ty =
                  let ty = realise rw ty in
-                 default_ord ty;
+                 default_overload ty;
                  if non_expansive e then generalise loc ty else mono ty
                in
                match (p.Ast.p, checked) with
@@ -630,7 +645,7 @@ and elab_dec env (dc : Ast.dec) (k : Sem.env -> bound list -> C.block) : C.block
         List.fold_left
           (fun (env, acc) ((f : Ast.fundec), v, ty) ->
             let ty = realise rw ty in
-            default_ord ty;
+            default_overload ty;
             let sch = generalise f.Ast.floc ty in
             ( S.add_val env f.Ast.fname sch { S.root = v; path = [] },
               acc @ [ BVal (f.Ast.fname, sch, v) ] ))

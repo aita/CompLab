@@ -17,7 +17,7 @@
 ## 1. 3つの不変条件
 
 ```ocaml
-type atom = AVar of string | AInt of int | AStr of string | AUnit
+type atom = AVar of string | AInt of int | AReal of float | AStr of string | AUnit
 
 type rhs = Atom of atom | Lam of ... | Call of atom * atom | Prim of string * atom list
          | Record of ... | Con of ... | Field of ... | Payload of ...

@@ -26,6 +26,10 @@ module Map = Map.Make (String)
 
 type value =
   | VInt of int
+  (* A real is a host double.  Both back ends have to agree on IEEE-754
+     binary64 and on how one is printed ([Types.real_str]); nothing else about
+     it is the machine's business. *)
+  | VReal of float
   | VStr of string
   | VUnit
   (* One product: a tuple is a record whose labels are 1, 2, ... n. *)
@@ -85,6 +89,7 @@ let set w a v = w.cells.(a) <- v
 let rec show w v =
   match v with
   | VInt n -> if n < 0 then Printf.sprintf "~%d" (-n) else string_of_int n
+  | VReal r -> Types.real_str r
   | VStr s -> Printf.sprintf "%S" s
   | VUnit -> "()"
   | VRecord [] -> "()"
@@ -131,9 +136,14 @@ let rec equal w a b =
   | VRef a, VRef b -> a = b
   | (VClos _ | VPrim _), _ | _, (VClos _ | VPrim _) ->
       fault "functions cannot be compared"
+  (* Unreachable, like the line above: `real` is not an equality type, so the
+     type checker stopped this.  Saying it out loud costs one line and is worth
+     more than `false` would be. *)
+  | VReal _, _ | _, VReal _ -> fault "reals cannot be compared"
   | _ -> false
 
 let as_int = function VInt n -> n | _ -> fault "expected an integer"
+let as_real = function VReal r -> r | _ -> fault "expected a real"
 let as_str = function VStr s -> s | _ -> fault "expected a string"
 
 (* A pair is a record with the labels 1 and 2. *)
@@ -149,9 +159,15 @@ let rec append w a b =
       VCon (cons_con, Some (pair_value hd (append w tl b)))
   | _ -> fault "expected a list"
 
+(* NaN is *not* unordered here.  SML raises `Unordered` from `Real.compare` and
+   answers false to every comparison with a NaN; this language has no
+   exceptions, so a NaN sorts below every number instead and `order` is a total
+   order on each type.  It is the one place where a real does not behave the way
+   IEEE-754 says, and it is written down rather than hidden. *)
 let order a b =
   match (a, b) with
   | VInt a, VInt b -> compare a b
+  | VReal a, VReal b -> compare a b
   | VStr a, VStr b -> compare a b
   | _ -> fault "these cannot be ordered"
 
@@ -167,10 +183,26 @@ let vbool b =
 let prim w name (args : value list) =
   let two f = match args with [ a; b ] -> f a b | _ -> fault "%s wants two" name in
   let one f = match args with [ a ] -> f a | _ -> fault "%s wants one" name in
+  (* An overloaded operator is one primitive, and which arithmetic it does is
+     decided by the value.  It cannot be decided any earlier: elaboration emits
+     the [Prim] before unification has necessarily settled whether the operands
+     are int or real -- `fun double x = x + x` learns that from its caller -- and
+     by the time the machine runs, the type that settled it is gone.  Same
+     bargain as `order` above. *)
+  let num fi fr a b =
+    match (a, b) with
+    | VInt a, VInt b -> VInt (fi a b)
+    | VReal a, VReal b -> VReal (fr a b)
+    | _ -> fault "%s wants two numbers of the same type" name
+  in
   match name with
-  | "+" -> two (fun a b -> VInt (as_int a + as_int b))
-  | "-" -> two (fun a b -> VInt (as_int a - as_int b))
-  | "*" -> two (fun a b -> VInt (as_int a * as_int b))
+  | "+" -> two (num ( + ) ( +. ))
+  | "-" -> two (num ( - ) ( -. ))
+  | "*" -> two (num ( * ) ( *. ))
+  (* `/` is real-only, so there is nothing to dispatch on.  Division by zero is
+     an infinity, as IEEE-754 says, and not the error `div` gives: the two
+     divisions are spelled differently in SML and they behave differently. *)
+  | "/" -> two (fun a b -> VReal (as_real a /. as_real b))
   | "div" ->
       two (fun a b ->
           let d = as_int b in
@@ -179,10 +211,10 @@ let prim w name (args : value list) =
       two (fun a b ->
           let d = as_int b in
           if d = 0 then fault "division by zero" else VInt (as_int a mod d))
-  | "~" -> one (fun a -> VInt (-as_int a))
+  | "~" -> one (fun a -> match a with VReal r -> VReal (-.r) | _ -> VInt (-as_int a))
   | "^" -> two (fun a b -> VStr (as_str a ^ as_str b))
   | "@" -> two (fun a b -> append w a b)
-  (* Ordered types are int and string; which one is decided by the value,
+  (* Ordered types are int, string and real; which one is decided by the value,
      because the type that decided it is gone by now. *)
   | "<" -> two (fun a b -> vbool (order a b < 0))
   | "<=" -> two (fun a b -> vbool (order a b <= 0))
@@ -228,6 +260,23 @@ let call_prim w name (v : value) =
   | "Int.compare" ->
       let a, b = pair () in
       VInt (compare (as_int a) (as_int b))
+  | "Real.toString" -> VStr (Types.real_str (as_real v))
+  | "Real.fromInt" -> VReal (float_of_int (as_int v))
+  (* `floor` rounds towards minus infinity, and refuses what will not fit in an
+     int rather than returning a number nobody meant.  `int_of_float` would
+     otherwise be undefined here, and quietly so. *)
+  | "Real.floor" ->
+      let r = as_real v in
+      let f = Float.floor r in
+      if Float.is_nan f || Float.abs f >= 4.611686018427388e18 then
+        fault "Real.floor: %s does not fit in an int" (Types.real_str r)
+      else VInt (int_of_float f)
+  | "Real.compare" ->
+      let a, b = pair () in
+      VInt (compare (as_real a) (as_real b))
+  (* The square root of a negative number is a NaN, which prints as `nan`.  SML
+     says the same; there is no exception to raise here anyway. *)
+  | "Math.sqrt" -> VReal (Float.sqrt (as_real v))
   | "String.size" -> VInt (String.length (as_str v))
   | "String.compare" ->
       let a, b = pair () in
@@ -301,6 +350,7 @@ let lookup w env x =
 let atom w env : F.atom -> value = function
   | F.AVar x -> lookup w env x
   | F.AInt n -> VInt n
+  | F.AReal r -> VReal r
   | F.AStr s -> VStr s
   | F.AUnit -> VUnit
 

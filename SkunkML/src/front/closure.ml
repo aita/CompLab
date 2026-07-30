@@ -28,6 +28,7 @@ module Tys = Map.Make (String)
 let atom : C.atom -> F.atom = function
   | C.AVar x -> F.AVar x
   | C.AInt n -> F.AInt n
+  | C.AReal r -> F.AReal r
   | C.AStr s -> F.AStr s
   | C.AUnit -> F.AUnit
 

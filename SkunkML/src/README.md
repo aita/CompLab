@@ -105,7 +105,8 @@ that does not typecheck never prints half of its output first.
 
 Standard ML, cut down. `val` and `fun` declarations, `fn x => e`, `case e of`,
 `let ... in ... end`, `(* nesting comments *)`, `'a` type variables,
-`andalso`/`orelse`/`div`/`mod`/`<>`, `~` for negation.
+`andalso`/`orelse`/`div`/`mod`/`<>`, `~` for negation, `1.0` and `1.5E~3` for
+reals.
 
 ```sml
 val answer = 6 * 7
@@ -123,7 +124,7 @@ and odd 0 = false
 
 ```
 type ::= 'a | ''a                         any type / an equality type
-       | int | bool | string | unit
+       | int | real | bool | string | unit
        | type * type * ...                a tuple is a record: { 1 : t, 2 : u }
        | { l : type, ... }                record
        | type -> type
@@ -246,12 +247,14 @@ val words : StringSet.set = ["apple"]
 
 ### The basis
 
-`print`, `not`, `!`, and three structures written in OCaml because the machine
+`print`, `not`, `!`, and five structures written in OCaml because the machine
 has to do them itself:
 
 | | |
 | --- | --- |
 | `Int` | `toString`, `abs`, `min`, `max`, `compare` |
+| `Real` | `toString`, `fromInt`, `floor`, `compare` |
+| `Math` | `sqrt` |
 | `String` | `size`, `compare`, `substring` |
 | `Array` | `array`, `fromList`, `toList`, `length`, `sub`, `update` |
 
@@ -261,10 +264,19 @@ a user's program; `--no-prelude` leaves them out. `List` has `null`, `length`,
 `concat` and `tabulate`.
 
 `=` and `<>` are structural, and only on **equality types**: a function is a
-type error, not a runtime one, and a type variable that has to be compared
-prints as `''a`. `<` and friends are overloaded over `int` and `string` and
-default to `int` when nothing decides — so `fun bigger (a, b) = if a < b then b
-else a` is `int * int -> int`, exactly as in SML.
+type error, not a runtime one, `real` is one too — `1.0 = 1.0` does not compile,
+as the Definition says — and a type variable that has to be compared prints as
+`''a`. `<` and friends are overloaded over `int`, `string` and `real`, and
+`+`, `-`, `*` and `~` over `int` and `real`; all of them default to `int` when
+nothing decides — so `fun bigger (a, b) = if a < b then b else a` is
+`int * int -> int`, exactly as in SML. `/` is real-only and `div` and `mod` are
+int-only, so neither division is overloaded.
+
+How a real prints is specified, not left to a library: at most 12 significant
+digits, always a digit after the point, `~` for the sign, and `1.0E12` outside
+`0.0001 .. 10^12`. The specification is in `front/types.ml` because the
+compiler's runtime will have to produce the same bytes from freestanding C with
+no `printf`.
 
 ## How it is put together
 
@@ -308,23 +320,23 @@ In `src/front/`, which is everything up to and including Flat:
 | file | lines | what it does |
 | --- | --- | --- |
 | `loc.ml` | 37 | source positions, the one exception, the warning list |
-| `lexer.mll` | 114 | ocamllex scanner (nesting comments, `'a`, `List.map` as one token) |
-| `parser.mly` | 326 | menhir grammar, conflict-free |
-| `ast.ml` | 139 | the surface tree |
-| `types.ml` | 516 | types, levels, destructive unification, equality and order, schemes |
+| `lexer.mll` | 131 | ocamllex scanner (nesting comments, `'a`, `List.map` as one token) |
+| `parser.mly` | 332 | menhir grammar, conflict-free |
+| `ast.ml` | 140 | the surface tree |
+| `types.ml` | 639 | types, levels, destructive unification, equality, order and arithmetic, schemes, and how a real is spelled |
 | `sem.ml` | 512 | environments, semantic signatures, matching, realisation |
-| `core.ml` | 294 | typed Core, its free variables, and its printer |
-| `elab.ml` | 1010 | inference and normalisation in one pass; modules become records |
+| `core.ml` | 299 | typed Core, its free variables, and its printer |
+| `elab.ml` | 1025 | inference and normalisation in one pass; modules become records |
 | `patmat.ml` | 335 | pattern matrices, decision trees, exhaustiveness |
-| `flat.ml` | 152 | the flat IR, and its printer |
-| `closure.ml` | 142 | code blocks, captures, and what is deliberately not captured |
-| `basis.ml` | 155 | what the names in the initial environment are, and the prelude source |
+| `flat.ml` | 156 | the flat IR, and its printer |
+| `closure.ml` | 143 | code blocks, captures, and what is deliberately not captured |
+| `basis.ml` | 181 | what the names in the initial environment are, and the prelude source |
 
 And the two back ends. In `src/interpreter/`:
 
 | file | lines | what it does |
 | --- | --- | --- |
-| `machine.ml` | 514 | the CESK machine, the primitives, and the basis in its store |
+| `machine.ml` | 564 | the CESK machine, the primitives, and the basis in its store |
 | `skunk.ml` | 148 | the command line |
 
 In `src/compiler/`:
@@ -332,13 +344,13 @@ In `src/compiler/`:
 | file | lines | what it does |
 | --- | --- | --- |
 | `ssa.ml` | 269 | value SSA: values, blocks, phis, and the printer |
-| `build.ml` | 235 | Flat to SSA. A join point is a block with phi-functions |
+| `build.ml` | 266 | Flat to SSA. A join point is a block with phi-functions |
 | `dom.ml` | 262 | dominators, dominance frontiers, and the checks they are for |
 | `opt.ml` | 593 | folding, sccp, gvn, dce, and block merging |
 | `loops.ml` | 233 | tail recursion becomes a loop; then licm has something to do |
 | `sched.ml` | 169 | list scheduling over each block's dependence graph |
 | `mach.ml` | 199 | amd64 in a graph: instructions, operands, virtual registers |
-| `select.ml` | 535 | lowering, and the DP tiler that chooses the instructions |
+| `select.ml` | 541 | lowering, and the DP tiler that chooses the instructions |
 | `statics.ml` | 181 | descriptors, string literals, nullary constructors, globals |
 | `stubs.ml` | 89 | the basis, as static data plus one stub per function |
 | `outofssa.ml` | 151 | critical edges, parallel copies, and no more phis |
@@ -390,6 +402,11 @@ in the assembler, the linker, the ELF writer or the runtime shows up without the
 compiler in the way. `skunkc --dump-encoding` is a golden file of instruction
 bytes, each of which was diffed against the system assembler once.
 
+`tests/reals.sk` is the one program only the interpreter runs, because the back
+end has no representation for a real yet: it is where the printing specification
+is pinned down, and it becomes a differential test like the others as soon as
+there is a compiled half to diff it against.
+
 `tests/opt.sk` has one redundancy per line, each visible to exactly one pass, and
 `tests/loop.sk` is tail-recursive, so its golden file has the only backward edges
 in the repository. `tests/gc.sk` allocates more than the heap holds, so finishing
@@ -398,9 +415,11 @@ at all is the evidence that collection happens.
 ## What is deliberately missing
 
 No exceptions, so no `raise` and no `handle`, and a match that fails stops the
-program. No characters and no reals, so `<` is overloaded over two types where
-SML has four. No `op`, no user-defined infix operators, no `local`, `abstype`,
-`withtype` or `sharing`. No polymorphic recursion, no separate compilation, no
+program. No characters, so `<` is overloaded over three types where SML has
+four, and there is no `String.sub`. Reals exist but the compiler cannot do them
+yet: it has no representation for one, so `skunkc` stops with a message when it
+meets a real literal, the `Real` or `Math` structures, or `/`. No `op`, no
+user-defined infix operators, no `local`, `abstype`, `withtype` or `sharing`. No polymorphic recursion, no separate compilation, no
 optimiser, and no garbage collector: the store only grows.
 
 A written type variable *is* a promise, as it should be. `val id : 'a -> 'a`

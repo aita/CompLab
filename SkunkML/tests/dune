@@ -46,6 +46,21 @@
  (action
   (diff store.expected store.out)))
 
+; Reals, and the interpreter alone: the back end has no representation for a
+; real yet, so there is no compiled half to diff this against.  When there is,
+; this file becomes a differential test like the ones above and that is the
+; whole of what has to change here.
+
+(rule
+ (with-stdout-to
+  reals.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:reals.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff reals.expected reals.out)))
+
 ; The two intermediate languages, which a change can quietly break.
 
 (rule
@@ -127,6 +142,9 @@
    (with-accepted-exit-codes
     1
     (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/ordered.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/realeq.sk}))
    (with-accepted-exit-codes
     1
     (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/abstracteq.sk}))

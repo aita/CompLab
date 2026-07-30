@@ -34,9 +34,16 @@ let split_path s =
   | [] -> assert false
 
 let buf = Buffer.create 64
+
+(* A real literal wears SML's minus in its exponent: `1.5E~3`.  Nothing else
+   about the spelling differs from C's, so one substitution is the whole
+   translation, and `float_of_string` does the rest -- correctly rounded, which
+   is what the printer in `types.ml` assumes of the other side too. *)
+let real_of_string s = float_of_string (String.map (fun c -> if c = '~' then '-' else c) s)
 }
 
 let digit = ['0'-'9']
+let exponent = ['e' 'E'] '~'? digit+
 let lower = ['a'-'z' '_']
 let upper = ['A'-'Z']
 let idchar = ['A'-'Z' 'a'-'z' '0'-'9' '_' '\'']
@@ -48,6 +55,15 @@ rule token = parse
   | [' ' '\t' '\r']+      { token lexbuf }
   | '\n'                  { Lexing.new_line lexbuf; token lexbuf }
   | "(*"                  { comment 1 lexbuf }
+  (* A real before an integer, because ocamllex takes the longest match and
+     these overlap on the leading digits: `1.5` is one token and not `1`
+     followed by whatever `.5` would be.  There has to be a digit on each side
+     of the point, as in SML, so `1.` is an integer followed by an error and a
+     path is never in danger -- a qualifier starts with a capital, and `1.foo`
+     is not a name.  `1exp` is still `1` and `exp`, because the exponent form
+     needs digits after the `e` and ocamllex backtracks to the shorter rule. *)
+  | digit+ '.' digit+ exponent? as s { REAL (real_of_string s) }
+  | digit+ exponent as s  { REAL (real_of_string s) }
   | digit+ as s           { INT (int_of_string s) }
   (* `'a` is a type variable; `x'` is an identifier.  The quote decides which
      by where it stands, as in SML. *)
@@ -77,6 +93,7 @@ rule token = parse
   | '+'                   { PLUS }
   | '-'                   { MINUS }
   | '*'                   { STAR }
+  | '/'                   { SLASH }
   | '^'                   { CARET }
   | '@'                   { AT }
   | '~'                   { TILDE }

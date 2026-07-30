@@ -230,6 +230,12 @@ let arith ctx op (args : S.value list) dst =
       let ra = in_reg ctx a in
       put ctx (M.Mov (reg dst, imm 2));
       put ctx (M.Alu ("sub", reg dst, reg ra))
+  (* `/` is real-only, and the tiles above are tagged *integer* arithmetic.  No
+     real can reach here -- `build.ml` refuses a real literal and refuses the
+     Real and Math structures -- so this is the message for a program that got
+     past both, not a hole to be filled by accident. *)
+  | "/", _ ->
+      failwith "select: real is not compiled yet -- / has no tile (see doc/18-abi.md)"
   | _ -> failwith ("select: no tile for " ^ op)
 
 let value ctx (v : S.value) =

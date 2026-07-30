@@ -90,6 +90,14 @@ let global st (blk : S.block) name =
   | Some v -> v
   | None -> emit st blk (S.Global name)
 
+(* A structure the front end declares and `stubs.ml` does not provide.  That is
+   what `Real` and `Math` are until the back end has a representation for
+   `real`, and it has to be caught here: the name is a global like any other, so
+   without this it would become a word nobody ever fills in and the program
+   would call through a null pointer instead of failing to compile. *)
+let unstubbed x =
+  List.mem_assoc x Basis.structures && not (List.mem_assoc x Stubs.structures)
+
 let atom st blk : F.atom -> S.value = function
   (* A local binding first: a top-level `val x = ...` binds `x` locally inside
      its own body before it becomes the global of that name, and the local is
@@ -98,9 +106,22 @@ let atom st blk : F.atom -> S.value = function
       match Map.find_opt x st.names with
       | Some v -> v
       | None ->
-          if Hashtbl.mem st.globals x then global st blk x
+          if unstubbed x then
+            failwith
+              ("build: " ^ x
+             ^ " is not compiled yet -- the back end has no representation for real \
+                (see doc/18-abi.md)")
+          else if Hashtbl.mem st.globals x then global st blk x
           else failwith ("build: unbound " ^ x))
   | F.AInt n -> constant st blk (S.CInt n)
+  (* A real does not fit in an SSA constant, because `Ssa.const` is an int, a
+     string or unit, and a tagged word cannot hold a double.  Deciding what it
+     should be is the back end's next piece of work (doc/18-abi.md), so until
+     then say so instead of guessing. *)
+  | F.AReal _ ->
+      failwith
+        "build: real is not compiled yet -- the value representation has no real \
+         (see doc/18-abi.md)"
   | F.AStr s -> constant st blk (S.CStr s)
   | F.AUnit -> constant st blk S.CUnit
 

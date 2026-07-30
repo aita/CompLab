@@ -175,7 +175,8 @@ Japanese: [プログラムが通る道](doc/00-pipeline.md) と
 
 ## What is deliberately missing
 
-No exceptions, no characters or reals, no user-defined infix operators, no
-polymorphic recursion, no separate compilation, no optimiser and no garbage
-collector. Each chapter of the book ends with the list for its pass, and with
-why.
+No exceptions, no characters, no user-defined infix operators, no polymorphic
+recursion, no separate compilation, no optimiser and no garbage collector.
+Reals the interpreter has and the compiler does not: the back end has no
+representation for one yet and says so rather than guessing. Each chapter of the
+book ends with the list for its pass, and with why.

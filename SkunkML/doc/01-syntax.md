@@ -29,6 +29,14 @@
 残りは普通です。コメント `(* *)` は入れ子にでき、`'a` は型変数、`x'` は識別子、
 文字列のエスケープは4つだけで改行をまたげません。
 
+**実数リテラルだけは、そのドットと隣り合っています。** `1.0` は1トークンで、`1` と
+何かではありません。ocamllex は最長一致を採るので規則を数値の前に置くだけで済み、
+危なそうな組み合わせも全部黙って正しくなります — 点の両側に数字を要求してあるので
+`1.` は整数のあとにエラー、修飾子は大文字始まりなので `1.foo` はパスになりようがなく、
+`1exp` は指数部に数字がないので `1` と `exp` に戻ります。指数の符号は SML なので
+`~` です（`1.5E~3`）。`~1.5` はリテラルではなく `~` の適用で、これは字句ではなく
+文法の話です。
+
 **大文字と小文字を区別するのは修飾子だけです。** パスの前半（`List` の部分）は大文字で
 始まらなければなりませんが、構成子は大文字でも小文字でもかまいません。SML の `nil` と
 `true` が小文字だからです。「その名前は構成子か変数か」は文法ではなく環境が決めます
@@ -53,7 +61,7 @@ LR で「内側」を選ぶのは shift することです。衝突を優先順�
 %nonassoc BAR DARROW
 %right SEMI
 ...
-%left STAR DIV MOD
+%left STAR SLASH DIV MOD
 %nonassoc TILDE
 ```
 
@@ -169,7 +177,7 @@ this clause of f takes 2 arguments, the first takes 1
   SML の演算子表を固定で持っています。
 - **`op` がありません。** `foldl op + 0 xs` は書けません。`fn (a, b) => a + b` と
   書きます。
-- **文字と実数がありません。** 文字がないので `String.sub` もありません。
+- **文字がありません。** だから `String.sub` もありません。
 - **`local`・`abstype`・`withtype`・`sharing` がありません。** どれも構文の仕事が
   増えるだけで、この本の主題に何も足しません。
 - **`e : t` を括弧なしで書けません。** 3節のとおりです。
@@ -188,7 +196,7 @@ this clause of f takes 2 arguments, the first takes 1
 
 | ファイル | 何が |
 |---|---|
-| `src/front/lexer.mll` | `split_path` が `List.map` を1トークンにする。`comment` が入れ子、`string` がエスケープ |
+| `src/front/lexer.mll` | `split_path` が `List.map` を1トークンにする。`comment` が入れ子、`string` がエスケープ、`real_of_string` が指数の `~` を直す |
 | `src/front/parser.mly` | 冒頭の優先順位宣言（2節）、`fun_bind` が節を揃える（5節）、`ty`/`ty_tuple`/`ty_app`/`ty_atom` が型の文法（4節） |
 | `src/front/ast.ml` | 表層構文木。型を知らず、名前が構成子かどうかも知らない |
 

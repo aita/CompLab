@@ -7,7 +7,8 @@ errors/flexrecord.sk:2:5: type error: this record's type is not determined here:
 errors/valrestriction.sk:3:10: type error: cannot unify int with bool
 errors/rigid.sk:2:5: type error: 'a was written in an annotation, so it has to work for every type, and this needs it to be int
 errors/eqtype.sk:2:11: type error: a function cannot be compared: '_12 -> '_12 does not admit equality
-errors/ordered.sk:1:11: type error: bool cannot be ordered: only int and string can
+errors/ordered.sk:1:11: type error: bool cannot be ordered: only int, string and real can
+errors/realeq.sk:1:11: type error: real does not admit equality, as in the Definition of Standard ML: compare reals with Real.compare, or with <= and <
 errors/abstracteq.sk:2:21: signature error: the signature declares t as an eqtype, but a function cannot be compared: int -> int does not admit equality
 errors/toospecific.sk:1:42: signature error: f is int -> int here, but the signature asks for 'a -> 'a
 errors/missing.sk:2:19: signature error: this structure does not define b

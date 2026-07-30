@@ -16,7 +16,7 @@
        signatures, and there is nothing left for them to decide. *)
 
 type label = string
-type atom = AVar of string | AInt of int | AStr of string | AUnit
+type atom = AVar of string | AInt of int | AReal of float | AStr of string | AUnit
 
 type rhs =
   | Atom of atom
@@ -64,6 +64,7 @@ type program = { codes : code list; items : item list }
 let atom_str = function
   | AVar x -> x
   | AInt n -> if n < 0 then Printf.sprintf "~%d" (-n) else string_of_int n
+  | AReal r -> Types.real_str r
   | AStr s -> Printf.sprintf "%S" s
   | AUnit -> "()"
 

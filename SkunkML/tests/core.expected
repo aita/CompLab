@@ -48,8 +48,8 @@ fix sum : int * int -> int = fn a1.21 : int * int =>
       tailcall sum t.64
 ret sum
 -- val depth : 'a list -> int
-fix depth : '_31 list -> int = fn a1.22 : '_31 list =>
-  let xs.13 : '_31 list = a1.22
+fix depth : '_34 list -> int = fn a1.22 : '_34 list =>
+  let xs.13 : '_34 list = a1.22
   join k (v : int) =
     let t.66 : int = +(1, v)
     ret t.66
@@ -57,10 +57,10 @@ fix depth : '_31 list -> int = fn a1.22 : '_31 list =>
   | nil =>
       jump k (0)
   | :: =>
-      let arg.15 : '_31 * '_31 list = payload xs.13
-      let p.63 : '_31 = #1 arg.15
-      let p.64 : '_31 list = #2 arg.15
-      let rest.2 : '_31 list = p.64
+      let arg.15 : '_34 * '_34 list = payload xs.13
+      let p.63 : '_34 = #1 arg.15
+      let p.64 : '_34 list = #2 arg.15
+      let rest.2 : '_34 list = p.64
       let t.65 : int = depth rest.2
       jump k (t.65)
 ret depth

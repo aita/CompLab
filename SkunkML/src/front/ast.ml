@@ -50,13 +50,14 @@ type exp = { e : exp_desc; eloc : Loc.t }
 and exp_desc =
   | EVar of path
   | EInt of int
+  | EReal of float
   | EStr of string
   | ETuple of exp list
   | ERecord of (label * exp) list
   | EList of exp list
   | ESelect of label (* #lab: a record field, never a tuple component *)
   | EApp of exp * exp
-  | EBin of string * exp * exp (* + - * div mod ^ = <> < <= > >= :: @ *)
+  | EBin of string * exp * exp (* + - * / div mod ^ = <> < <= > >= :: @ *)
   | ENeg of exp (* ~e *)
   | EIf of exp * exp * exp
   | EAndalso of exp * exp

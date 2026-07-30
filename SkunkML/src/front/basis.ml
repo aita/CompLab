@@ -32,6 +32,24 @@ let int_sg =
       ("compare", m (Tarrow (ttuple [ tint; tint ], tint)));
     ]
 
+(* structure Real.  `toString` is the printer specified in `types.ml`, so a
+   real that goes through `Real.toString` and one that a binding reports print
+   the same.  `floor` is here rather than `trunc`/`round`/`ceil` because it is
+   the one that comes up, and because each of the others would want its own
+   rounding rule written down. *)
+let real_sg =
+  sg_of
+    [
+      ("toString", m (Tarrow (treal, tstring)));
+      ("fromInt", m (Tarrow (tint, treal)));
+      ("floor", m (Tarrow (treal, tint)));
+      ("compare", m (Tarrow (ttuple [ treal; treal ], tint)));
+    ]
+
+(* structure Math.  One function, and the only one the machine cannot write for
+   itself. *)
+let math_sg = sg_of [ ("sqrt", m (Tarrow (treal, treal))) ]
+
 (* structure String *)
 let string_sg =
   sg_of
@@ -55,7 +73,14 @@ let array_sg =
       ("update", poly1 (fun a -> Tarrow (ttuple [ tarray a; tint; a ], tunit)));
     ]
 
-let structures = [ ("Int", int_sg); ("String", string_sg); ("Array", array_sg) ]
+let structures =
+  [
+    ("Int", int_sg);
+    ("Real", real_sg);
+    ("Math", math_sg);
+    ("String", string_sg);
+    ("Array", array_sg);
+  ]
 
 let toplevel_vals =
   [
@@ -72,6 +97,7 @@ let env () =
       e
       [
         ("int", Sem.TyName int_tc);
+        ("real", Sem.TyName real_tc);
         ("bool", Sem.TyName bool_tc);
         ("string", Sem.TyName string_tc);
         ("unit", Sem.TyAlias ([], tunit));

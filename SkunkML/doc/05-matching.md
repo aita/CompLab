@@ -99,9 +99,9 @@ let p.58 : '_6 = #2 a1.19
 
 ```
 | :: =>
-    let arg.15 : '_31 * '_31 list = payload xs.13
-    let p.63 : '_31 = #1 arg.15
-    let p.64 : '_31 list = #2 arg.15
+    let arg.15 : '_34 * '_34 list = payload xs.13
+    let p.63 : '_34 = #1 arg.15
+    let p.64 : '_34 list = #2 arg.15
 ```
 
 `payload` が構成子の中身を取り出す操作で、その中身がタプルなら次のステップで

@@ -26,7 +26,7 @@
 
 type label = string
 
-type atom = AVar of string | AInt of int | AStr of string | AUnit
+type atom = AVar of string | AInt of int | AReal of float | AStr of string | AUnit
 
 (* Patterns, after elaboration has resolved which names are constructors and
    filled a record pattern out to every field of its type. *)
@@ -176,6 +176,7 @@ let recursive (defs : (string * Types.ty * rhs) list) =
 let atom_str = function
   | AVar x -> x
   | AInt n -> if n < 0 then Printf.sprintf "~%d" (-n) else string_of_int n
+  | AReal r -> Types.real_str r
   | AStr s -> Printf.sprintf "%S" s
   | AUnit -> "()"
 

@@ -34,13 +34,14 @@ let fun_bind startpos (clauses : (string * pat list * ty option * exp) list) =
 %}
 
 %token <int> INT
+%token <float> REAL
 %token <string> STRING LID UID TYVAR SELECT
 %token <string list * string> QID
 %token VAL FUN FN LET IN END IF THEN ELSE CASE OF AS
 %token DATATYPE TYPE AND ANDALSO ORELSE DIV MOD OPEN
 %token STRUCTURE SIGNATURE FUNCTOR STRUCT SIG WHERE INCLUDE EQTYPE
 %token DARROW ARROW CONS COLONGT COLON ASSIGN EQ NE LE GE LT GT
-%token PLUS MINUS STAR CARET AT TILDE BAR COMMA SEMI DOTS UNDERSCORE
+%token PLUS MINUS STAR SLASH CARET AT TILDE BAR COMMA SEMI DOTS UNDERSCORE
 %token LPAREN RPAREN LBRACK RBRACK LBRACE RBRACE EOF
 
 (* Lowest first.  The interesting entries are the two at the bottom.  A match
@@ -50,7 +51,7 @@ let fun_bind startpos (clauses : (string * pat list * ty option * exp) list) =
    rule, and it is why a `case` inside a `fun` clause has to be parenthesised:
    the bar that was meant to start the next clause joins the case instead.
 
-   Everything else is SML's operator table -- `*` and `div` tightest, then
+   Everything else is SML's operator table -- `*`, `/` and `div` tightest, then
    `+`, then the right-associative `::` and `@`, then the comparisons. *)
 %nonassoc LOWEST
 %nonassoc BAR DARROW
@@ -64,7 +65,7 @@ let fun_bind startpos (clauses : (string * pat list * ty option * exp) list) =
 %nonassoc AS
 %right CONS AT
 %left PLUS MINUS CARET
-%left STAR DIV MOD
+%left STAR SLASH DIV MOD
 %nonassoc TILDE
 
 %start <Ast.program> program
@@ -284,6 +285,7 @@ term:
   | a = term; MINUS; b = term       { bin $startpos "-" a b }
   | a = term; CARET; b = term       { bin $startpos "^" a b }
   | a = term; STAR; b = term        { bin $startpos "*" a b }
+  | a = term; SLASH; b = term       { bin $startpos "/" a b }
   | a = term; DIV; b = term         { bin $startpos "div" a b }
   | a = term; MOD; b = term         { bin $startpos "mod" a b }
   | TILDE; e = term %prec TILDE     { mk $startpos (ENeg e) }
@@ -303,6 +305,10 @@ app:
 atom:
   | p = path                        { mk $startpos (EVar p) }
   | n = INT                         { mk $startpos (EInt n) }
+  (* `~1.5` is `~` applied to `1.5`, so there is nothing to do here for the
+     sign.  And there is no real *pattern*: a real does not admit equality, so
+     matching one is not a thing the Definition allows. *)
+  | r = REAL                        { mk $startpos (EReal r) }
   | s = STRING                      { mk $startpos (EStr s) }
   | l = SELECT                      { mk $startpos (ESelect l) }
   | LPAREN; RPAREN                  { mk $startpos (ETuple []) }
