@@ -94,6 +94,66 @@ let nodes rs =
 
 module IS = Set.Make (Int)
 
+(* ---- how often a block runs ---------------------------------------------- *)
+
+(* Whether a block is inside a loop.  A block that can reach itself is on a
+   cycle, and every block of a natural loop can: it reaches the latch, and the
+   latch reaches the header again.
+
+   This is an approximation, and a deliberate one.  It is *sound* -- it never
+   calls a block loop-free when it is in a loop -- but it over-approximates, and
+   it cannot count nesting: an irreducible tangle is all "in a loop", and two
+   nested loops look like one.  The exact answer is dominators and natural
+   loops, which is what `loops.ml` does for the SSA graph and what would have to
+   be written again here for the Mach one.  It would say nothing more.  Every
+   loop in a SkunkML program is a self tail call ([10章](../doc/10-ssa.md)), the
+   back edges of a function all point at the same header, and nothing nests --
+   so "inside a loop" is the whole of what there is to know. *)
+let in_loop (f : M.func) =
+  let byid = Hashtbl.create 16 in
+  List.iter (fun (b : M.block) -> Hashtbl.replace byid b.M.id b) f.M.blocks;
+  let out_of id = match Hashtbl.find_opt byid id with Some b -> succs b | None -> [] in
+  let cyclic = Hashtbl.create 16 in
+  List.iter
+    (fun (b : M.block) ->
+      let seen = Hashtbl.create 16 in
+      let rec go id =
+        if not (Hashtbl.mem seen id) then begin
+          Hashtbl.replace seen id ();
+          List.iter go (out_of id)
+        end
+      in
+      List.iter go (out_of b.M.id);
+      if Hashtbl.mem seen b.M.id then Hashtbl.replace cyclic b.M.id ())
+    f.M.blocks;
+  fun id -> Hashtbl.mem cyclic id
+
+(* ---- what a value costs to spill ----------------------------------------- *)
+
+(* Chaitin's estimate: how many times the value is read or written, ten times
+   over if the instruction is inside a loop.  Ten is the usual guess at how much
+   more often a loop body runs than the code around it -- a guess, and all that
+   is asked of it is to order the candidates.
+
+   Divided by the degree (in `select_spill`), this is the whole of the spill
+   heuristic: prefer the value that frees many neighbours and is barely touched,
+   and not the one a loop reads every time round. *)
+let spill_costs (f : M.func) =
+  let hot = in_loop f in
+  let cost = Hashtbl.create 256 in
+  let bump w n = Hashtbl.replace cost n (w +. try Hashtbl.find cost n with Not_found -> 0.) in
+  List.iter
+    (fun (b : M.block) ->
+      let w = if hot b.M.id then 10. else 1. in
+      List.iter
+        (fun i ->
+          let d, u = defs_uses i in
+          List.iter (bump w) (nodes (d @ u)))
+        b.M.code;
+      List.iter (bump w) (nodes (term_uses b.M.term)))
+    f.M.blocks;
+  cost
+
 let liveness (f : M.func) =
   let live_in = Hashtbl.create 32 and live_out = Hashtbl.create 32 in
   List.iter
@@ -197,8 +257,8 @@ let moves_of (f : M.func) =
      coalesce   a move whose ends can safely become one node: fuse them
      freeze     a low-degree node whose moves are all blocked: give up on its
                 moves so it can be simplified
-     spill      nothing else is possible: push the most constrained node
-                optimistically (Briggs) and hope its neighbours share colours
+     spill      nothing else is possible: push the cheapest node optimistically
+                (Briggs) and hope its neighbours share colours
 
    "Safely" is the interesting word.  Fusing two nodes can only make colouring
    harder, so a test has to say when it cannot:
@@ -215,9 +275,15 @@ let moves_of (f : M.func) =
 
 exception Spilled of int list
 
-let colour (f : M.func) =
+(* [unspillable] holds the nodes that must not be chosen to spill: the fresh
+   registers a previous rewrite made.  Their live ranges are two instructions
+   long, so spilling one again would insert a load right next to the store that
+   fed it and leave the round no smaller than it started -- the one way this
+   loop could fail to converge. *)
+let colour (f : M.func) (unspillable : IS.t) =
   let _, live_out = liveness f in
   let adj, _ = build_graph f live_out in
+  let cost = spill_costs f in
   let k_inf = 1_000_000 in
   (* Degrees, with the precoloured ones held at infinity so that they are never
      simplified and never spilled: they already have their colour. *)
@@ -370,11 +436,15 @@ let colour (f : M.func) =
     freeze_moves n
   in
   let select_spill () =
-    (* The most constrained node.  A real allocator weighs this by how often the
-       value is used and how deep in a loop it is; this one only counts
-       neighbours. *)
+    (* Cost over degree: what the memory traffic would cost, per neighbour the
+       spill frees.  Degree alone would happily spill the value a loop reads
+       every time round, which is the expensive mistake. *)
+    let value n =
+      if IS.mem n unspillable then infinity
+      else (try Hashtbl.find cost n with Not_found -> 0.) /. float_of_int (max 1 (deg n))
+    in
     let n =
-      IS.fold (fun x best -> if deg x > deg best then x else best) !spill_wl
+      IS.fold (fun x best -> if value x < value best then x else best) !spill_wl
         (IS.min_elt !spill_wl)
     in
     spill_wl := IS.remove n !spill_wl;
@@ -564,10 +634,17 @@ let apply (f : M.func) colours =
     f.M.blocks;
   f.M.used_callee <- List.sort compare !used
 
+(* One frame word per spilled value, and a value that spills twice keeps the
+   word it had.  Two values that are never live together could share one -- it is
+   the colouring problem over again, with slots for colours and no limit on how
+   many -- but there is nothing here to share: a function spills because too much
+   is live across one call, and everything live across that call interferes with
+   everything else that is ([13章](../doc/13-regalloc.md)). *)
 let func (f : M.func) =
   let slots = Hashtbl.create 16 in
+  let unspillable = ref IS.empty in
   let rec go () =
-    match colour f with
+    match colour f !unspillable with
     | colours -> apply f colours
     | exception Spilled vs ->
         List.iter
@@ -577,7 +654,12 @@ let func (f : M.func) =
               f.M.nspill <- f.M.nspill + 1
             end)
           vs;
+        (* Everything the rewrite invents is off the table for the next round. *)
+        let before = f.M.nvreg in
         rewrite f vs (Hashtbl.find slots);
+        for i = before to f.M.nvreg - 1 do
+          unspillable := IS.add (nphys + i) !unspillable
+        done;
         go ()
   in
   go ()
