@@ -124,6 +124,9 @@
     (run %{exe:../src/mink.exe} %{dep:errors/monomorphic.mnk}))
    (with-accepted-exit-codes
     1
+    (run %{exe:../src/mink.exe} %{dep:errors/rank2Annotated.mnk}))
+   (with-accepted-exit-codes
+    1
     (run %{exe:../src/mink.exe} %{dep:errors/rank2.mnk}))
    (with-accepted-exit-codes
     1

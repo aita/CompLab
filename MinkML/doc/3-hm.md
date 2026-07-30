@@ -209,8 +209,8 @@ errors/monomorphic.mnk:6:25: type error: cannot unify int with bool
 なり、`g 1` が `'a` を `int` に合わせようとした時点で失敗します。
 
 ```
-$ mink /tmp/hm2.mnk
-/tmp/hm2.mnk:2:61: type error: cannot unify int with bool
+$ mink tests/errors/rank2Annotated.mnk
+errors/rank2Annotated.mnk:4:68: type error: cannot unify int with bool
 ```
 
 **HM では、この型を書く場所がないのではなく、書いても意味が変わってしまう**——これが

@@ -93,8 +93,8 @@ val n = (someExpression : int)
 There is no separate grammar of types: a type *is* a term, so `x * y` is one
 node that means multiplication or a product depending on where it stands, and
 each system reads the tree it understands out of the one the parser builds.
-[The syntax chapter](../doc/1-syntax.md) explains that choice, and
-[the grammar appendix](../doc/10-grammar.md) has the whole thing in EBNF.
+[The grammar chapter](../doc/1-syntax.md) has the whole grammar in EBNF, and
+explains that choice.
 
 ### Inference with nothing written — `hm` and `row`
 

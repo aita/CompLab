@@ -66,6 +66,11 @@ examples/rows.mnk:6:22: type error: records and variants belong to #system row
 「どのプログラムが正しいか」では意見が違いますが、「正しいプログラムがどう走るか」では
 完全に一致するので、実行系は1つで足ります。
 
+```sml
+fun add x y = x + y
+val five = add 2 3
+```
+
 ```
 $ mink --dump-anf add.mnk
 -- add in A-normal form
@@ -133,7 +138,9 @@ pinged : unit = ()
 | 型検査 (type checking) | 与えられた型に対して式が合うかを確かめること |
 | 型推論 (type inference) | 書かれていない型を求めること。どこまでやるかがシステムごとに違う |
 | 双方向 (bidirectional) | 検査と合成の2つのモードを持つ検査の書き方（[4章](4-poly.md)） |
-| 単一化 (unification) | 2つの型が等しくなるように変数を決めること（[5章](5-rows.md)） |
+| 単一化 (unification) | 2つの型が等しくなるように変数を決めること（[3章](3-hm.md)・[5章](5-rows.md)） |
+| 全称量化 (`forall`) | 「どんな型についても」。`forall 'a. 'a -> 'a` は定義側の義務と使用側の権利を同時に言う（[1章](1-syntax.md)） |
+| 単型 / 型スキーム | `forall` を含まない型 / 含む型。環境に入るのは後者（[3章](3-hm.md)） |
 | エラボレーション (elaboration) | 書かれた構文を、検査済みの内部表現へ翻訳すること |
 | 健全性 (soundness) | 「通ったなら正しい」。この本の各システムが狙っているもの |
 | 完全性 (completeness) | 「正しいなら通る」。落とすことがあり、落としたときは章に書いてあります |

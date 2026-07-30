@@ -1,0 +1,4 @@
+#system hm
+(* An annotation cannot rescue this in `hm`: the `forall` is read past, `'a`
+   becomes one fixed unknown type, and the first use decides it. *)
+val useTwice : (forall 'a. 'a -> 'a) -> int * bool = fn g => (g 1, g true)
