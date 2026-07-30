@@ -88,7 +88,7 @@ ret adder
 ```
 
 自由変数を数えもしません。数える必要がないからです。join point へ跳べるのは、それを
-定義したブロックの内側からだけ（[6章](06-join.md)の4節）。跳んだ時点でその値はまだ
+定義したブロックの内側からだけ（[6章](06-join.md)の3節）。跳んだ時点でその値はまだ
 そこにあります。
 
 自由変数の計算（`core.ml` にあります）のほうも、join point を素通しします。
@@ -193,8 +193,6 @@ code twice$3 (a1.20) =
 - **ラムダ持ち上げ (lambda lifting) をしていません。** 自由変数を引数にしてしまう
   やり方もあり、そちらは環境を確保しませんが、呼び出し側が全部見えている必要があります。
 - **捕獲の順序は名前順です。** `Set.elements` の順。決定的でありさえすればよいので。
-- **未使用の捕獲を落としません。** 自由変数の計算がそのまま捕獲リストなので、実際には
-  落ちています（使っていない変数は自由変数ではないので）。
 
 ## 参考文献
 
@@ -211,10 +209,10 @@ code twice$3 (a1.20) =
 
 | ファイル | 何が |
 |---|---|
-| `src/closure.ml` | `make_closure`（1節）、`conv_closure`（ラムダを閉じる唯一の場所）、`conv` の `C.Join`（2節）、`conv` の `C.Fix`（3節）、`program`（グローバルの受け取り） |
-| `src/flat.ml` | `Closure`/`Capture`/`Fix`/`code`（1・3節）、`program_to_string`（ダンプ） |
-| `src/machine.ml` | `enter`（クロージャに入る）、`F.Fix`（3節）、`eval` の `F.Closure`/`F.Capture` |
-| `src/core.ml` | `free_vars`/`free_rhs`/`free_tail`（2節）。自由変数は IR のものなので IR の側に置いてあります |
+| `src/interpreter/closure.ml` | `make_closure`（1節）、`conv_closure`（ラムダを閉じる唯一の場所）、`conv` の `C.Join`（2節）、`conv` の `C.Fix`（3節）、`program`（グローバルの受け取り） |
+| `src/interpreter/flat.ml` | `Closure`/`Capture`/`Fix`/`code`（1・3節）、`program_to_string`（ダンプ） |
+| `src/interpreter/machine.ml` | `enter`（クロージャに入る）、`F.Fix`（3節）、`eval` の `F.Closure`/`F.Capture` |
+| `src/interpreter/core.ml` | `free_vars`/`free_rhs`/`free_tail`（2節）。自由変数は IR のものなので IR の側に置いてあります |
 
 ---
 

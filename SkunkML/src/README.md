@@ -267,10 +267,10 @@ else a` is `int * int -> int`, exactly as in SML.
 | `types.ml` | 516 | types, levels, destructive unification, equality and order, schemes |
 | `sem.ml` | 512 | environments, semantic signatures, matching, realisation |
 | `core.ml` | 294 | typed Core, its free variables, and its printer |
-| `elab.ml` | 1007 | inference and normalisation in one pass; modules become records |
+| `elab.ml` | 1010 | inference and normalisation in one pass; modules become records |
 | `patmat.ml` | 335 | pattern matrices, decision trees, exhaustiveness |
-| `flat.ml` | 153 | the flat IR, and its printer |
-| `closure.ml` | 113 | code blocks, captures, and what is deliberately not captured |
+| `flat.ml` | 152 | the flat IR, and its printer |
+| `closure.ml` | 116 | code blocks, captures, and what is deliberately not captured |
 | `machine.ml` | 498 | the CESK machine and the primitives |
 | `basis.ml` | 162 | the initial environment, and the prelude source |
 | `skunk.ml` | 148 | the command line |
@@ -282,7 +282,7 @@ And the compiler, in `src/compiler/`:
 | `ssa.ml` | 269 | value SSA: values, blocks, phis, and the printer |
 | `build.ml` | 232 | Flat to SSA. A join point is a block with phi-functions |
 | `dom.ml` | 241 | dominators, dominance frontiers, and the checks they are for |
-| `skunkc.ml` | 122 | the command line |
+| `skunkc.ml` | 129 | the command line |
 
 ## Layout
 

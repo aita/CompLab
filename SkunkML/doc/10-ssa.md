@@ -47,6 +47,9 @@ let inline = fn a1.21 : bool =>          func inline$3:
 指で追えます。`join k (v)` が `b3` と `v4 = phi […]` に、`jump k ("yes")` が
 「b2 から b3 への辺」と「φ の第1引数」に。木が graph になっただけです。
 
+ダンプの `preds` は**先行ブロック**、つまりそのブロックへ来る辺の出どころで、
+φ の引数はこの並びと位置で対応します。
+
 `;` のあとは Flat の束縛名で、読むためのコメントです。SSA の側に名前はありません。
 
 ## 2. 値 SSA — 名前がない
@@ -106,7 +109,7 @@ type state = {
 |---|---|
 | `let x = rhs` | 値を1つ作って現在のブロックに積み、`names` に `x ↦ その値` |
 | `join j (p…) = body in rest` | 新しいブロックを作り、`p` ごとに φ を置いて `joins` に登録 |
-| `jump j (a…)` | `j` のブロックの述語に現在のブロックを足し、各 φ に引数を1つ足し、終端子を `Jump` に |
+| `jump j (a…)` | `j` のブロックの先行ブロックに現在のブロックを足し、各 φ に引数を1つ足し、終端子を `Jump` に |
 | `switch a of …` | 枝ごとに新しいブロックを作ってそこへ歩き、終端子を `Switch` に |
 | `ret` / `tailcall` / `fail` | 終端子を置いて、そのブロックは終わり |
 
@@ -128,7 +131,7 @@ type state = {
 歩けば、本体に着いたときには φ の引数がもう揃っています。**φ を埋め直す2周目が
 要らない**のはこの順序のおかげです。
 
-引数は述語と**位置で**対応します。両方を同時に足すので、ずれようがありません。
+引数は先行ブロックと**位置で**対応します。両方を同時に足すので、ずれようがありません。
 
 ```ocaml
 let goto (from : S.block) (target : S.block) args =
@@ -185,8 +188,8 @@ func parity$1:
 そこで**確保と充填を2つの操作に割ります**。まず両方の閉包を作り、それから中身を書く。
 `mkclos` は大きさだけ決まった閉包を作る演算で、`setcap` は結果を持たない文です。
 
-[7章](07-closure.md)の3節で機械が実行時にやっていたことと同じですが、あちらは
-「そう書くと楽」で、こちらは**形がそれを強制します**。SSA の性質が実装を決めた、
+[7章](07-closure.md)の3節で機械が実行時にやっていたことと同じですが、機械のほうは
+「そう書くと楽」で、ここでは**形がそれを強制します**。SSA の性質が実装を決めた、
 数少ない場所です。
 
 ### 最後に番号を振り直す
@@ -223,7 +226,7 @@ let renumber (f : func) =
 - Richard Kelsey, "A Correspondence between Continuation Passing Style and
   Static Single Assignment Form", *IR* 1995.
 - Andrew Appel, "SSA is Functional Programming", *SIGPLAN Notices* 33(4), 1998.
-  この章の主張の出典。φ は関数の引数である。
+  この章の主張の出典。φ は関数の引数だという話。
 - Fabrice Rastello, Florent Bouchez Tichadou (eds.), *SSA-based Compiler
   Design*, Springer, 2022.
 

@@ -49,7 +49,7 @@ sigs : (string * (Ast.sigexp * env)) list;
 `ORD` を2回使えば hole は2組できます。これは手抜きに見えますが、「使うたびに新しい
 hole」が要件そのものなので、覚えたシグネチャを毎回作り直す機構（refresh）を書かずに
 済ませる方法として素直です。refresh がどうしても要るのはファンクタ適用の1箇所だけで、
-それはこのファイルの末尾にあります（5節）。
+それは5節です。
 
 ## 2. 照合と realisation
 
@@ -90,9 +90,9 @@ errors/toospecific.sk:1:42: signature error: f is int -> int here,
   but the signature asks for 'a -> 'a
 ```
 
-これは[2章](02-hm.md)の4節で注釈の型変数に対してやっていることと同じ手です。違うのは、
-あちらは宣言のあいだだけ rigid にして最後に戻すのに対し、こちらは照合のあいだだけ
-rigid にして捨てるところです。
+これは[2章](02-hm.md)の5節で注釈の型変数に対してやっていることと同じ手です。違いは
+rigid のままにしておく期間で、注釈のほうは宣言が終わるまで持って最後に変数へ戻し、
+照合のほうは照合が終わったら捨てます。
 
 ## 3. `:` と `:>` の唯一の違い
 
@@ -165,7 +165,7 @@ structure B = Wrap (struct type t = int end)
 `int` と `bool` が混ざります。
 
 本体を1回しか検査しないと決めた以上、本体が作った型構成子を適用ごとに作り直す必要が
-あります。これがこのファイルで唯一 refresh が要る場所です。
+あります。`sem.ml` で refresh が要るのはここだけです。
 
 どれが「本体が作った型」かは、型構成子を作った順に記録しておいて区切ります。
 
@@ -241,8 +241,8 @@ $ skunk --trace examples/modules.sk
 
 同じ結論に別の道で着く方法もあります。**defunctorization** — ファンクタを適用ごとに
 本体ごと複製して、名前解決だけで済ませてしまうやり方で、MLton がそれをやっています。
-あちらはモジュールが実行時表現を一切持たず、こちらは本体が1回しか検査されません。
-どちらを取るかは、だいたい「分割コンパイルがあるか」で決まります。
+複製する側はモジュールが実行時表現を一切持たず、ここでやっている側は本体が1回しか
+検査されません。どちらを取るかは、だいたい「分割コンパイルがあるか」で決まります。
 
 ## していないこと
 
@@ -275,9 +275,9 @@ $ skunk --trace examples/modules.sk
 
 | ファイル | 何が |
 |---|---|
-| `src/sem.ml` | `sg`/`tyfun`/`fct`/`env` の定義（1節）、`elab_sig`・`elab_spec`（1・4節）、`match_sig`・`more_general`・`match_datatype`（2節）、`refresh`・`instantiate_functor`（5節）、`open_sg`・`map_sg` |
-| `src/elab.ml` | `elab_str`（3・7節）、`elab_topdec` の `TStr`/`TFun`（4・5・6節）、`qualify`（6節）、`struct_ty`（レコードとしての構造の型） |
-| `src/types.ml` | `tycon.tid`（1節）、`copy`/`realise`（2・5節）、`mark`/`since`（5節） |
+| `src/interpreter/sem.ml` | `sg`/`tyfun`/`fct`/`env` の定義（1節）、`elab_sig`・`elab_spec`（1・4節）、`match_sig`・`more_general`・`match_datatype`（2節）、`refresh`・`instantiate_functor`（5節）、`open_sg`・`map_sg` |
+| `src/interpreter/elab.ml` | `elab_str`（3・7節）、`elab_topdec` の `TStr`/`TFun`（4・5・6節）、`qualify`（6節）、`struct_ty`（レコードとしての構造の型） |
+| `src/interpreter/types.ml` | `tycon.tid`（1節）、`copy`/`realise`（2・5節）、`mark`/`since`（5節） |
 
 ---
 

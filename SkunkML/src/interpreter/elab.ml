@@ -294,12 +294,15 @@ let rec infer env (e : Ast.exp) (d : dest) : ty * C.block =
       (match dup_label fs with
       | Some l -> Loc.type_error loc "the field %s appears twice" l
       | None -> ());
-      let fs = sort_fields fs in
+      (* The fields are evaluated in the order they were written and sorted
+         afterwards, so that `{ b = f (), a = g () }` runs `f` first.  Sorting
+         before converting would have run them in label order, which is a
+         surprise the Definition permits and nobody wants. *)
       let ts = List.map (fun _ -> newvar ()) fs in
-      let ty = Trecord (List.map2 (fun (l, _) t -> (l, t)) fs ts) in
+      let ty = Trecord (sort_fields (List.map2 (fun (l, _) t -> (l, t)) fs ts)) in
       ( ty,
         atoms env (List.map snd fs) ts (fun ats ->
-            emit ty (C.Record (List.map2 (fun (l, _) a -> (l, a)) fs ats)) d) )
+            emit ty (C.Record (sort_fields (List.map2 (fun (l, _) a -> (l, a)) fs ats))) d) )
   | Ast.EList es ->
       (* `[a, b]` is `a :: b :: nil`, built from the tail forwards. *)
       let elt = newvar () in

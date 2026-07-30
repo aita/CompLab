@@ -20,7 +20,7 @@
 type atom = AVar of string | AInt of int | AStr of string | AUnit
 
 type rhs = Atom of atom | Lam of ... | Call of atom * atom | Prim of string * atom list
-         | Tuple of atom list | Record of ... | Con of ... | Proj of ... | Field of ... | Payload of ...
+         | Record of ... | Con of ... | Field of ... | Payload of ...
 
 and block = Let of string * Types.ty * rhs * block
           | Fix of (string * Types.ty * rhs) list * block
@@ -48,7 +48,7 @@ and tail = Ret of atom | TCall of atom * atom
 
 名前が `LetRec` でないのも理由があります。**この言語に `let rec` という構文はありません。**
 あるのは `val`（再帰しない）と `fun`（する）だけで、`fun` は SML の綴りでは常に再帰的です。
-SML/NJ は再帰関数の組を `FIX` と呼んでいて、こちらもそれに倣いました。
+SML/NJ は再帰関数の組を `FIX` と呼んでいます。ここでも同じ名前にしました。
 
 ## 2. destination 渡しで、推論と正規化を同時にやる
 
@@ -218,12 +218,12 @@ ret t
 **join point という区別も要らなくなります** — [6章](06-join.md)が2つの理由で必要とした
 ものは、CPS では単に「脱出しない継続」であって、他の関数と同じ形をしています。代償は
 逆側に出ます。どの継続がスタックに載せられるかを後で決め直さなければならず、それが
-あちらのクロージャ変換の主題になります。
+CPS 側のクロージャ変換の主題になります。
 
 **MLton は全プログラムです。** ファンクタを適用ごとに複製して消し（defunctorization、
 [3章](03-modules.md)の参考文献）、多相を単相化してから、一階の SSA に落とします。SSA の
-基本ブロックは引数を持ち、合流点の引数は φ 節点です — これは join point の別の語彙で、
-[6章](06-join.md)がそう書いています。
+合流点の引数は φ 節点で、これは join point の別の語彙です — この処理系も
+[10章](10-ssa.md)で同じところへ行き着きますが、そちらは ANF を捨てずに行きます。
 
 **Definition には中間表現がありません。** 意味論は構文に直接与えられていて、
 `val rec` は環境の knot として定義されます。
@@ -247,7 +247,7 @@ ret t
 - **最適化がありません。** インライン展開も、共通部分式除去も、`Proj (Tuple ...)` の
   簡約もしません。ダンプに `let p.57 = #1 a1.19` と `let a = p.57` が並んで出るのは
   そのためで、消せますが消すと「パターン変数がどこから来たか」が読めなくなります。
-- **既知関数の直接呼び出しがありません。** `letrec` で束縛した関数を飽和して呼んでも、
+- **既知関数の直接呼び出しがありません。** `Fix` で束縛した関数を飽和して呼んでも、
   クロージャを経由します（[7章](07-closure.md)）。
 - **`Case` の腕の型は揃っているだけで、結果の型は Core に書かれていません。**
   必要になるのは join point の引数型だけで、それは `with_join` が持っています。
@@ -273,8 +273,8 @@ ret t
 
 | ファイル | 何が |
 |---|---|
-| `src/core.ml` | IR の定義（1節）、`fresh_name`（5節）、`item`（6節）、`print_block` 系（ダンプ） |
-| `src/elab.ml` | `dest`/`ret`/`emit`（2節）、`infer`（2節）、`elab_fun`（3節）、`elab_dec`（2・6節）、`program`（6節） |
+| `src/interpreter/core.ml` | IR の定義（1節）、`fresh_name`（5節）、`item`（6節）、`print_block` 系（ダンプ） |
+| `src/interpreter/elab.ml` | `dest`/`ret`/`emit`（2節）、`infer`（2節）、`elab_fun`（3節）、`elab_dec`（2・6節）、`program`（6節） |
 
 ---
 
