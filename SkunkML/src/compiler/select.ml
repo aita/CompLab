@@ -69,13 +69,27 @@ let mem ?base ?index ?(scale = 1) ?(disp = 0) ?sym () = M.Mem { base; index; sca
 let glob name = mem ~sym:name ()
 let field r i = mem ~base:r ~disp:(8 * i) ()
 
+(* An immediate and a displacement are four bytes wide, and a tagged integer is
+   twice the number that was written -- so a constant stops fitting at 2^30,
+   less than a thousandth of the way to where an `int` stops.  [Asm.fits32] is
+   the same test the assembler makes before it refuses to truncate a field;
+   asking it *here* is what turns "cannot encode that" into "choose another
+   tile", and the other tile is always the same one: a register, loaded by the
+   ten-byte movabs that [M.Mov (Reg, Imm)] widens to by itself. *)
+let fits_tagged n = Asm.fits32 ((2 * n) + 1)
+
 (* ---- the cost function --------------------------------------------------- *)
 
 (* A value is a tile root -- it must end up in a register of its own -- unless
    it has exactly one use, that use is in the same block, and it is one of the
    operations an operand can absorb. *)
 let absorbable (v : S.value) =
-  match v.S.op with S.Field _ | S.Global _ | S.Const (S.CInt _) -> true | _ -> false
+  match v.S.op with
+  | S.Field _ | S.Global _ -> true
+  (* A constant no operand field can hold is a tile root like anything else: it
+     gets a register of its own, and consumers read it from there. *)
+  | S.Const (S.CInt n) -> fits_tagged n
+  | _ -> false
 
 let foldable ctx (v : S.value) =
   absorbable v && v.S.uses = 1
@@ -99,7 +113,7 @@ let rec cost ctx (v : S.value) nt =
 
 and compute ctx v nt =
   match nt with
-  | Nimm -> ( match v.S.op with S.Const (S.CInt _) -> 0 | _ -> inf)
+  | Nimm -> ( match v.S.op with S.Const (S.CInt n) when fits_tagged n -> 0 | _ -> inf)
   | Nmem ->
       if not (foldable ctx v) then inf
       else (
@@ -199,24 +213,36 @@ let prim_routine = function
    The constant cases are the reason to tile at all: `x + 1` is a single
    instruction that touches one register and writes another, and never has to
    untag anything. *)
+
+(* The number a lea would put in its displacement, scaled the way that tile
+   needs it -- [2n] to add a tagged constant, [-2n] to subtract one -- or [None]
+   when four bytes will not hold it.  The scaling is why the check is here and
+   not left to [cost ... Nimm]: `x - ~1073741824` has a tagged constant that
+   fits and a displacement that does not, so the two questions have different
+   answers at the edge. *)
+let displacement (b : S.value) k =
+  match b.S.op with
+  | S.Const (S.CInt n) when Asm.fits32 (k * n) -> Some (k * n)
+  | _ -> None
+
 let arith ctx op (args : S.value list) dst =
   match (op, args) with
-  | "+", [ a; b ] when cost ctx b Nimm = 0 ->
-      let n = match b.S.op with S.Const (S.CInt n) -> n | _ -> assert false in
-      put ctx (M.Lea (dst, mem ~base:(in_reg ctx a) ~disp:(2 * n) ()))
-  | "+", [ a; b ] ->
-      let ra = in_reg ctx a in
-      put ctx (M.Mov (reg dst, reg ra));
-      put ctx (M.Alu ("add", reg dst, any ctx b));
-      put ctx (M.Alu ("sub", reg dst, imm 1))
-  | "-", [ a; b ] when cost ctx b Nimm = 0 ->
-      let n = match b.S.op with S.Const (S.CInt n) -> n | _ -> assert false in
-      put ctx (M.Lea (dst, mem ~base:(in_reg ctx a) ~disp:(-2 * n) ()))
-  | "-", [ a; b ] ->
-      let ra = in_reg ctx a in
-      put ctx (M.Mov (reg dst, reg ra));
-      put ctx (M.Alu ("sub", reg dst, any ctx b));
-      put ctx (M.Alu ("add", reg dst, imm 1))
+  | "+", [ a; b ] -> (
+      match displacement b 2 with
+      | Some d -> put ctx (M.Lea (dst, mem ~base:(in_reg ctx a) ~disp:d ()))
+      | None ->
+          let ra = in_reg ctx a in
+          put ctx (M.Mov (reg dst, reg ra));
+          put ctx (M.Alu ("add", reg dst, any ctx b));
+          put ctx (M.Alu ("sub", reg dst, imm 1)))
+  | "-", [ a; b ] -> (
+      match displacement b (-2) with
+      | Some d -> put ctx (M.Lea (dst, mem ~base:(in_reg ctx a) ~disp:d ()))
+      | None ->
+          let ra = in_reg ctx a in
+          put ctx (M.Mov (reg dst, reg ra));
+          put ctx (M.Alu ("sub", reg dst, any ctx b));
+          put ctx (M.Alu ("add", reg dst, imm 1)))
   | "*", [ a; b ] ->
       let ra = in_reg ctx a in
       let t = fresh ctx in
@@ -308,8 +334,8 @@ let switch ctx (bid, preds) phis (v : S.value) arms dflt fail =
     List.map
       (fun (k, (b : S.block)) ->
         match k with
-        | Core.Kint n -> (`Int (tagged n), b)
-        | Core.Ktag c -> (`Int (imm c.Types.cidx), b)
+        | Core.Kint n -> (`Int ((2 * n) + 1), b)
+        | Core.Ktag c -> (`Int c.Types.cidx, b)
         | Core.Kstr s -> (`Str s, b))
       arms
   in
@@ -340,6 +366,17 @@ let switch ctx (bid, preds) phis (v : S.value) arms dflt fail =
         (match key with
         | `Int k ->
             let s = match scrutinee with `Tag t -> reg t | `Val r -> reg r in
+            (* cmp's immediate is four bytes like every other, so a key wider
+               than that is compared out of a register.  Tags are small; it is
+               `case n of 3000000000 => ...` that gets here. *)
+            let k =
+              if Asm.fits32 k then imm k
+              else begin
+                let t = fresh ctx in
+                put ctx (M.Mov (reg t, imm k));
+                reg t
+              end
+            in
             put ctx (M.Cmp (s, k))
         | `Str s ->
             let sv = match scrutinee with `Tag t -> reg t | `Val r -> reg r in

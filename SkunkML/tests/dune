@@ -414,6 +414,38 @@
  (action
   (diff nullary.expected nullary.bin.out)))
 
+; Constants wider than an operand field.  An immediate and a displacement are
+; four bytes, and an integer is twice what was written, so a constant stops
+; fitting at 2^30 and selection has to reach for a register.  The numbers in
+; wide.sk sit either side of that edge; the interpreter never had the question,
+; so its output is the answer both halves are diffed against.
+
+(rule
+ (with-stdout-to
+  wide.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:wide.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff wide.expected wide.interp.out)))
+
+(rule
+ (targets wide.bin)
+ (deps wide.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o wide.bin wide.sk)))
+
+(rule
+ (with-stdout-to
+  wide.bin.out
+  (run %{dep:wide.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff wide.expected wide.bin.out)))
+
 ; The optimiser.  opt.sk has one redundancy per line, each of a kind only one
 ; pass can see; the golden file is the SSA that comes out the far side.  Read it
 ; next to `--no-opt --dump-ssa` on the same file to see what each pass did.

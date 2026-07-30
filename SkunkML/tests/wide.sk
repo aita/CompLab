@@ -1,0 +1,64 @@
+(* Constants too wide for an operand field.
+
+   An integer is 2n + 1, and an immediate or a displacement is four bytes, so a
+   constant stops fitting at 2^30 -- a thousandth of the way to where an `int`
+   stops.  Every number here sits either side of that edge, in every tile that
+   takes a constant, so selection has to notice and reach for a register instead.
+   The interpreter never had the question, which is why this file is a diff
+   against it. *)
+
+val edge = 1073741824 (* 2^30: twice this no longer fits *)
+val under = 1073741823
+val over = 1073741825
+
+(* The lea that adds a tagged constant, on both sides of the edge. *)
+fun addUnder x = x + 1073741823
+fun addEdge x = x + 1073741824
+fun addWide x = x + 3000000000
+
+val a1 = addUnder 5
+val a2 = addEdge 5
+val a3 = addWide 5
+
+(* And the one that subtracts it.  ~2^30 is the asymmetric case: the tagged
+   constant fits in four bytes and twice it does not. *)
+fun subUnder x = x - 1073741823
+fun subEdge x = x - 1073741824
+fun subWide x = x - 3000000000
+fun addNegEdge x = x + ~1073741824
+fun subNegEdge x = x - ~1073741824
+
+val s1 = subUnder 5
+val s2 = subEdge 5
+val s3 = subWide 5
+val s4 = addNegEdge 5
+val s5 = subNegEdge 5
+
+(* A wide constant as an ordinary operand: multiplication untags it rather than
+   folding it into an address. *)
+fun timesWide x = x * 3000000000
+val m1 = timesWide 7
+val m2 = 3000000000 * 3
+
+(* A comparison key wider than the immediate cmp can hold. *)
+fun classify x =
+  case x of
+      3000000000 => "wide"
+    | 1073741824 => "edge"
+    | 1073741823 => "under"
+    | _ => "other"
+
+val c1 = classify 3000000000
+val c2 = classify 1073741824
+val c3 = classify 1073741823
+val c4 = classify 0
+
+(* Wide constants have to survive being printed, compared and carried round a
+   loop as well as being added. *)
+fun countTo (i, stop, acc) = if i >= stop then acc else countTo (i + 1, stop, acc + 3000000000)
+val loop = countTo (0, 3, 0)
+
+val big = 1152921504606846976 (* 2^60, far past what four bytes hold *)
+val small = ~1152921504606846976
+val ordered = (small < ~1073741824, ~1073741824 < 0, 0 < 1073741824, 1073741824 < big)
+val roundtrip = Int.toString 3000000000 ^ " " ^ Int.toString (~3000000000)
