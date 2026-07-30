@@ -46,6 +46,7 @@ let link ?(dynamic = false) ~path ~(text : A.t) ~(data : A.t) ~entry () =
         | A.Rel32 ->
             let p = sec_addr + r.A.at in
             patch b r.A.at (s + r.A.addend - p) 4
+        | A.Abs32 -> patch b r.A.at (s + r.A.addend) 4
         | A.Abs64 -> patch b r.A.at (s + r.A.addend) 8)
       sec.A.relocs;
     Bytes.to_string b

@@ -25,7 +25,7 @@
 
 module M = Mach
 
-type kind = Rel32 | Abs64
+type kind = Rel32 | Abs32 | Abs64
 
 type reloc = { at : int; kind : kind; sym : string; addend : int }
 
@@ -67,7 +67,7 @@ let align st n =
    anything that has bytes after the field. *)
 let reloc st kind sym addend =
   st.relocs <- { at = here st; kind; sym; addend } :: st.relocs;
-  match kind with Rel32 -> word32 st 0 | Abs64 -> word64 st 0
+  match kind with Rel32 | Abs32 -> word32 st 0 | Abs64 -> word64 st 0
 
 let dq_sym st sym = reloc st Abs64 sym 0
 let zeros st n = for _ = 1 to n do byte st 0 done

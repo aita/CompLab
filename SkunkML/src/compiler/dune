@@ -12,6 +12,27 @@
  (flags
   (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
 
+; The runtime is C, compiled freestanding -- no libc, no start files, and no
+; undefined symbols except the ones the compiler itself emits -- and then carried
+; inside the compiler as a string, so that `skunkc` needs nothing on disk beside
+; itself.  `obj.ml` reads it back and links it.
+
+(rule
+ (targets runtime.o)
+ (deps ../runtime/runtime.c)
+ (action
+  (run cc -c -O1 -nostdlib -ffreestanding -fno-pic -fno-pie -mcmodel=small
+    -fno-asynchronous-unwind-tables -fno-stack-protector -fno-builtin -o runtime.o
+    ../runtime/runtime.c)))
+
+(rule
+ (targets runtime_obj.ml)
+ (deps runtime.o ../../tools/embed.ml)
+ (action
+  (with-stdout-to
+   runtime_obj.ml
+   (run ocaml ../../tools/embed.ml runtime.o))))
+
 (executable
  (name skunkc)
  (modules skunkc)

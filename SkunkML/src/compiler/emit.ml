@@ -118,10 +118,14 @@ let program ?(dynamic = false) (p : M.prog) ~path =
   List.iter (func text) p.M.funcs;
   program_entry text p;
   Stubs.text text;
-  Rt.text ~dynamic text;
+  Rt.text text;
   Rt.data_start data;
   Statics.write data;
   Rt.data data;
+  (* The runtime, read back out of the compiler and linked in.  Its data lands
+     inside the range the collector scans, which is what we want: one of its
+     globals holds the unit value. *)
+  Obj.load ~text ~data Runtime_obj.bytes;
   (* The dynamic tables go inside the range the collector scans, which is
      harmless: it is all words that either point outside the heap or are not
      8-aligned, and every candidate is checked anyway. *)
