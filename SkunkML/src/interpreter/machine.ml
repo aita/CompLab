@@ -89,10 +89,29 @@ let int_str n =
   let s = string_of_int n in
   if s.[0] = '-' then "~" ^ String.sub s 1 (String.length s - 1) else s
 
+(* And how a string is spelled: the four escapes the lexer reads, and every
+   other byte through untouched.  OCaml's `%S` also turns a byte outside
+   printable ASCII into `\ddd`, which is an escape this language cannot read
+   back and which the runtime's `show` does not produce. *)
+let str_str s =
+  let b = Buffer.create (String.length s + 2) in
+  Buffer.add_char b '"';
+  String.iter
+    (fun c ->
+      match c with
+      | '"' -> Buffer.add_string b "\\\""
+      | '\\' -> Buffer.add_string b "\\\\"
+      | '\n' -> Buffer.add_string b "\\n"
+      | '\t' -> Buffer.add_string b "\\t"
+      | c -> Buffer.add_char b c)
+    s;
+  Buffer.add_char b '"';
+  Buffer.contents b
+
 let rec show w v =
   match v with
   | VInt n -> int_str n
-  | VStr s -> Printf.sprintf "%S" s
+  | VStr s -> str_str s
   | VUnit -> "()"
   | VRecord [] -> "()"
   | VRecord fs when Types.tuple_shaped fs ->

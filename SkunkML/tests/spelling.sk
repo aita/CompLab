@@ -20,3 +20,15 @@ val leastNeg = ~least
 val zero = 0
 val zeroStr = Int.toString zero
 val negZero = 0 - 0
+
+(* The four escapes, and a byte that is not one of them: `show` escapes exactly
+   what the lexer reads back and passes the rest through, so a string written in
+   UTF-8 comes out as it went in. *)
+val escapes = "\"\\\n\t"
+val escapeSize = String.size escapes
+val plain = "hello"
+val nothing = ""
+
+val wide = "café → 🦨"
+val wideSize = String.size wide
+val () = print (wide ^ "\n")

@@ -7,3 +7,10 @@ val leastNeg : int = ~4611686018427387904
 val zero : int = 0
 val zeroStr : string = "0"
 val negZero : int = 0
+val escapes : string = "\"\\\n\t"
+val escapeSize : int = 4
+val plain : string = "hello"
+val nothing : string = ""
+val wide : string = "café → 🦨"
+val wideSize : int = 14
+café → 🦨
