@@ -22,6 +22,10 @@
 
 [6章](06-join.md)の `inline` です。左が Core、右が SSA。
 
+> 横に並べるために、**右の `;` の桁だけ詰めてあります**。`ssa.ml` の printer は
+> コメントを38桁目に置くので、`--dump-ssa` をそのまま見ると桁がもっと右です。
+> 中身はどちらも一字一句そのままです。
+
 ```sml
 fun inline b = "it is " ^ (if b then "yes" else "no")
 ```
