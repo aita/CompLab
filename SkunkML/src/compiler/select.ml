@@ -337,6 +337,68 @@ let multiply ctx r c dst =
       put ctx (M.Alu ("imul", reg dst, imm c));
       put ctx (M.Alu ("sub", reg dst, imm (c - 1)))
 
+(* Dividing by a constant power of two, which is the rewrite that is easiest to
+   get wrong, so here is the derivation.
+
+   `div` and `mod` in this language **truncate towards zero**: `~9 div 2` is ~4
+   and `~9 mod 2` is ~1.  That is not what SML says -- the Definition floors --
+   but it is what both halves do, because the interpreter is OCaml's `/` and
+   `mod` and `skunk_div` is C's `/` and `%`, and the two back ends agreeing is
+   the property this file is not allowed to break.  An arithmetic shift floors,
+   so a bare `sar` is the wrong answer for every negative dividend the divisor
+   does not divide, and the whole of the work below is the bias that fixes it.
+
+   Write T = 2x + 1 and d = 2^k.  Two facts:
+
+     T >> (k + 1)  =  floor (x / d)    since 2x + 1 = q*2^(k+1) + (2r + 1),
+                                       and 0 <= 2r + 1 < 2^(k+1)
+     trunc (x / d) =  floor ((x + b) / d)    with b = d - 1 when x < 0, else 0
+
+   and 2(x + b) + 1 = T + 2b, so the bias can be added to the *tagged* number
+   and nothing has to be untagged at all.  Shifting by k rather than k + 1
+   leaves 2q + e with e in {0, 1}, and `or $1` drops the e and writes the tag in
+   the same instruction.  For the remainder the same biased number gives
+
+     tagged (x mod d)  =  ((T + 2b) & (2^(k+1) - 1)) - 2b
+
+   because masking 2y + 1 to k + 1 bits is masking y to k bits and keeping the
+   tag.  2b itself is `sar $63` -- all ones exactly when x < 0, since 2x + 1 has
+   the sign of x -- masked down to 2^(k+1) - 2.
+
+   Six instructions each, against four and a call and an `idiv`.  The masks are
+   four-byte immediates, so this stops at 2^30; a divisor that is not a positive
+   power of two, or is too wide, stays a call, and so does a negative one --
+   `div` by ~2^k is the shift with a negation after it, but no program measured
+   here writes one. *)
+let divide ctx op r k dst =
+  if k = 0 then
+    (* Dividing by one is the number, and the remainder is zero -- tagged 1. *)
+    put ctx (M.Mov (reg dst, if op = "div" then reg r else imm 1))
+  else begin
+    let s = fresh ctx in
+    let bias = (1 lsl (k + 1)) - 2 in
+    put ctx (M.Mov (reg s, reg r));
+    put ctx (M.Sar (reg s, 63));
+    put ctx (M.Alu ("and", reg s, imm bias));
+    put ctx (M.Lea (dst, mem ~base:r ~index:s ~scale:1 ()));
+    if op = "div" then begin
+      put ctx (M.Sar (reg dst, k));
+      put ctx (M.Alu ("or", reg dst, imm 1))
+    end
+    else begin
+      put ctx (M.Alu ("and", reg dst, imm (bias + 1)));
+      put ctx (M.Alu ("sub", reg dst, reg s))
+    end
+  end
+
+(* The divisor a shift can stand in for: a positive power of two whose masks are
+   four bytes.  Zero is not one of them, which is what keeps `x div 0` a call
+   and so keeps its message the runtime's. *)
+let shift_divisor ctx (b : S.value) =
+  match literal ctx b with
+  | Some n when is_pow2 n && log2 0 n <= 30 -> Some (log2 0 n)
+  | _ -> None
+
 let arith ctx op (args : S.value list) dst =
   match (op, args) with
   | "+", [ a; b ] -> (
@@ -367,6 +429,11 @@ let arith ctx op (args : S.value list) dst =
           put ctx (M.Sar (reg dst, 1));
           put ctx (M.Alu ("imul", reg dst, reg t));
           put ctx (M.Alu ("or", reg dst, imm 1)))
+  | ("div" | "mod"), [ a; b ] ->
+      (* Only reached with a divisor the shift tile takes: [value] asks
+         [shift_divisor] before it reaches for the runtime routine. *)
+      let k = match shift_divisor ctx b with Some k -> k | None -> assert false in
+      divide ctx op (in_reg ctx a) k dst
   | "~", [ a ] ->
       let ra = in_reg ctx a in
       put ctx (M.Mov (reg dst, imm 2));
@@ -486,6 +553,11 @@ let value ctx (v : S.value) =
         let k = bounds ctx "skunk_array_update" [ reg ra; reg ri; reg rx ] ra ri in
         put ctx (M.Mov (element ra k, reg rx));
         if v.S.uses > 0 then put ctx (M.Mov (reg dst, glob "skunk_the_unit"))
+    (* A divisor the shift tile takes never reaches [prim_routine]; every other
+       one still does, including zero, so `x div 0` fails with the runtime's
+       message rather than a second copy of it. *)
+    | S.Prim (("div" | "mod") as p), [ a; b ] when shift_divisor ctx b <> None ->
+        arith ctx p [ a; b ] dst
     | S.Prim p, args -> (
         match prim_routine p with
         | Some sym ->

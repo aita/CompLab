@@ -56,6 +56,7 @@ val mod30 : int * int * int * int * int * int = (~1, 0, ~1073741823, 0, 10737418
 val div31 : int * int * int * int * int * int = (0, 0, 0, 0, 0, 0)
 val mod31 : int * int * int * int * int * int = (~1073741825, ~1073741824, ~1073741823, 0, 1073741823, 1073741824)
 val div1 : int * int * int * int * int * int * int * int * int = (~9, ~8, ~7, ~1, 0, 1, 7, 8, 9)
+val mod1 : int * int * int * int * int * int * int * int * int = (0, 0, 0, 0, 0, 0, 0, 0, 0)
 val div3 : int * int * int * int * int * int * int * int * int = (~3, ~2, ~2, 0, 0, 0, 2, 2, 3)
 val mod3 : int * int * int * int * int * int * int * int * int = (0, ~2, ~1, ~1, 0, 1, 1, 2, 0)
 val divNeg2 : int * int * int * int * int * int * int * int * int = (4, 4, 3, 0, 0, 0, ~3, ~4, ~4)

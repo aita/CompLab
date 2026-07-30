@@ -108,9 +108,13 @@ val mod30 = bigSpan (fn x => x mod 1073741824)
 val div31 = bigSpan (fn x => x div 2147483648)
 val mod31 = bigSpan (fn x => x mod 2147483648)
 
+(* One is 2^0: the bias is zero, so the quotient is the number and the
+   remainder is zero, and neither costs more than the move. *)
+val div1 = span (fn x => x div 1)
+val mod1 = span (fn x => x mod 1)
+
 (* And the divisors that are not powers of two, or not positive, which is where
    the runtime routine still is. *)
-val div1 = span (fn x => x div 1)
 val div3 = span (fn x => x div 3)
 val mod3 = span (fn x => x mod 3)
 val divNeg2 = span (fn x => x div ~2)
