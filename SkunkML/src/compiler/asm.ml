@@ -51,6 +51,18 @@ let word64 st n =
     byte st ((n asr (8 * i)) land 0xff)
   done
 
+(* An immediate and a displacement are four bytes, and [word32] would take the
+   low four of a wider number without saying so -- so `x + 3000000000` would
+   assemble, run, and print the wrong answer.  A silently truncated constant is
+   the worst thing an assembler can do, so a field that does not fit stops the
+   compiler here rather than letting the bytes out. *)
+let fits32 n = n >= -0x80000000 && n <= 0x7fffffff
+
+let word32_exact st what n =
+  if not (fits32 n) then
+    failwith (Printf.sprintf "asm: %s %d does not fit in 32 bits" what n);
+  word32 st n
+
 let label st name =
   if Hashtbl.mem st.syms name then
     failwith ("asm: duplicate label " ^ name);
@@ -133,9 +145,9 @@ let modrm st ~reg ~(rm : M.operand) =
                 byte st ((sc lsl 6) lor ((xn land 7) lsl 3) lor (bn land 7))
               end
               else byte st ((md lsl 6) lor (rf lsl 3) lor (bn land 7));
-              if base = None then word32 st disp
+              if base = None then word32_exact st "displacement" disp
               else if md = 1 then byte st disp
-              else if md = 2 then word32 st disp),
+              else if md = 2 then word32_exact st "displacement" disp),
             {
               no_rex with
               r = rbit;
@@ -214,7 +226,7 @@ let rec instr st (i : M.instr) =
       put_rex st rx;
       byte st 0xc7;
       put ();
-      word32 st n
+      word32_exact st "immediate" n
   | M.Mov (_, _) -> failwith "asm: mov needs a register on one side"
   | M.Lea (d, src) -> op_rm st [ 0x8d ] ~reg:(num d) ~rm:src
   | M.Alu ("imul", M.Reg d, src) -> op_rm st [ 0x0f; 0xaf ] ~reg:(num d) ~rm:src
@@ -230,7 +242,7 @@ let rec instr st (i : M.instr) =
       else begin
         byte st 0x81;
         put ();
-        word32 st n
+        word32_exact st "immediate" n
       end
   | M.Alu (op, dst, M.Reg s) ->
       let code, _ = alu_opcode op in
