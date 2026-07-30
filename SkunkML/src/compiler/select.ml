@@ -48,6 +48,10 @@ type ctx = {
   one_use : (int, int) Hashtbl.t;
   (* Phi predecessors that moved because a switch grew a comparison chain. *)
   mutable renames : (int * int * int) list; (* target block, old pred, new pred *)
+  (* Phis, resolved after every block has been selected.  A loop header's phi
+     takes an argument from the latch, which is a *later* block, so its virtual
+     register does not exist yet when the header is selected. *)
+  mutable pending : (int * (M.reg * (int * S.value) list)) list;
   mutable clos : M.reg; (* the running closure *)
   mutable param : M.reg; (* its argument *)
 }
@@ -369,21 +373,15 @@ let block ctx (b : S.block) =
   let here = start_block ctx b.S.bid (List.map (fun (p : S.block) -> p.S.bid) b.S.preds) in
   (* A phi's destination is a register of its own; its sources are the operands
      the predecessors will copy from. *)
-  let phis =
-    List.map
-      (fun (p : S.value) ->
-        let d = fresh ctx in
-        Hashtbl.replace ctx.regs p.S.vid d;
-        ( d,
-          List.map2
-            (fun (pred : S.block) (a : S.value) ->
-              ( pred.S.bid,
-                match a.S.op with
-                | S.Const (S.CInt n) -> tagged n
-                | _ -> reg (Hashtbl.find ctx.regs a.S.vid) ))
-            b.S.preds p.S.args ))
-      b.S.phis
-  in
+  List.iter
+    (fun (p : S.value) ->
+      let d = fresh ctx in
+      Hashtbl.replace ctx.regs p.S.vid d;
+      ctx.pending <-
+        (b.S.bid, (d, List.map2 (fun (pred : S.block) a -> (pred.S.bid, a)) b.S.preds p.S.args))
+        :: ctx.pending)
+    b.S.phis;
+  let phis = [] in
   List.iter (value ctx) b.S.values;
   match b.S.term with
   | S.Ret v ->
@@ -434,6 +432,7 @@ let func ?name (f : S.func) =
       regs = Hashtbl.create 64;
       one_use = use_map f;
       renames = [];
+      pending = [];
       clos = M.V 0;
       param = M.V 0;
     }
@@ -448,6 +447,25 @@ let func ?name (f : S.func) =
   in
   List.iter (block ctx) f.S.blocks;
   let blocks = List.rev ctx.blocks in
+  (* Now every value has its register, so the phis can be filled in. *)
+  List.iter
+    (fun (b : M.block) ->
+      b.M.phis <-
+        List.filter_map
+          (fun (bid, (d, srcs)) ->
+            if bid <> b.M.id then None
+            else
+              Some
+                ( d,
+                  List.map
+                    (fun (p, (a : S.value)) ->
+                      ( p,
+                        match a.S.op with
+                        | S.Const (S.CInt n) -> tagged n
+                        | _ -> reg (Hashtbl.find ctx.regs a.S.vid) ))
+                    srcs ))
+          (List.rev ctx.pending))
+    blocks;
   (* Fix up the phis whose predecessors moved into a comparison chain. *)
   List.iter
     (fun (b : M.block) ->

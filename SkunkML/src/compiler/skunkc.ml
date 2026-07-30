@@ -20,7 +20,8 @@ let usage () =
     \                    the linker and the ELF writer on their own\n\
     \      --dump-opt    print the SSA again, after optimisation\n\
     \      --dump-mach   print the amd64 graph after register allocation\n\
-    \      --no-opt      do not optimise: skip folding, sccp, gvn and dce\n\
+    \      --no-opt      do not optimise: skip folding, sccp, gvn, dce and\n\
+    \                    instruction scheduling\n\
     \  -o FILE           write the executable here (the default is a.out)\n\
     \      --dump-encoding\n\
     \                    print the bytes for the tricky addressing modes\n\
@@ -327,6 +328,7 @@ let () =
          if !dump_ssa then print_string (Ssa.prog_to_string prog);
          if !dump_dom then
            List.iter (fun f -> print_string (Dom.to_string f)) (Dom.all_funcs prog);
+         let whole = if !optimise then Loops.program whole else whole in
          if !optimise then begin
            Opt.program whole;
            (* Optimisation has to leave it in SSA: every use still dominated by
@@ -349,6 +351,7 @@ let () =
          let mach = Select.program whole in
          Outofssa.program mach;
          Regalloc.program mach;
+         if !optimise then Sched.program mach;
          if !dump_mach then print_string (Mach.to_string mach);
          Emit.program mach ~path:(Option.value !out ~default:"a.out")
        with Loc.Error { loc; where; msg } ->

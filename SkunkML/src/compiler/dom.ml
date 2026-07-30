@@ -185,22 +185,43 @@ let check (f : S.func) =
 (* Every block that carries phi-functions should be in the dominance frontier
    of each of its predecessors: that is where Cytron's algorithm would have put
    them, and the join points put them there without being asked. *)
+(* Cytron's rule places a phi at j when j is in the dominance frontier of a block
+   that *defines* the variable.  For a join point every predecessor defines it, so
+   the claim can be made about each one separately, and that is the strong form
+   worth checking: a join point puts its phis exactly where the algorithm would.
+
+   A loop header is the other case.  Its two definitions are the one before the
+   loop and the one on the back edge, and the header is in the frontier of the
+   latch but not of the block before the loop -- pre-headers dominate their
+   headers.  So for a header the honest claim is the weaker one: some predecessor
+   justifies it. *)
 let frontier_ok (f : S.func) =
   let t = build f in
   let df = frontier t f in
   let bad = ref [] in
+  let in_frontier (p : S.block) (b : S.block) =
+    let fr = try Hashtbl.find df p.S.bid with Not_found -> [] in
+    List.exists (fun (x : S.block) -> x.S.bid = b.S.bid) fr
+  in
   List.iter
     (fun (b : S.block) ->
       if b.S.phis <> [] then
-        List.iter
-          (fun (p : S.block) ->
-            let fr = try Hashtbl.find df p.S.bid with Not_found -> [] in
-            if not (List.exists (fun (x : S.block) -> x.S.bid = b.S.bid) fr) then
-              bad :=
-                !bad
-                @ [ Printf.sprintf "b%d has phis but is not in the frontier of b%d"
-                      b.S.bid p.S.bid ])
-          b.S.preds)
+        if List.exists (fun (p : S.block) -> dominates t b p) b.S.preds then begin
+          (* A loop header. *)
+          if not (List.exists (fun p -> in_frontier p b) b.S.preds) then
+            bad :=
+              !bad
+              @ [ Printf.sprintf "b%d has phis but is in no predecessor's frontier" b.S.bid ]
+        end
+        else
+          List.iter
+            (fun (p : S.block) ->
+              if not (in_frontier p b) then
+                bad :=
+                  !bad
+                  @ [ Printf.sprintf "b%d has phis but is not in the frontier of b%d" b.S.bid
+                        p.S.bid ])
+            b.S.preds)
     f.S.blocks;
   !bad
 

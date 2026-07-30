@@ -393,3 +393,43 @@
  (alias runtest)
  (action
   (diff opt.run.expected opt.bin.out)))
+
+; The loop pass.  loop.sk is tail-recursive, so its tail call becomes a jump and
+; its parameter becomes a phi -- the one place the control-flow graph stops being
+; acyclic.  The golden file is the SSA with the loop in it.
+
+(rule
+ (with-stdout-to
+  loop.out
+  (run %{exe:../src/compiler/skunkc.exe} --dump-opt %{dep:loop.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff loop.expected loop.out)))
+
+(rule
+ (targets loop.bin)
+ (deps loop.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o loop.bin loop.sk)))
+
+(rule
+ (with-stdout-to
+  loop.bin.out
+  (run %{dep:loop.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff loop.run.expected loop.bin.out)))
+
+(rule
+ (with-stdout-to
+  loop.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:loop.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff loop.run.expected loop.interp.out)))
