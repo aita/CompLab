@@ -414,6 +414,64 @@
  (action
   (diff nullary.expected nullary.bin.out)))
 
+; The store, compiled to loads and stores.  A bounds check is a branch, so an
+; `Array.sub` in the middle of a block splits it, and the phis after it name a
+; predecessor that moved -- which is the part that goes wrong quietly.
+; arrays.sk has every shape that moves one; shadow.sk is the program that binds
+; `!` and `Array` itself, where none of it may fire at all.
+
+(rule
+ (with-stdout-to
+  arrays.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:arrays.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff arrays.expected arrays.interp.out)))
+
+(rule
+ (targets arrays.bin)
+ (deps arrays.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o arrays.bin arrays.sk)))
+
+(rule
+ (with-stdout-to
+  arrays.bin.out
+  (run %{dep:arrays.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff arrays.expected arrays.bin.out)))
+
+(rule
+ (with-stdout-to
+  shadow.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:shadow.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff shadow.expected shadow.interp.out)))
+
+(rule
+ (targets shadow.bin)
+ (deps shadow.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o shadow.bin shadow.sk)))
+
+(rule
+ (with-stdout-to
+  shadow.bin.out
+  (run %{dep:shadow.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff shadow.expected shadow.bin.out)))
+
 ; Constants wider than an operand field.  An immediate and a displacement are
 ; four bytes, and an integer is twice what was written, so a constant stops
 ; fitting at 2^30 and selection has to reach for a register.  The numbers in

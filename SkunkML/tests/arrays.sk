@@ -1,0 +1,56 @@
+(* The store, compiled to loads and stores.
+
+   `!`, `:=`, `Array.sub`, `Array.update` and `Array.length` are calls in the
+   source and one or two instructions on the machine.  The bounds check is a
+   branch, so an `Array.sub` in the middle of a block ends that block and opens
+   two more -- which is the part that can go wrong quietly, because the phis in
+   the blocks after it name a predecessor that has moved.  So every shape that
+   moves one is here: a check before a `case`, a check inside a loop whose
+   header has a phi, two checks in one block, and a check in the arm of an
+   `if`.  All of it is diffed against the interpreter, which has no blocks. *)
+
+fun sign (a, i) = if Array.sub (a, i) > 0 then "pos" else "neg"
+
+(* A loop: the block with the check jumps back to the header, and the header's
+   phi has to name the block the check left off in. *)
+fun total (a, i, acc) =
+  if i >= Array.length a then acc else total (a, i + 1, acc + Array.sub (a, i))
+
+(* A check and then a switch in what is left of the same block. *)
+fun pick (a, i) =
+  case Array.sub (a, i) of
+      0 => "zero"
+    | 1 => "one"
+    | n => Int.toString n
+
+(* Two checks in one block, and a store after both. *)
+fun swap (a, i, j) =
+  let val x = Array.sub (a, i)
+      val y = Array.sub (a, j)
+  in Array.update (a, i, y); Array.update (a, j, x); a
+  end
+
+(* A check in one arm and a deref in the other, joining at a phi. *)
+fun either (a, i, r) = (if i > 2 then Array.sub (a, i) else !r) * 2
+
+fun bump r = (r := !r + 1; !r)
+
+val a = Array.fromList [3, 0, 1, ~4, 5]
+val signs = (sign (a, 0), sign (a, 3))
+val t = total (a, 0, 0)
+val picked = (pick (a, 1), pick (a, 2), pick (a, 4))
+val swapped = Array.toList (swap (a, 0, 4))
+val r = ref 20
+val eithers = (either (a, 4, r), either (a, 0, r))
+val bumped = (bump r, bump r, !r)
+val lengths = (Array.length a, Array.length (Array.array (0, 0)))
+
+(* The element is a value, not a number, and the collector has to keep seeing it
+   that way: the length word at offset 0 is not one. *)
+val strs = Array.array (3, "z")
+val () = Array.update (strs, 1, "hello" ^ "!")
+val got = (Array.sub (strs, 0), Array.sub (strs, 1), Array.length strs)
+
+(* An index computed rather than written, on both edges of the array. *)
+fun ends x = (Array.sub (x, 0), Array.sub (x, Array.length x - 1))
+val edges = ends a

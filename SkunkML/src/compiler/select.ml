@@ -54,12 +54,20 @@ type ctx = {
   mutable pending : (int * (M.reg * (int * S.value) list)) list;
   mutable clos : M.reg; (* the running closure *)
   mutable param : M.reg; (* its argument *)
+  (* The block being filled: its id and its predecessors.  It is in the context
+     rather than a local of [block] because a bounds check splits the block it
+     is in, and the values after the check go into the new one. *)
+  mutable here : int * int list;
 }
 
 let fresh ctx =
   let r = M.V ctx.vreg in
   ctx.vreg <- ctx.vreg + 1;
   r
+
+let fresh_block ctx =
+  ctx.fresh_bid <- ctx.fresh_bid + 1;
+  ctx.fresh_bid - 1
 
 let put ctx i = ctx.code <- i :: ctx.code
 let reg r = M.Reg r
@@ -189,6 +197,22 @@ let alloc ctx desc words dst =
   call ctx "skunk_alloc";
   put ctx (M.Mov (reg dst, reg (M.R M.rax)))
 
+(* ---- blocks -------------------------------------------------------------- *)
+
+(* Starting and finishing a block.  They are up here rather than with the
+   terminators because a bounds check needs them: the check is a branch, a block
+   holds one terminator, so the value in the middle of a block that carries a
+   check ends the block it was in and opens two more. *)
+
+let start_block ctx bid preds =
+  ctx.code <- [];
+  ctx.here <- (bid, preds)
+
+let finish ctx phis term =
+  let bid, preds = ctx.here in
+  ctx.blocks <- { M.id = bid; phis; code = ctx.code; term; preds } :: ctx.blocks;
+  ctx.code <- []
+
 let prim_routine = function
   | "^" -> Some "skunk_concat"
   | "@" -> Some "skunk_append"
@@ -200,7 +224,6 @@ let prim_routine = function
   | "<>" -> Some "skunk_noteq"
   | "div" -> Some "skunk_div"
   | "mod" -> Some "skunk_mod"
-  | ":=" -> Some "skunk_setref"
   | _ -> None
 
 (* Tagged arithmetic.  An integer is 2n + 1, so
@@ -265,6 +288,62 @@ let arith ctx op (args : S.value list) dst =
         "/ needs a tile the back end does not have yet (see doc/18-abi.md)"
   | _ -> failwith ("select: no tile for " ^ op)
 
+(* ---- the store ----------------------------------------------------------- *)
+
+(* Reading and writing memory, whose shape the ABI has already settled (see
+   doc/18-abi.md): a ref block is one word at offset 0, an array block is
+   `[length][elements...]`, and the length word is *untagged* -- it is a header
+   rather than a value, which is exactly why the collector skips it.
+
+   None of these is absorbed into another instruction's operand the way a field
+   read is.  A field read is from a block that never changes, so moving it later
+   in the block cannot change its answer; a deref can, because a store to the
+   same cell may be sitting in between.  The tiler has no memory dependences in
+   it, so the safe thing is to keep the load where the SSA put it. *)
+
+(* An array's length: one load, and then tag it.  `lea 1(%r,%r,1)` is 2r + 1 in
+   one instruction, which is what an untagged header has to become before the
+   program can see it as an int. *)
+let array_length ctx a dst =
+  put ctx (M.Mov (reg dst, field a 0));
+  put ctx (M.Lea (dst, mem ~base:dst ~index:dst ~scale:1 ~disp:1 ()))
+
+(* The bounds check, and the untagged index the addressing mode then wants.
+
+   One comparison does both halves of it.  The index is compared *unsigned*
+   against the length, so a negative index -- which as an unsigned number is
+   enormous -- fails the same test that a too-large one fails, and `k >= 0` never
+   needs an instruction of its own.
+
+   The check is a branch, and a block holds one terminator, so this ends the
+   block it is in and opens two: the one that reports and the one that carries
+   on.  The failure is the runtime routine that was doing all of this before, so
+   the message it prints is the same message by construction rather than by
+   agreeing to spell it the same way.  It does not return, and the halt after it
+   is there because a block has to end somehow. *)
+let bounds ctx routine args (a : M.reg) (i : M.reg) =
+  let k = fresh ctx in
+  put ctx (M.Mov (reg k, reg i));
+  put ctx (M.Sar (reg k, 1));
+  put ctx (M.Cmp (reg k, field a 0));
+  let bad = fresh_block ctx and ok = fresh_block ctx in
+  let hid = fst ctx.here in
+  finish ctx [] (M.Jcc ("b", ok, bad));
+  start_block ctx bad [ hid ];
+  (* Every argument, including the one `Array.update` would store.  The routine
+     fails before it looks at that one, so it could be left as whatever happens
+     to be in the register -- but a call that is only correct because of what the
+     callee does not read is a trap for whoever edits the callee. *)
+  runtime ctx routine args None;
+  finish ctx [] (M.Halt "?");
+  start_block ctx ok [ hid ];
+  k
+
+(* Element i is at 8*(i+1), so the addressing mode does the whole of the index
+   arithmetic: base, index, scale 8, and a displacement of 8 to step over the
+   length word.  This is the one place the tiler builds an `index * scale`. *)
+let element a k = mem ~base:a ~index:k ~scale:8 ~disp:8 ()
+
 let value ctx (v : S.value) =
   if foldable ctx v then ()
   else begin
@@ -291,6 +370,30 @@ let value ctx (v : S.value) =
         put ctx (M.Mov (reg (M.R M.rcx), field (M.R M.rdi) 0));
         put ctx (M.CallReg (M.R M.rcx));
         put ctx (M.Mov (reg dst, reg (M.R M.rax)))
+    (* The store.  These five arrive as prims because [basis_ops] below turned
+       the calls that spelled them into prims; nothing in the source says
+       `prim !`. *)
+    | S.Prim "!", [ r ] -> put ctx (M.Mov (reg dst, field (in_reg ctx r) 0))
+    | S.Prim ":=", [ r; x ] ->
+        let rr = in_reg ctx r in
+        let rx = in_reg ctx x in
+        put ctx (M.Mov (field rr 0, reg rx));
+        (* An assignment is usually a statement, and its unit is usually not
+           read.  Only fetch it when somebody wants it. *)
+        if v.S.uses > 0 then put ctx (M.Mov (reg dst, glob "skunk_the_unit"))
+    | S.Prim "Array.length", [ a ] -> array_length ctx (in_reg ctx a) dst
+    | S.Prim "Array.sub", [ a; i ] ->
+        let ra = in_reg ctx a in
+        let ri = in_reg ctx i in
+        let k = bounds ctx "skunk_array_sub" [ reg ra; reg ri ] ra ri in
+        put ctx (M.Mov (reg dst, element ra k))
+    | S.Prim "Array.update", [ a; i; x ] ->
+        let ra = in_reg ctx a in
+        let ri = in_reg ctx i in
+        let rx = in_reg ctx x in
+        let k = bounds ctx "skunk_array_update" [ reg ra; reg ri; reg rx ] ra ri in
+        put ctx (M.Mov (element ra k, reg rx));
+        if v.S.uses > 0 then put ctx (M.Mov (reg dst, glob "skunk_the_unit"))
     | S.Prim p, args -> (
         match prim_routine p with
         | Some sym ->
@@ -317,19 +420,12 @@ let value ctx (v : S.value) =
 
 (* ---- terminators --------------------------------------------------------- *)
 
-let start_block ctx bid preds =
-  ctx.code <- [];
-  (bid, preds)
-
-let finish ctx (bid, preds) phis term =
-  ctx.blocks <- { M.id = bid; phis; code = ctx.code; term; preds } :: ctx.blocks;
-  ctx.code <- []
-
 (* A switch becomes a chain of two-way branches, one per arm, each in its own
    block.  The first comparison stays where the switch was, so the first arm's
    predecessor does not move; the others gain a new one, which the phis in them
    have to be told about. *)
-let switch ctx (bid, preds) phis (v : S.value) arms dflt fail =
+let switch ctx phis (v : S.value) arms dflt fail =
+  let bid = fst ctx.here in
   let keyed =
     List.map
       (fun (k, (b : S.block)) ->
@@ -355,14 +451,16 @@ let switch ctx (bid, preds) phis (v : S.value) arms dflt fail =
     | Some b -> `Block b.S.bid
     | None -> `Fail
   in
-  let rec chain here phis = function
+  let rec chain phis = function
     | [] -> (
         match default with
-        | `Block b -> finish ctx here phis (M.Jmp b)
-        | `Fail -> finish ctx here phis (M.Halt fail))
+        | `Block b -> finish ctx phis (M.Jmp b)
+        | `Fail -> finish ctx phis (M.Halt fail))
     | (key, (target : S.block)) :: rest ->
-        let next = if rest = [] then match default with `Block b -> b | `Fail -> -1
-                   else (ctx.fresh_bid <- ctx.fresh_bid + 1; ctx.fresh_bid - 1) in
+        let next =
+          if rest = [] then match default with `Block b -> b | `Fail -> -1
+          else fresh_block ctx
+        in
         (match key with
         | `Int k ->
             let s = match scrutinee with `Tag t -> reg t | `Val r -> reg r in
@@ -386,10 +484,10 @@ let switch ctx (bid, preds) phis (v : S.value) arms dflt fail =
             let t = fresh ctx in
             put ctx (M.Lea (t, glob "skunk_true"));
             put ctx (M.Cmp (reg (M.R M.rax), reg t)));
-        let hid = fst here in
+        let hid = fst ctx.here in
         if rest = [] then begin
           match default with
-          | `Block b -> finish ctx here phis (M.Jcc ("e", target.S.bid, b));
+          | `Block b -> finish ctx phis (M.Jcc ("e", target.S.bid, b));
               if hid <> bid then begin
                 ctx.renames <- (target.S.bid, bid, hid) :: ctx.renames;
                 ctx.renames <- (b, bid, hid) :: ctx.renames
@@ -397,24 +495,25 @@ let switch ctx (bid, preds) phis (v : S.value) arms dflt fail =
           | `Fail ->
               (* The failure needs a block of its own, because a block has one
                  terminator and this one already has a branch. *)
-              ctx.fresh_bid <- ctx.fresh_bid + 1;
-              let fb = ctx.fresh_bid - 1 in
-              finish ctx here phis (M.Jcc ("e", target.S.bid, fb));
+              let fb = fresh_block ctx in
+              finish ctx phis (M.Jcc ("e", target.S.bid, fb));
               if hid <> bid then ctx.renames <- (target.S.bid, bid, hid) :: ctx.renames;
-              finish ctx (start_block ctx fb [ hid ]) [] (M.Halt fail)
+              start_block ctx fb [ hid ];
+              finish ctx [] (M.Halt fail)
         end
         else begin
-          finish ctx here phis (M.Jcc ("e", target.S.bid, next));
+          finish ctx phis (M.Jcc ("e", target.S.bid, next));
           if hid <> bid then ctx.renames <- (target.S.bid, bid, hid) :: ctx.renames;
-          chain (start_block ctx next [ hid ]) [] rest
+          start_block ctx next [ hid ];
+          chain [] rest
         end
   in
-  chain (bid, preds) phis keyed
+  chain phis keyed
 
 let epilogue_ret ctx v = put ctx (M.Mov (reg (M.R M.rax), reg (in_reg ctx v)))
 
 let block ctx (b : S.block) =
-  let here = start_block ctx b.S.bid (List.map (fun (p : S.block) -> p.S.bid) b.S.preds) in
+  start_block ctx b.S.bid (List.map (fun (p : S.block) -> p.S.bid) b.S.preds);
   (* A phi's destination is a register of its own; its sources are the operands
      the predecessors will copy from. *)
   List.iter
@@ -427,21 +526,28 @@ let block ctx (b : S.block) =
     b.S.phis;
   let phis = [] in
   List.iter (value ctx) b.S.values;
+  (* A bounds check may have split the block, in which case the terminator is
+     leaving from somewhere else than it arrived, and the phis in the successors
+     name a predecessor that no longer branches to them. *)
+  let hid = fst ctx.here in
+  if hid <> b.S.bid then
+    List.iter
+      (fun (s : S.block) -> ctx.renames <- (s.S.bid, b.S.bid, hid) :: ctx.renames)
+      (S.succs b);
   match b.S.term with
   | S.Ret v ->
       epilogue_ret ctx v;
-      finish ctx here phis (M.Ret (reg (M.R M.rax)))
+      finish ctx phis (M.Ret (reg (M.R M.rax)))
   | S.TailCall (f, a) ->
       put ctx (M.Mov (reg (M.R M.rdi), reg (in_reg ctx f)));
       put ctx (M.Mov (reg (M.R M.rsi), reg (in_reg ctx a)));
-      finish ctx here phis M.TailCall
-  | S.Jump t -> finish ctx here phis (M.Jmp t.S.bid)
+      finish ctx phis M.TailCall
+  | S.Jump t -> finish ctx phis (M.Jmp t.S.bid)
   | S.Fail (loc, _) ->
       (* The message is the runtime's; what the compiler has to supply is where
          in the source it happened. *)
-      finish ctx here phis (M.Halt (Loc.to_string loc))
-  | S.Switch (v, arms, dflt) ->
-      switch ctx here phis v arms dflt (Loc.to_string Loc.unknown)
+      finish ctx phis (M.Halt (Loc.to_string loc))
+  | S.Switch (v, arms, dflt) -> switch ctx phis v arms dflt (Loc.to_string Loc.unknown)
 
 (* ---- functions ----------------------------------------------------------- *)
 
@@ -479,6 +585,7 @@ let func ?name (f : S.func) =
       pending = [];
       clos = M.V 0;
       param = M.V 0;
+      here = (entry, []);
     }
   in
   (* The prologue: the closure arrives in rdi and the argument in rsi, and both
@@ -510,29 +617,23 @@ let func ?name (f : S.func) =
                     srcs ))
           (List.rev ctx.pending))
     blocks;
-  (* Fix up the phis whose predecessors moved into a comparison chain. *)
+  (* Fix up the phis whose predecessors moved -- into a comparison chain, or past
+     a bounds check.  The moves compose: a block that a check split and that then
+     ends in a switch renames twice, once per step, so the lookup follows the
+     chain rather than stopping at the first link.  It terminates because each
+     new id is a fresh one, so a rename never points backwards. *)
+  let rec renamed target p =
+    match List.find_opt (fun (t, old, _) -> t = target && old = p) ctx.renames with
+    | Some (_, _, nw) when nw <> p -> renamed target nw
+    | _ -> p
+  in
   List.iter
     (fun (b : M.block) ->
       b.M.phis <-
         List.map
-          (fun (d, srcs) ->
-            ( d,
-              List.map
-                (fun (p, o) ->
-                  match
-                    List.find_opt (fun (t, old, _) -> t = b.M.id && old = p) ctx.renames
-                  with
-                  | Some (_, _, nw) -> (nw, o)
-                  | None -> (p, o))
-                srcs ))
+          (fun (d, srcs) -> (d, List.map (fun (p, o) -> (renamed b.M.id p, o)) srcs))
           b.M.phis;
-      b.M.preds <-
-        List.map
-          (fun p ->
-            match List.find_opt (fun (t, old, _) -> t = b.M.id && old = p) ctx.renames with
-            | Some (_, _, nw) -> nw
-            | None -> p)
-          b.M.preds)
+      b.M.preds <- List.map (renamed b.M.id) b.M.preds)
     blocks;
   (* The prologue goes at the top of the entry block, after its phis (it has
      none: nothing jumps to the entry). *)
@@ -548,6 +649,156 @@ let func ?name (f : S.func) =
     used_callee = [];
   }
 
+(* ---- the basis calls that are really machine operations ------------------ *)
+
+(* `!r` reaches the machine as: read the global that holds the basis closure,
+   load the code address out of it, call through it, and let the callee do one
+   8-byte load.  `Array.sub (a, i)` is worse, because the language passes one
+   argument: the pair is allocated, so a bounds-checked load costs a collection's
+   worth of heap.  Every one of these is one or two instructions, and
+   doc/18-abi.md already says which ones.
+
+   This *is* a tile, but not one the cost function can express.  It spans four
+   values -- the global, the field read, the tuple, the call -- and what it does
+   to three of them is delete them, which is not something a per-value cost can
+   say.  Half the time it is not even a value: `Array.sub` in tail position is a
+   terminator.  So it is done first, by rewriting those four values into one
+   prim, and the tiler downstream sees a prim like any other.
+
+   Nothing outside this file ever sees these prims, which is why they are prims
+   and not new `Ssa.op`s: the rewrite runs inside selection, after every pass
+   that matches on an op has already run. *)
+
+(* Which globals still hold what the basis put in them.  A global is a word, and
+   a top-level binding of that name overwrites it -- `val ! = fn x => 0` is a
+   legal program and means what it says -- so the rewrite only fires on a name no
+   item of this program rebinds.  It is the same question `loops.ml` asks in
+   `known` before it turns a call into a jump. *)
+let basis_intact (p : S.prog) =
+  let taken = Hashtbl.create 16 in
+  List.iter
+    (fun (i : S.item) -> if i.S.iname <> "" then Hashtbl.replace taken i.S.iname ())
+    p.S.items;
+  fun n -> not (Hashtbl.mem taken n)
+
+(* Where a field sits in a basis structure.  The labels are sorted, because that
+   is what a record is here: a field is reached by offset and the offset came
+   from the sorted labels (`stubs.ml`).  Checking the offset as well as the name
+   costs nothing and means this cannot drift away from what was laid out. *)
+let structure_field s f =
+  match List.assoc_opt s Stubs.structures with
+  | None -> None
+  | Some fields ->
+      let sorted = Types.sort_fields (List.map (fun (n, _, _) -> (n, ())) fields) in
+      let rec at i = function
+        | (n, ()) :: _ when n = f -> Some i
+        | _ :: rest -> at (i + 1) rest
+        | [] -> None
+      in
+      at 0 sorted
+
+(* The prim a callee stands for, and how many arguments it takes. *)
+let inline_prim intact (f : S.value) =
+  match (f.S.op, f.S.args) with
+  | S.Global "!", _ when intact "!" -> Some ("!", 1)
+  | S.Field (l, i), [ g ] -> (
+      match (g.S.op, l) with
+      | S.Global "Array", ("sub" | "update" | "length")
+        when intact "Array" && structure_field "Array" l = Some i ->
+          Some ("Array." ^ l, match l with "update" -> 3 | "sub" -> 2 | _ -> 1)
+      | _ -> None)
+  | _ -> None
+
+(* The arguments the tile wants, out of the one argument the call passes.  Two or
+   three of them arrive as a tuple, and a tuple is a record whose arguments are
+   the values that were about to be stored in it -- so reading them straight is
+   what lets the allocation go.  It is safe wherever the call is: a record's
+   arguments dominate the record, and the record dominates the call.
+
+   A tuple that was not built here (`val p = (a, i)` used twice, say) is not
+   matched, and the call stays a call. *)
+let untuple n (a : S.value) =
+  if n = 1 then Some [ a ]
+  else
+    match (a.S.op, a.S.args) with
+    | S.Record ls, args
+      when List.length args = n && ls = List.init n (fun i -> string_of_int (i + 1)) ->
+        Some args
+    | _ -> None
+
+let basis_ops intact (f : S.func) =
+  let next =
+    ref
+      (List.fold_left
+         (fun m (b : S.block) ->
+           List.fold_left (fun m (v : S.value) -> max m (v.S.vid + 1)) m (b.S.phis @ b.S.values))
+         0 f.S.blocks)
+  in
+  (* What the rewrite took the last use of.  Nothing else is going to come along
+     and remove them -- the optimiser has already run, and with `--no-opt` it
+     never ran at all -- so the pass clears up after itself, and only after
+     itself: a value it did not consume is left alone however dead it is. *)
+  let consumed = Hashtbl.create 16 in
+  let eat (callee : S.value) (arg : S.value) =
+    Hashtbl.replace consumed callee.S.vid ();
+    Hashtbl.replace consumed arg.S.vid ();
+    List.iter (fun (g : S.value) -> Hashtbl.replace consumed g.S.vid ()) callee.S.args
+  in
+  let hit = ref false in
+  let recognise (g : S.value) (a : S.value) =
+    match inline_prim intact g with
+    | Some (p, n) -> (
+        match untuple n a with
+        | Some args ->
+            eat g a;
+            hit := true;
+            Some (p, args)
+        | None -> None)
+    | None -> None
+  in
+  List.iter
+    (fun (b : S.block) ->
+      List.iter
+        (fun (v : S.value) ->
+          match (v.S.op, v.S.args) with
+          | S.Call, [ g; a ] -> (
+              match recognise g a with
+              | Some (p, args) ->
+                  v.S.op <- S.Prim p;
+                  v.S.args <- args
+              | None -> ())
+          | _ -> ())
+        b.S.values;
+      match b.S.term with
+      | S.TailCall (g, a) -> (
+          match recognise g a with
+          | Some (p, args) ->
+              (* A tail call that is really a load returns the load, so the
+                 terminator becomes a return of a value that did not exist. *)
+              let v = { S.vid = !next; op = S.Prim p; args; home = b; uses = 0; origin = "" } in
+              incr next;
+              b.S.values <- b.S.values @ [ v ];
+              b.S.term <- S.Ret v
+          | None -> ())
+      | _ -> ())
+    f.S.blocks;
+  if !hit then begin
+    (* Repeated, because dropping the field read is what makes the global
+       unused. *)
+    let go = ref true in
+    while !go do
+      go := false;
+      S.recount f;
+      List.iter
+        (fun (b : S.block) ->
+          let keep (v : S.value) = v.S.uses > 0 || not (Hashtbl.mem consumed v.S.vid) in
+          let before = List.length b.S.values in
+          b.S.values <- List.filter keep b.S.values;
+          if List.length b.S.values <> before then go := true)
+        f.S.blocks
+    done
+  end
+
 (* ---- the program --------------------------------------------------------- *)
 
 (* [List.filter_map] with the index, which the standard library does not
@@ -555,6 +806,9 @@ let func ?name (f : S.func) =
 let filteri_map f l = List.filter_map (fun x -> x) (List.mapi f l)
 
 let program (p : S.prog) =
+  let intact = basis_intact p in
+  List.iter (basis_ops intact) p.S.funcs;
+  List.iter (fun (i : S.item) -> Option.iter (basis_ops intact) i.S.ibody) p.S.items;
   let funcs = List.map (fun f -> func f) p.S.funcs in
   (* A top-level binding's body is a function of no arguments, and closure
      conversion did not have to give it a distinct name because nothing calls
