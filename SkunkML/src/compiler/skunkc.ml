@@ -11,7 +11,8 @@ let usage () =
     "usage: skunkc [options] file.sk\n\
     \n\
      options:\n\
-    \      --dump-ssa    print the SSA of the program (not of the basis)\n\
+    \      --dump-ssa    print the SSA of the program as it was built, before\n\
+    \                    any pass (not of the basis)\n\
     \      --dump-dom    print the dominator tree and the dominance frontiers\n\
     \      --dump-flat   print the A-normal form it was built from\n\
     \      --no-verify   skip the check that every use is dominated by its \
@@ -20,8 +21,8 @@ let usage () =
     \                    the linker and the ELF writer on their own\n\
     \      --dump-opt    print the SSA again, after optimisation\n\
     \      --dump-mach   print the amd64 graph after register allocation\n\
-    \      --no-opt      do not optimise: skip folding, sccp, gvn, dce and\n\
-    \                    instruction scheduling\n\
+    \      --no-opt      do not optimise: skip inlining, folding, sccp, gvn,\n\
+    \                    dce and instruction scheduling\n\
     \  -o FILE           write the executable here (the default is a.out)\n\
     \      --dynamic     link against libc.so.6 instead of writing a\n\
     \                    freestanding executable\n\
@@ -204,6 +205,21 @@ let () =
          in
          let _, globals, flat = to_flat env globals ~file:path ~source in
          if !dump_flat then print_string (Flat.program_to_string flat);
+         (* `--dump-ssa` and `--dump-dom` are the SSA the builder made out of
+            what the front end wrote ([10章](../../doc/10-ssa.md)), so they have
+            to be taken before inlining -- which happens on Flat, one pass
+            earlier.  Building a second copy is the price, and only a dump pays
+            it. *)
+         let built = if !dump_ssa || !dump_dom then Some (Build.program globals flat) else None in
+         (* Inlining sees both units at once: the file calls the basis, and it
+            can rebind the basis's names, which is the question that decides
+            whether a global still holds the function it was defined with. *)
+         let basis_flat, flat =
+           if not !optimise then (basis_flat, flat)
+           else
+             let e = Inline.analyse [ basis_flat; flat ] in
+             (Inline.rewrite e basis_flat, Inline.rewrite e flat)
+         in
          let basis = Build.program globals basis_flat in
          let prog = Build.program globals flat in
          let whole =
@@ -221,9 +237,10 @@ let () =
                 flush stdout;
                 List.iter (fun m -> Printf.eprintf "skunkc: not in SSA: %s\n" m) bad;
                 exit 1);
-         if !dump_ssa then print_string (Ssa.prog_to_string prog);
+         let shown = Option.value built ~default:prog in
+         if !dump_ssa then print_string (Ssa.prog_to_string shown);
          if !dump_dom then
-           List.iter (fun f -> print_string (Dom.to_string f)) (Dom.all_funcs prog);
+           List.iter (fun f -> print_string (Dom.to_string f)) (Dom.all_funcs shown);
          let whole = if !optimise then Loops.program whole else whole in
          if !optimise then begin
            Opt.program whole;

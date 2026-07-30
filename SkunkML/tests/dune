@@ -598,6 +598,49 @@
  (action
   (diff opt.run.expected opt.bin.out)))
 
+; Inlining.  inline.sk has one declaration per thing that only happens once the
+; callee's body is at the call site, and the golden file is the SSA that comes
+; out: the call sites that folded to a constant, the one recursive body that got
+; peeled once and no more, and the tail call the loop pass is supposed to keep.
+
+(rule
+ (with-stdout-to
+  inline.out
+  (run %{exe:../src/compiler/skunkc.exe} --dump-opt %{dep:inline.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff inline.expected inline.out)))
+
+; And it has to compute the same thing afterwards.
+
+(rule
+ (with-stdout-to
+  inline.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:inline.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff inline.run.expected inline.interp.out)))
+
+(rule
+ (targets inline.bin)
+ (deps inline.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o inline.bin inline.sk)))
+
+(rule
+ (with-stdout-to
+  inline.bin.out
+  (run %{dep:inline.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff inline.run.expected inline.bin.out)))
+
 ; The loop pass.  loop.sk is tail-recursive, so its tail call becomes a jump and
 ; its parameter becomes a phi -- the one place the control-flow graph stops being
 ; acyclic.  The golden file is the SSA with the loop in it.
