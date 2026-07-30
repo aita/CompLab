@@ -147,13 +147,25 @@ That diff is the test the whole back end is aimed at, and `dune test` runs it fo
 every example: the compiler may pick different instructions every time it
 changes, but it may not print anything different.
 
+In between there are the optimisations, and one of them is more interesting than
+the rest for a reason that comes from the front end. There were no loops. A join
+point can only jump outwards, so a function's control-flow graph was acyclic and
+every loop in a SkunkML program was a tail call -- which makes the loop
+optimisation that matters here not one that improves a loop but the one that
+*makes* one: a self tail call becomes a jump to the top and the parameter becomes
+a phi. The rest are the usual ones on SSA -- constant folding, sparse conditional
+constant propagation, global value numbering down the dominator tree, dead code
+elimination, and a list scheduler over each block's dependence graph -- with a
+loop around them, because pruning one branch is what makes the next constant
+visible.
+
 The implementation is in [`src/`](src) and the book is in
 [`doc/`](doc/index.md): see [`src/README.md`](src/README.md) for the language,
 the two command lines and a map of the source, and
 [`doc/index.md`](doc/index.md) for a chapter per pass. Two to start with, in
 Japanese: [プログラムが通る道](doc/00-pipeline.md) と
 [パターンマッチを決定木にする](doc/05-matching.md)。バックエンドなら
-[命令選択](doc/12-select.md) から [アセンブラ、リンカ、実行時](doc/14-elf.md) まで。
+[命令選択](doc/12-select.md) から [ループと命令スケジューリング](doc/17-loops.md) まで。
 
 ## What is deliberately missing
 

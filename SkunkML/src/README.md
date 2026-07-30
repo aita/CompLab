@@ -59,6 +59,9 @@ skunkc [options] file.sk
   -h, --help
 ```
 
+`--dump-opt` next to `--no-opt --dump-ssa` on the same file is how to see what
+each optimisation pass did.
+
 `skunkc` writes a static ELF64 with no libc and nothing dynamically linked:
 
 ```sh
@@ -268,11 +271,15 @@ else a` is `int * int -> int`, exactly as in SML.
      +--> machine.ml                    a value
      |
      +--> build.ml                      value SSA
+            |  opt.ml + loops.ml         folding, sccp, gvn, dce, tail loops
+            v
+          value SSA      optimised, and with the only backward edges there are
             |  select.ml                 amd64: lowering, and DP tiling
             v
           Mach           a graph of amd64 instructions, virtual registers, phis
             |  outofssa.ml               phis become copies
             |  regalloc.ml               the interference graph, coloured
+            |  sched.ml                  list scheduling, after the colours
             v
           Mach           real registers, a frame
             |  emit.ml + asm.ml          bytes
@@ -304,9 +311,12 @@ And the compiler, in `src/compiler/`:
 | --- | --- | --- |
 | `ssa.ml` | 269 | value SSA: values, blocks, phis, and the printer |
 | `build.ml` | 235 | Flat to SSA. A join point is a block with phi-functions |
-| `dom.ml` | 241 | dominators, dominance frontiers, and the checks they are for |
+| `dom.ml` | 262 | dominators, dominance frontiers, and the checks they are for |
+| `opt.ml` | 593 | folding, sccp, gvn, dce, and block merging |
+| `loops.ml` | 233 | tail recursion becomes a loop; then licm has something to do |
+| `sched.ml` | 169 | list scheduling over each block's dependence graph |
 | `mach.ml` | 199 | amd64 in a graph: instructions, operands, virtual registers |
-| `select.ml` | 517 | lowering, and the DP tiler that chooses the instructions |
+| `select.ml` | 535 | lowering, and the DP tiler that chooses the instructions |
 | `statics.ml` | 181 | descriptors, string literals, nullary constructors, globals |
 | `stubs.ml` | 89 | the basis, as static data plus one stub per function |
 | `outofssa.ml` | 151 | critical edges, parallel copies, and no more phis |
@@ -316,7 +326,7 @@ And the compiler, in `src/compiler/`:
 | `link.ml` | 62 | addresses, symbols, and patching the holes |
 | `elf.ml` | 103 | a static ELF64 with two segments |
 | `rt.ml` | 1660 | the runtime, in amd64: the heap and the collector, equality, strings, `show` |
-| `skunkc.ml` | 330 | the command line, and the hand-built self-test |
+| `skunkc.ml` | 360 | the command line, and the hand-built self-test |
 
 ## Layout
 
@@ -343,6 +353,11 @@ hand-written descriptors, every runtime routine called once -- so that a failure
 in the assembler, the linker, the ELF writer or the runtime shows up without the
 compiler in the way. `skunkc --dump-encoding` is a golden file of instruction
 bytes, each of which was diffed against the system assembler once.
+
+`tests/opt.sk` has one redundancy per line, each visible to exactly one pass, and
+`tests/loop.sk` is tail-recursive, so its golden file has the only backward edges
+in the repository. `tests/gc.sk` allocates more than the heap holds, so finishing
+at all is the evidence that collection happens.
 
 ## What is deliberately missing
 
