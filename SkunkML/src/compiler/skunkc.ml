@@ -60,31 +60,103 @@ let to_flat env globals ~file ~source =
   let globals = globals @ names in
   (env, globals, Closure.program globals items)
 
-(* Checking the assembler, the linker and the ELF writer without the rest of
-   the compiler.  The program is written out by hand: say hello, exit 0.  It is
-   how a code generator gets off the ground -- if this runs, the three lowest
-   layers are right, and anything that goes wrong afterwards is selection or
-   register allocation. *)
+(* Checking the assembler, the linker, the ELF writer and the runtime without
+   the rest of the compiler.  `skunk_program` is written out by hand here, and
+   the values it reports are static blocks with hand-written descriptors -- so
+   what this exercises is exactly the layer the code generator will sit on:
+   the allocator, `show`, structural equality, the string routines and the
+   arithmetic that can fail.
+
+   It is how a code generator gets off the ground.  If this runs and prints what
+   the interpreter would print, then anything that goes wrong afterwards is
+   selection or register allocation. *)
 let selftest path =
-  let module M = Mach in
+  let open Rt in
   let text = Asm.create () and data = Asm.create () in
-  Asm.label data "msg";
-  Asm.ascii data "hello from skunkc\n";
-  Asm.label text "_start";
-  let r n = M.Reg (M.R n) in
-  (* write(1, msg, 18) *)
-  List.iter (Asm.instr text)
-    [
-      M.Mov (r M.rax, M.Imm 1);
-      M.Mov (r M.rdi, M.Imm 1);
-      M.Lea (M.R M.rsi, M.Mem { base = None; index = None; scale = 1; disp = 0; sym = Some "msg" });
-      M.Mov (r M.rdx, M.Imm 18);
-      M.Syscall;
-      (* exit(0) *)
-      M.Mov (r M.rax, M.Imm 60);
-      M.Alu ("xor", r M.rdi, r M.rdi);
-      M.Syscall;
-    ];
+  Asm.label text "skunk_program";
+  let tagged n = imm ((2 * n) + 1) in
+  (* The value first: computing it takes rdi, so the label goes in last. *)
+  let report name value = value @ [ lea rdi (glob (lit name)); Cl "skunk_report" ] in
+  (* A static block: the descriptor word goes down first, so the label -- which
+     is the value -- is at offset 8 from it, exactly as on the heap. *)
+  let block name desc fields =
+    Asm.align data 8;
+    Asm.dq_sym data desc;
+    Asm.label data name;
+    List.iter (function `Int n -> Asm.dq data ((2 * n) + 1) | `Sym s -> Asm.dq_sym data s) fields
+  in
+  (* The same program as tests/selftest.sk, so that the interpreter's output for
+     it is the golden file for this one too. *)
+  emit text
+    ([ lea rdi (glob (lit "datatype tree = Leaf of int")); Cl "skunk_report_label" ]
+    @ report "val i : int" [ mov (o rsi) (tagged 42) ]
+    @ report "val j : int" [ mov (o rsi) (tagged (-7)) ]
+    @ report "val s : string" [ lea rsi (glob "t_str") ]
+    @ report "val u : unit" [ load rsi (glob "skunk_the_unit") ]
+    @ report "val t : int * string" [ lea rsi (glob "t_tuple") ]
+    @ report "val r : { age : int, name : string }" [ lea rsi (glob "t_record") ]
+    @ report "val xs : int list" [ lea rsi (glob "t_list") ]
+    @ report "val e : int list" [ lea rsi (glob "t_empty") ]
+    @ report "val c : tree" [ lea rsi (glob "t_con") ]
+    @ report "val f : 'a -> 'a" [ lea rsi (glob "t_clos") ]
+    (* Now the routines: each result is reported, so the golden file pins down
+       what they computed. *)
+    @ report "val cat : string"
+        [ lea rdi (glob "t_str"); lea rsi (glob "t_str"); Cl "skunk_concat"; movr rsi rax ]
+    @ report "val sub : string"
+        [
+          lea rdi (glob "t_str");
+          mov (o rsi) (tagged 2);
+          mov (o rdx) (tagged 3);
+          Cl "skunk_substring";
+          movr rsi rax;
+        ]
+    @ report "val len : int" [ lea rdi (glob "t_str"); Cl "skunk_size"; movr rsi rax ]
+    @ report "val str : string" [ mov (o rdi) (tagged (-1234)); Cl "skunk_int_to_string"; movr rsi rax ]
+    @ report "val eq : bool"
+        [ lea rdi (glob "t_list"); lea rsi (glob "t_list2"); Cl "skunk_equal"; movr rsi rax ]
+    @ report "val ne : bool"
+        [ lea rdi (glob "t_list"); lea rsi (glob "t_empty"); Cl "skunk_noteq"; movr rsi rax ]
+    @ report "val lt : bool" [ mov (o rdi) (tagged 3); mov (o rsi) (tagged 10); Cl "skunk_lt"; movr rsi rax ]
+    @ report "val gt : bool" [ lea rdi (glob "t_str"); lea rsi (glob "t_str2"); Cl "skunk_gt"; movr rsi rax ]
+    @ report "val q : int"
+        [ mov (o rdi) (tagged 17); mov (o rsi) (tagged 5); Cl "skunk_div"; movr rsi rax ]
+    @ report "val m : int"
+        [ mov (o rdi) (tagged (-17)); mov (o rsi) (tagged 5); Cl "skunk_mod"; movr rsi rax ]
+    @ report "val arr : int array"
+        [ mov (o rdi) (tagged 3); mov (o rsi) (tagged 9); Cl "skunk_array"; movr rsi rax ]
+    @ report "val rr : int ref" [ mov (o rdi) (tagged 5); Cl "skunk_ref"; movr rsi rax ]
+    (* And what a program that prints rather than reports looks like. *)
+    @ [ lea rdi (glob "t_str2"); Cl "skunk_print" ]
+    @ [ Ret ]);
+  Rt.text text;
+  descriptor data "t_pair_desc" ~kind:0 ~nfields:2 ~con:None ~labels:None ~list:0;
+  descriptor data "t_rec_desc" ~kind:0 ~nfields:2 ~con:None ~labels:(Some "t_rec_labels") ~list:0;
+  descriptor data "t_nil_desc" ~kind:1 ~nfields:0 ~con:(Some (lit "nil")) ~labels:None ~list:1;
+  descriptor data "t_cons_desc" ~kind:1 ~nfields:1 ~con:(Some (lit "::")) ~labels:None ~list:2;
+  descriptor data "t_con_desc" ~kind:1 ~nfields:1 ~con:(Some (lit "Leaf")) ~labels:None ~list:0;
+  descriptor data "t_clos_desc" ~kind:3 ~nfields:1 ~con:None ~labels:None ~list:0;
+  Asm.align data 8;
+  Asm.label data "t_rec_labels";
+  Asm.dq_sym data (lit "age");
+  Asm.dq_sym data (lit "name");
+  string_block data "t_str" "hi\tthere \"you\"\n";
+  string_block data "t_str2" "zebra\n";
+  (* [1, 2], twice, so that equality has two structurally equal values that are
+     not the same pointer. *)
+  block "t_empty" "t_nil_desc" [];
+  List.iter
+    (fun (suffix : string) ->
+      block ("t_p2" ^ suffix) "t_pair_desc" [ `Int 2; `Sym "t_empty" ];
+      block ("t_c2" ^ suffix) "t_cons_desc" [ `Sym ("t_p2" ^ suffix) ];
+      block ("t_p1" ^ suffix) "t_pair_desc" [ `Int 1; `Sym ("t_c2" ^ suffix) ];
+      block ("t_list" ^ suffix) "t_cons_desc" [ `Sym ("t_p1" ^ suffix) ])
+    [ ""; "2" ];
+  block "t_tuple" "t_pair_desc" [ `Int 42; `Sym "t_str2" ];
+  block "t_record" "t_rec_desc" [ `Int 30; `Sym "t_str2" ];
+  block "t_con" "t_con_desc" [ `Int 7 ];
+  block "t_clos" "t_clos_desc" [ `Int 0 ];
+  Rt.data data;
   Link.link ~path ~text ~data ~entry:"_start"
 
 (* The corner cases of the encoding, as bytes.  Every line here was checked

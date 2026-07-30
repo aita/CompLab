@@ -215,21 +215,37 @@
  (action
   (diff encoding.expected encoding.out)))
 
-; The assembler, the linker and the ELF writer together: skunkc writes a
-; hand-built executable and we run it.  Nothing of the compiler proper is
-; involved, so a failure here is in one of those three and nowhere else.
+; The assembler, the linker, the ELF writer and the runtime together: skunkc
+; writes a hand-built executable and we run it.  Nothing of the compiler proper
+; is involved, so a failure here is in one of those four and nowhere else.  What
+; it prints is what the interpreter prints for the same values.
 
 (rule
- (targets hello.exe)
+ (targets selftest.exe)
  (action
-  (run %{exe:../src/compiler/skunkc.exe} --selftest hello.exe)))
+  (run %{exe:../src/compiler/skunkc.exe} --selftest selftest.exe)))
 
 (rule
  (with-stdout-to
-  hello.out
-  (run %{dep:hello.exe})))
+  selftest.out
+  (run %{dep:selftest.exe})))
 
 (rule
  (alias runtest)
  (action
-  (diff hello.expected hello.out)))
+  (diff selftest.expected selftest.out)))
+
+; The other half of it: selftest.sk is the same program in SkunkML, and the
+; interpreter's output for it is diffed against the same golden file.  That is
+; the differential test the whole back end is aimed at -- compiled output has to
+; match `skunk` byte for byte -- run here on a program compiled by hand.
+
+(rule
+ (with-stdout-to
+  selftest.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:selftest.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff selftest.expected selftest.interp.out)))

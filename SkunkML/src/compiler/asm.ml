@@ -70,6 +70,7 @@ let reloc st kind sym addend =
   match kind with Rel32 -> word32 st 0 | Abs64 -> word64 st 0
 
 let dq_sym st sym = reloc st Abs64 sym 0
+let zeros st n = for _ = 1 to n do byte st 0 done
 let dq st n = word64 st n
 let ascii st s = String.iter (fun c -> Buffer.add_char st.buf c) s
 
@@ -164,6 +165,10 @@ let cc = function
   | "ge" -> 0xd
   | "le" -> 0xe
   | "g" -> 0xf
+  | "a" -> 0x7
+  | "ae" -> 0x3
+  | "b" -> 0x2
+  | "be" -> 0x6
   | c -> failwith ("asm: no condition " ^ c)
 
 let rec instr st (i : M.instr) =
@@ -190,6 +195,13 @@ let rec instr st (i : M.instr) =
       end
   | M.Mov (M.Reg d, src) -> op_rm st [ 0x8b ] ~reg:(num d) ~rm:src
   | M.Mov (dst, M.Reg s) -> op_rm st [ 0x89 ] ~reg:(num s) ~rm:dst
+  | M.Mov ((M.Mem { base = None; index = None; sym = Some _; _ } as dst), M.Imm _) ->
+      (* rip-relative plus an immediate would need the distance measured from
+         after the immediate, and the relocation says "from after the
+         displacement".  Rather than carry a second addend convention, refuse
+         it: the code generator loads the constant into a register first. *)
+      ignore dst;
+      failwith "asm: cannot store an immediate through a rip-relative address"
   | M.Mov (dst, M.Imm n) ->
       let put, rx = modrm st ~reg:0 ~rm:dst in
       put_rex st rx;
@@ -267,6 +279,16 @@ let rec instr st (i : M.instr) =
       if n >= 8 then byte st 0x41;
       byte st (0x58 lor (n land 7))
   | M.Push _ | M.Pop _ -> failwith "asm: push and pop take a register"
+  | M.Loadb (d, src) -> op_rm st [ 0x0f; 0xb6 ] ~reg:(num d) ~rm:src
+  | M.Storeb (dst, s) ->
+      (* A byte store has no REX.W -- the operand size is fixed -- but it does
+         need the prefix at all, or sil, dil and the low bytes of r8 and up
+         cannot be named. *)
+      let put, rx = modrm st ~reg:(num s) ~rm:dst in
+      put_rex st { rx with w = false };
+      byte st 0x88;
+      put ()
+  | M.RepMovsb -> bytes st [ 0xf3; 0xa4 ]
 
 (* Jumps are always the four-byte form: choosing the short one would need a
    second pass, and nothing here is short of space. *)

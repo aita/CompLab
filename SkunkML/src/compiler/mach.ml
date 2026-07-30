@@ -21,22 +21,31 @@ type reg =
   | V of int (* a virtual register: one SSA value *)
   | R of int (* a real one, indexing [reg_name] *)
 
-(* The System V order for the ones we use.  rsp and rbp are not allocatable;
-   r10 is kept back as a scratch for spilled operands. *)
+(* The allocatable registers first, in the System V argument order so that a
+   call's operands often need no moves, then the three that are never handed
+   out: r10 is the scratch a spilled operand is loaded into, and rsp and rbp
+   belong to the frame. *)
 let reg_name =
-  [| "rax"; "rcx"; "rdx"; "rsi"; "rdi"; "r8"; "r9"; "r11"; "rbx"; "r12"; "r13"; "r14"; "r15" |]
+  [|
+    "rax"; "rcx"; "rdx"; "rsi"; "rdi"; "r8"; "r9"; "r11"; "rbx"; "r12"; "r13"; "r14"; "r15";
+    "r10"; "rsp"; "rbp";
+  |]
 
 (* The number the instruction encoding uses for each of them, which is not the
    order they are listed in. *)
-let x86 = [| 0; 1; 2; 6; 7; 8; 9; 11; 3; 12; 13; 14; 15 |]
+let x86 = [| 0; 1; 2; 6; 7; 8; 9; 11; 3; 12; 13; 14; 15; 10; 4; 5 |]
 
 let rax = 0
 let rcx = 1
 let rdx = 2
 let rsi = 3
 let rdi = 4
-let scratch = "r10"
-let nregs = Array.length reg_name
+let scratch = 13
+let rsp = 14
+let rbp = 15
+
+(* How many colours the register allocator has. *)
+let nregs = 13
 
 (* Which registers a call destroys.  The callee-saved ones survive it, which is
    what makes them worth having: a value live across a call wants to be in
@@ -67,6 +76,10 @@ type instr =
   | CallReg of reg * reg option (* through a register *)
   | Push of operand
   | Pop of operand
+  (* Byte-wide moves, for the inside of a string; [Loadb] zero-extends. *)
+  | Loadb of reg * operand
+  | Storeb of operand * reg
+  | RepMovsb (* rcx bytes from rsi to rdi *)
   | Syscall
   | Comment of string
 
@@ -147,6 +160,9 @@ let instr_str = function
   | Cqo -> "cqo"
   | Call (s, _) -> Printf.sprintf "call %s" s
   | CallReg (r, _) -> Printf.sprintf "call *%s" (reg_str r)
+  | Loadb (d, s) -> Printf.sprintf "movzbq %s, %s" (operand_str s) (reg_str d)
+  | Storeb (d, s) -> Printf.sprintf "movb %s, %s" (reg_str s) (operand_str d)
+  | RepMovsb -> "rep movsb"
   | Push o -> Printf.sprintf "push %s" (operand_str o)
   | Pop o -> Printf.sprintf "pop %s" (operand_str o)
   | Syscall -> "syscall"
