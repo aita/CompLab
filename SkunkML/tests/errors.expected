@@ -18,4 +18,6 @@ errors/nomatch.sk:1:5: match failure: no pattern matched
 ?: runtime error: division by zero
 val a : int array = [|0, 0|]
 ?: runtime error: Array.sub: index 5 out of 0..1
+val a : int array = [||]
+?: runtime error: Array.sub: index 0 out of 0..~1
 errors/syntax.sk:2:1: syntax error: unexpected end of file

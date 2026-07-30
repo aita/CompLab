@@ -82,9 +82,16 @@ let alloc w n =
 let get w a = w.cells.(a)
 let set w a v = w.cells.(a) <- v
 
+(* How an integer is spelled: SML writes the sign as `~`.  Negating and printing
+   the result would be wrong for the one integer that has no positive twin, so
+   the sign is replaced rather than removed. *)
+let int_str n =
+  let s = string_of_int n in
+  if s.[0] = '-' then "~" ^ String.sub s 1 (String.length s - 1) else s
+
 let rec show w v =
   match v with
-  | VInt n -> if n < 0 then Printf.sprintf "~%d" (-n) else string_of_int n
+  | VInt n -> int_str n
   | VStr s -> Printf.sprintf "%S" s
   | VUnit -> "()"
   | VRecord [] -> "()"
@@ -272,7 +279,8 @@ let call_prim w name (v : value) =
       match a with
       | VArray (base, len) ->
           let i = as_int i in
-          if i < 0 || i >= len then fault "Array.sub: index %d out of 0..%d" i (len - 1)
+          if i < 0 || i >= len then
+            fault "Array.sub: index %s out of 0..%s" (int_str i) (int_str (len - 1))
           else get w (base + i)
       | _ -> fault "expected an array")
   | "Array.update" -> (
@@ -280,7 +288,8 @@ let call_prim w name (v : value) =
       match a with
       | VArray (base, len) ->
           let i = as_int i in
-          if i < 0 || i >= len then fault "Array.update: index %d out of 0..%d" i (len - 1)
+          if i < 0 || i >= len then
+            fault "Array.update: index %s out of 0..%s" (int_str i) (int_str (len - 1))
           else (
             set w (base + i) x;
             VUnit)

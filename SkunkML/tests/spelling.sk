@@ -1,0 +1,22 @@
+(* How a value is spelled, at the edges.
+
+   Both back ends print, and their output has to match byte for byte, so this is
+   where the two spellings are pinned down together rather than one at a time.
+
+   The least integer is reached by doubling rather than written down, because a
+   negation is the one thing that cannot produce it: it is the integer with no
+   positive twin, and it is exactly the one a printer that negates before
+   printing the digits gets wrong. *)
+
+fun dbl (x, 0) = x
+  | dbl (x, n) = dbl (x + x, n - 1)
+
+val least = dbl (~1, 62)
+val greatest = least + 1
+val leastStr = Int.toString least
+val leastAbs = Int.abs least
+val leastNeg = ~least
+
+val zero = 0
+val zeroStr = Int.toString zero
+val negZero = 0 - 0

@@ -1,0 +1,9 @@
+val dbl : int * int -> int = fn
+val least : int = ~4611686018427387904
+val greatest : int = ~4611686018427387903
+val leastStr : string = "~4611686018427387904"
+val leastAbs : int = ~4611686018427387904
+val leastNeg : int = ~4611686018427387904
+val zero : int = 0
+val zeroStr : string = "0"
+val negZero : int = 0
