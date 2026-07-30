@@ -228,14 +228,19 @@ let prim_routine = function
 
 (* Tagged arithmetic.  An integer is 2n + 1, so
 
-     a + b   is  a + b - 1        and with a constant, one lea
-     a - b   is  a - b + 1
-     a * b   is  (a >> 1) * (b - 1) + 1
+     a + b   is  a + b - 1        one lea, always
+     a - b   is  (a + 1) - b
+     a * b   is  (a - 1) * (b >> 1) + 1
      ~a      is  2 - a
 
-   The constant cases are the reason to tile at all: `x + 1` is a single
-   instruction that touches one register and writes another, and never has to
-   untag anything. *)
+   Every one of these has a fixup on it that the untagged arithmetic would not
+   need, and `lea` is where the fixups go: it adds two registers and a constant
+   in one instruction, it writes somewhere neither of them is, and it does not
+   touch the flags.  So `a + b` is a whole tagged addition -- `lea -1(%ra,%rb)`
+   -- rather than a move, an add and a subtract, and `x + 1` is the same tile
+   with the register replaced by the constant.  The subtraction cannot fold its
+   right operand into an address, but it can fold the fixup: `(a + 1) - b` puts
+   the `+1` in the lea that would otherwise have been a `mov`. *)
 
 (* The number a lea would put in its displacement, scaled the way that tile
    needs it -- [2n] to add a tagged constant, [-2n] to subtract one -- or [None]
@@ -248,24 +253,33 @@ let displacement (b : S.value) k =
   | S.Const (S.CInt n) when Asm.fits32 (k * n) -> Some (k * n)
   | _ -> None
 
+(* Which of two arguments is the constant, and what the other one is.  `+` and
+   `*` are commutative and nothing upstream moves the constant to a side: `3 * r
+   * r` associates to the left, so the constant is the *left* argument of the
+   outer multiply.  Asking both sides costs one comparison and is the difference
+   between one instruction and six on that line. *)
+let commuted (a : S.value) (b : S.value) k =
+  match displacement b k with
+  | Some d -> Some (a, d)
+  | None -> ( match displacement a k with Some d -> Some (b, d) | None -> None)
+
 let arith ctx op (args : S.value list) dst =
   match (op, args) with
   | "+", [ a; b ] -> (
-      match displacement b 2 with
-      | Some d -> put ctx (M.Lea (dst, mem ~base:(in_reg ctx a) ~disp:d ()))
+      match commuted a b 2 with
+      | Some (x, d) -> put ctx (M.Lea (dst, mem ~base:(in_reg ctx x) ~disp:d ()))
       | None ->
           let ra = in_reg ctx a in
-          put ctx (M.Mov (reg dst, reg ra));
-          put ctx (M.Alu ("add", reg dst, any ctx b));
-          put ctx (M.Alu ("sub", reg dst, imm 1)))
+          let rb = in_reg ctx b in
+          put ctx (M.Lea (dst, mem ~base:ra ~index:rb ~scale:1 ~disp:(-1) ())))
   | "-", [ a; b ] -> (
       match displacement b (-2) with
       | Some d -> put ctx (M.Lea (dst, mem ~base:(in_reg ctx a) ~disp:d ()))
       | None ->
           let ra = in_reg ctx a in
-          put ctx (M.Mov (reg dst, reg ra));
-          put ctx (M.Alu ("sub", reg dst, any ctx b));
-          put ctx (M.Alu ("add", reg dst, imm 1)))
+          let ob = any ctx b in
+          put ctx (M.Lea (dst, mem ~base:ra ~disp:1 ()));
+          put ctx (M.Alu ("sub", reg dst, ob)))
   | "*", [ a; b ] ->
       let ra = in_reg ctx a in
       let t = fresh ctx in

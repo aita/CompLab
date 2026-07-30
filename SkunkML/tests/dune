@@ -504,6 +504,58 @@
  (action
   (diff wide.expected wide.bin.out)))
 
+; Strength reduction.  arith.sk asks every tile that a constant operand changes
+; -- the multiplies that became a lea or a shift, the divisions that became a
+; shift and a sign fixup, the additions that became one three-operand lea -- of
+; a negative operand as well as a positive one.  `div` truncates towards zero
+; and a shift does not, so the negative half is the half that matters, and the
+; interpreter is what says what the answer should have been.
+
+(rule
+ (with-stdout-to
+  arith.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:arith.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff arith.expected arith.interp.out)))
+
+(rule
+ (targets arith.bin)
+ (deps arith.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o arith.bin arith.sk)))
+
+(rule
+ (with-stdout-to
+  arith.bin.out
+  (run %{dep:arith.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff arith.expected arith.bin.out)))
+
+; And with the optimiser off, because `--no-opt` is where both operands of a
+; multiply can still be constants when selection gets there.
+
+(rule
+ (targets arith.noopt.bin)
+ (deps arith.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} --no-opt -o arith.noopt.bin arith.sk)))
+
+(rule
+ (with-stdout-to
+  arith.noopt.bin.out
+  (run %{dep:arith.noopt.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff arith.expected arith.noopt.bin.out)))
+
 ; The optimiser.  opt.sk has one redundancy per line, each of a kind only one
 ; pass can see; the golden file is the SSA that comes out the far side.  Read it
 ; next to `--no-opt --dump-ssa` on the same file to see what each pass did.
