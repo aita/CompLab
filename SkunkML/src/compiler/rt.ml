@@ -163,13 +163,28 @@ let bool_false = "skunk_false"
 let say s = [ lea rdi (glob (lit s)); Cl "rt_outs" ]
 let complain s = [ lea rdi (glob (lit s)); Cl "skunk_fail" ]
 
+(* ---- the two ways of reaching the outside ---------------------------------- *)
+
+(* Freestanding, the runtime asks the kernel directly.  Linked against libc, it
+   asks libc -- through a word the dynamic linker filled in, because there is no
+   PLT ([dyn.ml](dyn.ml)).  The argument registers are the same either way, which
+   is why only the last two instructions differ: a syscall wants its number in
+   rax, a call wants an address. *)
+let write_out dyn =
+  if dyn then [ load rax (glob (Dyn.slot "write")); I (M.CallReg rax) ]
+  else [ movi rax 1; syscall ]
+
+let leave dyn code =
+  if dyn then [ movi rdi code; load rax (glob (Dyn.slot "exit")); I (M.CallReg rax) ]
+  else [ movi rax 60; movi rdi code; syscall ]
+
 (* ---- output -------------------------------------------------------------- *)
 
 (* stdout is buffered here rather than in the kernel, because `show` writes a
    byte at a time and a syscall per byte would be absurd.  Anything that is
    about to write to stderr flushes first, so the two streams stay in the order
    they were produced. *)
-let output =
+let output dyn =
   [
     L "rt_flush";
     load rax (glob "skunk_outlen");
@@ -178,8 +193,9 @@ let output =
     movr rdx rax;
     lea rsi (glob "skunk_outbuf");
     movi rdi 1;
-    movi rax 1;
-    syscall;
+  ]
+  @ write_out dyn
+  @ [
     movi rax 0;
     store (glob "skunk_outlen") rax;
     L "rt_flush.done";
@@ -239,8 +255,9 @@ let output =
     movr rdx r12;
     movr rsi rbx;
     movi rdi 2;
-    movi rax 1;
-    syscall;
+  ]
+  @ write_out dyn
+  @ [
     pop r12;
     pop rbx;
     Ret;
@@ -275,19 +292,32 @@ let heap_words = heap_bytes / 8
 let map_bytes = heap_words
 let mstack_bytes = heap_words / 2 * 8
 
-let heap =
-  [
-    L "rt_heap_init";
-    movi rax 9 (* mmap *);
-    movi rdi 0 (* let the kernel choose *);
-    movi rsi (heap_bytes + (2 * map_bytes) + mstack_bytes);
-    movi rdx 3 (* PROT_READ | PROT_WRITE *);
-    movi r10 0x22 (* MAP_PRIVATE | MAP_ANONYMOUS *);
-    movi r8 (-1);
-    movi r9 0;
-    syscall;
+let heap dyn =
+  [ L "rt_heap_init" ]
+  @ (if dyn then
+       (* calloc rather than malloc: the two maps have to start as zeros, and
+          for a request this size glibc goes to the kernel and gets that for
+          free -- the same pages the freestanding path asks for itself. *)
+       [
+         movi rdi 1;
+         movi rsi (heap_bytes + (2 * map_bytes) + mstack_bytes);
+         load rax (glob (Dyn.slot "calloc"));
+         I (M.CallReg rax);
+       ]
+     else
+       [
+         movi rax 9 (* mmap *);
+         movi rdi 0 (* let the kernel choose *);
+         movi rsi (heap_bytes + (2 * map_bytes) + mstack_bytes);
+         movi rdx 3 (* PROT_READ | PROT_WRITE *);
+         movi r10 0x22 (* MAP_PRIVATE | MAP_ANONYMOUS *);
+         movi r8 (-1);
+         movi r9 0;
+         syscall;
+       ])
+  @ [
     cmp rax (imm 0);
-    Br ("l", "rt_heap_init.fail");
+    Br ("le", "rt_heap_init.fail");
     store (glob "skunk_heap_start") rax;
     store (glob "skunk_cursor") rax;
     movr rdx rax;
@@ -691,12 +721,12 @@ let collector =
 
 (* The two ways a program stops early.  Neither returns, so there is no
    epilogue and no need to restore anything. *)
-let failures =
+let failures dyn =
   [ L "skunk_fail"; push rbx; movr rbx rdi ]
   @ [ lea rdi (glob (lit "?: runtime error: ")); Cl "rt_errs" ]
   @ [ movr rdi rbx; Cl "rt_errs" ]
   @ [ lea rdi (glob (lit "\n")); Cl "rt_errs" ]
-  @ [ movi rax 60; movi rdi 1; syscall ]
+  @ leave dyn 1
   (* An out-of-range index, with the numbers in it, because "index 5 out of
      0..1" is the difference between a message and a shrug. *)
   @ [ L "skunk_fail_index"; push rbx; push r12; push r13 ]
@@ -708,7 +738,7 @@ let failures =
   @ [ lea rdi (glob (lit " out of 0..")); Cl "rt_errs" ]
   @ [ movr rdi r13; sub rdi (imm 1); Cl "rt_errnum" ]
   @ [ lea rdi (glob (lit "\n")); Cl "rt_errs" ]
-  @ [ movi rax 60; movi rdi 1; syscall ]
+  @ leave dyn 1
   @ [ L "rt_errnum"; push rbx; movr rbx rdi ]
   @ [ cmp rbx (imm 0); Br ("ge", "rt_errnum.pos") ]
   @ [ lea rdi (glob (lit "~")); Cl "rt_errs"; neg rbx ]
@@ -717,7 +747,7 @@ let failures =
   @ [ L "skunk_match_fail"; push rbx; movr rbx rdi ]
   @ [ movr rdi rbx; Cl "rt_errs" ]
   @ [ lea rdi (glob (lit ": match failure: no pattern matched\n")); Cl "rt_errs" ]
-  @ [ movi rax 60; movi rdi 1; syscall ]
+  @ leave dyn 1
 
 (* ---- strings ------------------------------------------------------------- *)
 
@@ -1546,7 +1576,7 @@ let printing =
 (* The kernel jumps straight here: no libc, so no ctors, no argv parsing, and
    nothing to do but make the heap, make the one unit value everything shares,
    and run the program. *)
-let start =
+let start dyn =
   [
     L "_start";
     (* The stack goes down from here, and the collector needs to know where "up"
@@ -1559,15 +1589,13 @@ let start =
     store (glob "skunk_the_unit") rax;
     Cl "skunk_program";
     Cl "rt_flush";
-    movi rax 60;
-    movi rdi 0;
-    syscall;
   ]
+  @ leave dyn 0
 
-let text st =
+let text ?(dynamic = false) st =
   emit st
-    (start @ output @ heap @ collector @ failures @ strings @ equality @ order @ arithmetic
-    @ arrays @ lists @ printing)
+    (start dynamic @ output dynamic @ heap dynamic @ collector @ failures dynamic @ strings
+    @ equality @ order @ arithmetic @ arrays @ lists @ printing)
 
 (* ---- static data --------------------------------------------------------- *)
 

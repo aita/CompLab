@@ -113,14 +113,18 @@ let program_entry st (p : M.prog) =
     p.M.items;
   A.ret st
 
-let program (p : M.prog) ~path =
+let program ?(dynamic = false) (p : M.prog) ~path =
   let text = A.create () and data = A.create () in
   List.iter (func text) p.M.funcs;
   program_entry text p;
   Stubs.text text;
-  Rt.text text;
+  Rt.text ~dynamic text;
   Rt.data_start data;
   Statics.write data;
   Rt.data data;
+  (* The dynamic tables go inside the range the collector scans, which is
+     harmless: it is all words that either point outside the heap or are not
+     8-aligned, and every candidate is checked anyway. *)
+  if dynamic then Dyn.write data;
   Rt.data_end data;
-  Link.link ~path ~text ~data ~entry:"_start"
+  Link.link ~dynamic ~path ~text ~data ~entry:"_start" ()

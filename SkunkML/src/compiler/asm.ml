@@ -71,6 +71,13 @@ let reloc st kind sym addend =
 
 let dq_sym st sym = reloc st Abs64 sym 0
 let zeros st n = for _ = 1 to n do byte st 0 done
+let db st n = byte st n
+
+let dw st n =
+  byte st n;
+  byte st (n asr 8)
+
+let dd st n = word32 st n
 let dq st n = word64 st n
 let ascii st s = String.iter (fun c -> Buffer.add_char st.buf c) s
 

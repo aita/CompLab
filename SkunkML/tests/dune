@@ -433,3 +433,40 @@
  (alias runtest)
  (action
   (diff loop.run.expected loop.interp.out)))
+
+; And the same programs again, linked against libc.  The dynamic linker fills in
+; the words the runtime calls through, so the heap comes from `calloc`, output
+; goes through libc's `write` and the program leaves through `exit` -- and the
+; output still has to match, byte for byte.
+
+(rule
+ (targets tour.dyn)
+ (deps ../examples/tour.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} --dynamic -o tour.dyn ../examples/tour.sk)))
+
+(rule
+ (with-stdout-to
+  tour.dyn.out
+  (run %{dep:tour.dyn})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.dyn.out)))
+
+(rule
+ (targets gc.dyn)
+ (deps gc.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} --dynamic -o gc.dyn gc.sk)))
+
+(rule
+ (with-stdout-to
+  gc.dyn.out
+  (run %{dep:gc.dyn})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gc.expected gc.dyn.out)))

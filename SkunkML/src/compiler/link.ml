@@ -25,7 +25,7 @@ let patch (b : Bytes.t) at n width =
     Bytes.set b (at + i) (Char.chr ((n asr (8 * i)) land 0xff))
   done
 
-let link ~path ~(text : A.t) ~(data : A.t) ~entry =
+let link ?(dynamic = false) ~path ~(text : A.t) ~(data : A.t) ~entry () =
   let text_addr, data_addr, data_offset = Elf.layout ~text:(A.contents text) in
   (* One namespace: a label is in the text or in the data, and nothing is in
      both -- the assembler would have refused a duplicate. *)
@@ -51,6 +51,21 @@ let link ~path ~(text : A.t) ~(data : A.t) ~entry =
     Bytes.to_string b
   in
   let text_bytes = apply text text_addr and data_bytes = apply data data_addr in
+  (* The dynamic tables are labels in the data section, so their file offsets are
+     the data segment's offset plus wherever the label landed.  A segment's
+     address is its file offset plus the base, so the program headers need no
+     other arithmetic. *)
+  let dynamic =
+    if not dynamic then None
+    else
+      let off name = data_offset + Hashtbl.find data.A.syms name in
+      let size a b = Hashtbl.find data.A.syms b - Hashtbl.find data.A.syms a in
+      Some
+        ( off "skunk_interp",
+          String.length Dyn.interp + 1,
+          off "skunk_dynamic",
+          size "skunk_dynamic" "skunk_dynamic_end" )
+  in
   Elf.write ~path
     {
       Elf.text = text_bytes;
@@ -58,5 +73,6 @@ let link ~path ~(text : A.t) ~(data : A.t) ~entry =
       text_addr;
       data_addr;
       entry = resolve entry;
+      dynamic;
     }
     ~data_offset

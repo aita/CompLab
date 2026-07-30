@@ -124,8 +124,10 @@ Chaitin's algorithm with Briggs' optimistic push, spilling to the frame and
 re-running until it fits.
 
 Then it writes the executable itself. There is no `as` and no `ld` after
-selection: the compiler encodes the instructions, assigns the addresses, patches
-the relocations and writes a static ELF64 -- and since there is no linker to
+selection -- and none with `--dynamic` either, which writes the tables `ld.so`
+reads by hand and links against libc.so.6 with no PLT. By default the compiler
+encodes the instructions, assigns the addresses, patches the relocations and
+writes a static ELF64 -- and since there is no linker to
 hand a C object to, the runtime is written in amd64 too -- including the garbage
 collector. `mmap` for the heap, `write` for output, `exit` at the end, and no
 libc.

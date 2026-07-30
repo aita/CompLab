@@ -23,6 +23,8 @@ let usage () =
     \      --no-opt      do not optimise: skip folding, sccp, gvn, dce and\n\
     \                    instruction scheduling\n\
     \  -o FILE           write the executable here (the default is a.out)\n\
+    \      --dynamic     link against libc.so.6 instead of writing a\n\
+    \                    freestanding executable\n\
     \      --dump-encoding\n\
     \                    print the bytes for the tricky addressing modes\n\
     \  -h, --help        this\n"
@@ -35,6 +37,7 @@ let selftest_to = ref None
 let dump_opt = ref false
 let dump_mach = ref false
 let optimise = ref true
+let dynamic = ref false
 let out = ref None
 
 let parse ~file source =
@@ -168,7 +171,7 @@ let selftest path =
   block "t_clos" "t_clos_desc" [ `Int 0 ];
   Rt.data data;
   Rt.data_end data;
-  Link.link ~path ~text ~data ~entry:"_start"
+  Link.link ~path ~text ~data ~entry:"_start" ()
 
 (* The corner cases of the encoding, as bytes.  Every line here was checked
    against the system assembler once; the golden file is what keeps it checked.
@@ -248,6 +251,9 @@ let () =
         args rest
     | "--no-opt" :: rest ->
         optimise := false;
+        args rest
+    | "--dynamic" :: rest ->
+        dynamic := true;
         args rest
     | "-o" :: f :: rest ->
         out := Some f;
@@ -353,7 +359,7 @@ let () =
          Regalloc.program mach;
          if !optimise then Sched.program mach;
          if !dump_mach then print_string (Mach.to_string mach);
-         Emit.program mach ~path:(Option.value !out ~default:"a.out")
+         Emit.program ~dynamic:!dynamic mach ~path:(Option.value !out ~default:"a.out")
        with Loc.Error { loc; where; msg } ->
          flush stdout;
          Printf.eprintf "%s: %s: %s\n" (Loc.to_string loc) where msg;

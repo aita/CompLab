@@ -55,6 +55,8 @@ skunkc [options] file.sk
       --dump-mach   print the amd64 graph after register allocation
       --no-verify   skip the check that every use is dominated by its definition
   -o FILE           write the executable here (the default is a.out)
+      --dynamic     link against libc.so.6 instead of writing a freestanding
+                    executable
       --selftest F  write a hand-built ELF to F: checks the assembler, the
                     linker, the ELF writer and the runtime on their own
       --dump-encoding
@@ -65,11 +67,14 @@ skunkc [options] file.sk
 `--dump-opt` next to `--no-opt --dump-ssa` on the same file is how to see what
 each optimisation pass did.
 
-`skunkc` writes a static ELF64 with no libc and nothing dynamically linked:
+`skunkc` writes a static ELF64 with no libc and nothing dynamically linked --
+or, with `--dynamic`, one that links against libc.so.6, with the dynamic tables
+written by hand and no PLT:
 
 ```sh
 ./_build/default/src/compiler/skunkc.exe -o /tmp/tour examples/tour.sk
-/tmp/tour
+./_build/default/src/compiler/skunkc.exe --dynamic -o /tmp/tour.dyn examples/tour.sk
+/tmp/tour && /tmp/tour.dyn
 ```
 
 Its output has to match `skunk`'s byte for byte, error messages included. That
@@ -334,7 +339,8 @@ In `src/compiler/`:
 | `emit.ml` | 124 | the frame, the fall-throughs, and `skunk_program` |
 | `asm.ml` | 311 | the assembler: REX, ModRM, SIB, and the relocations |
 | `link.ml` | 62 | addresses, symbols, and patching the holes |
-| `elf.ml` | 103 | a static ELF64 with two segments |
+| `elf.ml` | 155 | an ELF64: two segments, and three more headers when dynamic |
+| `dyn.ml` | 144 | the tables `ld.so` reads, and one GOT word per libc function |
 | `rt.ml` | 1660 | the runtime, in amd64: the heap and the collector, equality, strings, `show` |
 | `skunkc.ml` | 360 | the command line, and the hand-built self-test |
 
@@ -358,7 +364,8 @@ about. Every program in `tests/errors/` is expected to fail with the message in
 verifier.
 
 Then the same examples are compiled, run, and diffed against the interpreter's
-output. `tests/selftest.sk` is diffed twice: once as the interpreter runs it, and
+output -- twice for two of them, once freestanding and once linked against libc,
+because the differential test works on both paths. `tests/selftest.sk` is diffed twice: once as the interpreter runs it, and
 once against a program `skunkc --selftest` writes by hand -- static blocks,
 hand-written descriptors, every runtime routine called once -- so that a failure
 in the assembler, the linker, the ELF writer or the runtime shows up without the
