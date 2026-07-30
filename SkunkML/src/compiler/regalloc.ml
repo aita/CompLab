@@ -270,8 +270,12 @@ let moves_of (f : M.func) =
                  neighbours of significant degree, so it will still simplify
 
    Neither is exact.  Both are *conservative*: they never fuse a pair that would
-   make an colourable graph uncolourable, and they refuse some pairs that would
-   have been fine. *)
+   make a colourable graph uncolourable, and they refuse some pairs that would
+   have been fine.  Fusing without a test and undoing it when the colouring
+   fails -- Park and Moon's optimistic coalescing -- is the usual answer to
+   that, and here it is not worth it: on these programs Briggs refuses almost
+   nothing, and where it does refuse the optimism costs more spills than the
+   copies it saves ([13章](../doc/13-regalloc.md)). *)
 
 exception Spilled of int list
 
