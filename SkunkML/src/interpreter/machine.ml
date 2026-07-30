@@ -86,11 +86,37 @@ let alloc w n =
 let get w a = w.cells.(a)
 let set w a v = w.cells.(a) <- v
 
+(* How an integer is spelled: SML writes the sign as `~`.  Negating and printing
+   the result would be wrong for the one integer that has no positive twin, so
+   the sign is replaced rather than removed. *)
+let int_str n =
+  let s = string_of_int n in
+  if s.[0] = '-' then "~" ^ String.sub s 1 (String.length s - 1) else s
+
+(* And how a string is spelled: the four escapes the lexer reads, and every
+   other byte through untouched.  OCaml's `%S` also turns a byte outside
+   printable ASCII into `\ddd`, which is an escape this language cannot read
+   back and which the runtime's `show` does not produce. *)
+let str_str s =
+  let b = Buffer.create (String.length s + 2) in
+  Buffer.add_char b '"';
+  String.iter
+    (fun c ->
+      match c with
+      | '"' -> Buffer.add_string b "\\\""
+      | '\\' -> Buffer.add_string b "\\\\"
+      | '\n' -> Buffer.add_string b "\\n"
+      | '\t' -> Buffer.add_string b "\\t"
+      | c -> Buffer.add_char b c)
+    s;
+  Buffer.add_char b '"';
+  Buffer.contents b
+
 let rec show w v =
   match v with
-  | VInt n -> if n < 0 then Printf.sprintf "~%d" (-n) else string_of_int n
+  | VInt n -> int_str n
   | VReal r -> Types.real_str r
-  | VStr s -> Printf.sprintf "%S" s
+  | VStr s -> str_str s
   | VUnit -> "()"
   | VRecord [] -> "()"
   | VRecord fs when Types.tuple_shaped fs ->
@@ -284,7 +310,11 @@ let call_prim w name (v : value) =
   | "String.substring" ->
       let s, i, n = triple () in
       let s = as_str s and i = as_int i and n = as_int n in
-      if i < 0 || n < 0 || i + n > String.length s then fault "String.substring: out of range"
+      (* `i + n > size` is the obvious test and it is wrong: both are program
+         values, so their sum can wrap round and let an out-of-range pair
+         through to `String.sub`, which raises where a runtime error was owed.
+         Subtracting cannot wrap, because `i` is already known non-negative. *)
+      if i < 0 || n < 0 || n > String.length s - i then fault "String.substring: out of range"
       else VStr (String.sub s i n)
   | "Array.array" ->
       let n, init = pair () in
@@ -321,7 +351,8 @@ let call_prim w name (v : value) =
       match a with
       | VArray (base, len) ->
           let i = as_int i in
-          if i < 0 || i >= len then fault "Array.sub: index %d out of 0..%d" i (len - 1)
+          if i < 0 || i >= len then
+            fault "Array.sub: index %s out of 0..%s" (int_str i) (int_str (len - 1))
           else get w (base + i)
       | _ -> fault "expected an array")
   | "Array.update" -> (
@@ -329,7 +360,8 @@ let call_prim w name (v : value) =
       match a with
       | VArray (base, len) ->
           let i = as_int i in
-          if i < 0 || i >= len then fault "Array.update: index %d out of 0..%d" i (len - 1)
+          if i < 0 || i >= len then
+            fault "Array.update: index %s out of 0..%s" (int_str i) (int_str (len - 1))
           else (
             set w (base + i) x;
             VUnit)

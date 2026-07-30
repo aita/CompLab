@@ -1,0 +1,8 @@
+datatype colour = Red | Green | Blue
+val fromList : bool = false
+val fromCons : bool = true
+val fromColour : bool = false
+val fromColour2 : bool = true
+val fromOption : bool = false
+val both : int -> bool * bool * 'a list * colour = fn
+val pair : bool * bool * '_35 list * colour = (true, false, [], Red)

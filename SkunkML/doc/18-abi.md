@@ -92,14 +92,19 @@ call *%rcx
 
 ## 18.4 レジスタ
 
-割り付けに使うのは13本。並びは System V の引数順で、呼び出しの被演算子が移動を
+割り付けに使うのは14本。並びは System V の引数順で、呼び出しの被演算子が移動を
 要らなくなることが多い。
 
 | | |
 |---|---|
-| caller-saved | `rax` `rcx` `rdx` `rsi` `rdi` `r8` `r9` `r11` |
+| caller-saved | `rax` `rcx` `rdx` `rsi` `rdi` `r8` `r9` `r11` `r10` |
 | callee-saved | `rbx` `r12` `r13` `r14` `r15` |
-| 配らない | `r10`（末尾呼び出しの飛び先を待たせるスクラッチ）・`rsp`・`rbp` |
+| 配らない | `rsp`・`rbp` |
+
+**スクラッチ用に取り置く register はない。** 1本取り置けば色が1つ減るが、それを
+欲しがりそうな2つはどちらも要らない — 溢れた値は載せ降ろしを挟んだ新しい仮想
+register に書き換わるし、末尾呼び出しが飛び先を読むのには caller-saved なら
+どれでもよい（18.5）。
 
 **呼び出しをまたいで生きている値は callee-saved かフレームスロットにしかない。**
 呼び出しが caller-saved を全部定義するので、干渉グラフがそう押し出す
@@ -120,12 +125,13 @@ call *%rcx
 ```
 
 溢れの場所は `[rsp + 8i]`。末尾呼び出しはフレームを畳んでから飛ぶので、飛び先を
-`r10` に読んでおく — `pop` はそれを触らない。
+`rax` に読んでおく — 末尾呼び出しの時点で生きているのはクロージャと引数だけなので
+caller-saved ならどれでもよく、`pop` はそれを触らない。
 
 ```
-mov (%rdi), %r10
+mov (%rdi), %rax
 <epilogue>
-jmp *%r10
+jmp *%rax
 ```
 
 ## 18.6 記号の名前
@@ -155,9 +161,13 @@ jmp *%r10
 | `skunk_data_start` `skunk_data_end` | データ領域の範囲。収集器が保守的に走査する |
 | `skunk_true` `skunk_false` `skunk_nil` | 引数のない組み込み構成子の塊 |
 | `skunk_true_name` `skunk_false_name` `skunk_nil_name` `skunk_cons_name` | その名前の文字列の塊。`show` が使う |
-| `skunk_stack_top` | `_start` が `rsp` を書き込む1語 |
 
 **実行時が出し、コンパイラが使う:**
+
+| | |
+|---|---|
+| `skunk_boot` | `_start` が呼ぶ。ヒープを敷いて `skunk_program` へ行く |
+| `skunk_stack_top` | `_start` が `rsp` を書き込む1語。収集器の走査はここで止まる |
 
 記述子 — `skunk_string_desc` `skunk_unit_desc` `skunk_array_desc` `skunk_ref_desc`
 `skunk_pair_desc` `skunk_true_desc` `skunk_false_desc` `skunk_nil_desc`

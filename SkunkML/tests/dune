@@ -168,6 +168,12 @@
     (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/bounds.sk}))
    (with-accepted-exit-codes
     1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/bounds0.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/subrange.sk}))
+   (with-accepted-exit-codes
+    1
     (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/syntax.sk})))))
 
 (rule
@@ -347,6 +353,66 @@
  (alias runtest)
  (action
   (diff gc.expected gc.bin.out)))
+
+; How a value is spelled at the edges.  Both halves print it, so both are
+; diffed against the same golden file.
+
+(rule
+ (with-stdout-to
+  spelling.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:spelling.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff spelling.expected spelling.interp.out)))
+
+(rule
+ (targets spelling.bin)
+ (deps spelling.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o spelling.bin spelling.sk)))
+
+(rule
+ (with-stdout-to
+  spelling.bin.out
+  (run %{dep:spelling.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff spelling.expected spelling.bin.out)))
+
+; Nullary constructors: two datatypes number theirs the same way, so a pass
+; that materialises one has to say which type it means.  Both halves are
+; diffed against the same golden file, and only the optimised half could
+; ever have got it wrong.
+
+(rule
+ (with-stdout-to
+  nullary.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:nullary.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff nullary.expected nullary.interp.out)))
+
+(rule
+ (targets nullary.bin)
+ (deps nullary.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o nullary.bin nullary.sk)))
+
+(rule
+ (with-stdout-to
+  nullary.bin.out
+  (run %{dep:nullary.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff nullary.expected nullary.bin.out)))
 
 ; The optimiser.  opt.sk has one redundancy per line, each of a kind only one
 ; pass can see; the golden file is the SSA that comes out the far side.  Read it
