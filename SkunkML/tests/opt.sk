@@ -1,0 +1,27 @@
+(* What the optimiser is for.  Every line here has something redundant in it
+   that a later pass can see and an earlier one cannot. *)
+
+(* Common subexpressions: the same field read twice, and the same sum twice. *)
+fun twice (r : { x : int, y : int }) = (#x r + #y r) + (#x r + #y r)
+
+(* Constants all the way down, including a comparison, which then makes one arm
+   of the `if` unreachable. *)
+val folded = 6 * 7 + 0
+val chosen = if 3 < 4 then "yes" else "no"
+
+(* A record built and immediately taken apart. *)
+val projected = #2 (1, 2 + 3)
+
+(* Dead: nothing uses it, and building a list has no effect worth keeping. *)
+fun wasteful n = let val unused = [n, n, n] in n + 1 end
+
+(* The constant reaches the comparison through a join point, which is the case
+   only a conditional analysis gets: `n` is 5 on both paths. *)
+fun throughAJoin b =
+  let val n = if b then 5 else 5
+  in if n = 5 then "five" else "other"
+  end
+
+val a = twice { x = 1, y = 2 }
+val b = wasteful 10
+val c = throughAJoin true

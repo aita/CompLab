@@ -1,0 +1,9 @@
+val twice : { x : int, y : int } -> int = fn
+val folded : int = 42
+val chosen : string = "yes"
+val projected : int = 5
+val wasteful : int -> int = fn
+val throughAJoin : bool -> string = fn
+val a : int = 6
+val b : int = 11
+val c : string = "five"

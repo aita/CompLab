@@ -18,7 +18,9 @@ let usage () =
      definition\n\
     \      --selftest F  write a hand-built ELF to F: checks the assembler,\n\
     \                    the linker and the ELF writer on their own\n\
+    \      --dump-opt    print the SSA again, after optimisation\n\
     \      --dump-mach   print the amd64 graph after register allocation\n\
+    \      --no-opt      do not optimise: skip folding, sccp, gvn and dce\n\
     \  -o FILE           write the executable here (the default is a.out)\n\
     \      --dump-encoding\n\
     \                    print the bytes for the tricky addressing modes\n\
@@ -29,7 +31,9 @@ let dump_dom = ref false
 let dump_flat = ref false
 let verify = ref true
 let selftest_to = ref None
+let dump_opt = ref false
 let dump_mach = ref false
+let optimise = ref true
 let out = ref None
 
 let parse ~file source =
@@ -235,8 +239,14 @@ let () =
     | "--dump-flat" :: rest ->
         dump_flat := true;
         args rest
+    | "--dump-opt" :: rest ->
+        dump_opt := true;
+        args rest
     | "--dump-mach" :: rest ->
         dump_mach := true;
+        args rest
+    | "--no-opt" :: rest ->
+        optimise := false;
         args rest
     | "-o" :: f :: rest ->
         out := Some f;
@@ -317,6 +327,21 @@ let () =
          if !dump_ssa then print_string (Ssa.prog_to_string prog);
          if !dump_dom then
            List.iter (fun f -> print_string (Dom.to_string f)) (Dom.all_funcs prog);
+         if !optimise then begin
+           Opt.program whole;
+           (* Optimisation has to leave it in SSA: every use still dominated by
+              its definition, every phi still with one argument per
+              predecessor.  Checking again is cheap and catches a pass that
+              moved a value somewhere it does not dominate. *)
+           if !verify then
+             match Dom.check_prog whole with
+             | [] -> ()
+             | bad ->
+                 flush stdout;
+                 List.iter (fun m -> Printf.eprintf "skunkc: optimisation broke SSA: %s\n" m) bad;
+                 exit 1
+         end;
+         if !dump_opt then print_string (Ssa.prog_to_string prog);
          (* The back end.  Selection needs the basis to exist first, because a
             program that mentions `print` wants the global that holds it. *)
          Statics.reset ();

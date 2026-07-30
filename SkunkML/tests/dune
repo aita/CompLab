@@ -351,3 +351,45 @@
  (alias runtest)
  (action
   (diff gc.expected gc.bin.out)))
+
+; The optimiser.  opt.sk has one redundancy per line, each of a kind only one
+; pass can see; the golden file is the SSA that comes out the far side.  Read it
+; next to `--no-opt --dump-ssa` on the same file to see what each pass did.
+
+(rule
+ (with-stdout-to
+  opt.out
+  (run %{exe:../src/compiler/skunkc.exe} --dump-opt %{dep:opt.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff opt.expected opt.out)))
+
+; And it has to compute the same thing afterwards.
+
+(rule
+ (with-stdout-to
+  opt.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:opt.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff opt.run.expected opt.interp.out)))
+
+(rule
+ (targets opt.bin)
+ (deps opt.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o opt.bin opt.sk)))
+
+(rule
+ (with-stdout-to
+  opt.bin.out
+  (run %{dep:opt.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff opt.run.expected opt.bin.out)))

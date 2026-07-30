@@ -1,0 +1,90 @@
+func twice$1:
+  b0:
+    v0 = param                             ; a1.19
+    v1 = field v0, x(0)                    ; t.60
+    v2 = field v0, y(1)                    ; t.61
+    v3 = prim + v1, v2                     ; t.62
+    v4 = prim + v3, v3                     ; t.66
+    ret v4
+
+func wasteful$2:
+  b0:
+    v0 = param                             ; a1.20
+    v1 = const 1
+    v2 = prim + v0, v1                     ; t.80
+    ret v2
+
+func throughAJoin$3:
+  b0:
+    v0 = param                             ; a1.21
+    v1 = const "five"
+    switch v0 [true -> b2, false -> b1]
+  b1:                             ; preds b0
+    jump b3
+  b2:                             ; preds b0
+    jump b3
+  b3:                             ; preds b2 b1
+    ret v1
+
+-- val twice : { x : int, y : int } -> int
+func $twice:
+  b0:
+    v0 = mkclos twice$1, 0                 ; twice
+    ret v0
+
+-- val folded : int
+func $folded:
+  b0:
+    v0 = const 42
+    ret v0
+
+-- val chosen : string
+func $chosen:
+  b0:
+    v0 = const "yes"
+    ret v0
+
+-- val projected : int
+func $projected:
+  b0:
+    v0 = const 5
+    ret v0
+
+-- val wasteful : int -> int
+func $wasteful:
+  b0:
+    v0 = mkclos wasteful$2, 0              ; wasteful
+    ret v0
+
+-- val throughAJoin : bool -> string
+func $throughAJoin:
+  b0:
+    v0 = mkclos throughAJoin$3, 0          ; throughAJoin
+    ret v0
+
+-- val a : int
+func $a:
+  b0:
+    v0 = const 1
+    v1 = const 2
+    v2 = global twice
+    v3 = record { x = v0, y = v1 }         ; t.82
+    v4 = call v2, v3                       ; t.83
+    ret v4
+
+-- val b : int
+func $b.2:
+  b0:
+    v0 = const 10
+    v1 = global wasteful
+    v2 = call v1, v0                       ; t.84
+    ret v2
+
+-- val c : string
+func $c:
+  b0:
+    v0 = global throughAJoin
+    v1 = con true/1                        ; t.85
+    v2 = call v0, v1                       ; t.86
+    ret v2
+
