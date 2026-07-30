@@ -25,7 +25,7 @@ val id = fn x => x                                     (* 推論して一般化 
 ```
 
 `fun` の本体を検査するときには自分の型がまだ分かっていないので、`poly` システムでは
-未確定の型変数（existential variable）を立ててから検査し、後で一般化します（[3章](3-poly.md)）。多相再帰は書けません
+未確定の型変数（existential variable）を立ててから検査し、後で一般化します（[4章](4-poly.md)）。多相再帰は書けません
 ——注釈があっても、この処理系は要求しません。
 
 `let` の中にも同じ2つが置けます。`in` の前にいくつ並べてもよく、終わりは `end` です。
@@ -118,71 +118,53 @@ examples/rows.mnk:6:22: type error: records and variants belong to #system row
 
 ## 文法
 
-`parser.mly` が最終的な決定権を持ちますが、要約するとこうです。
+完全な EBNF は[付録](10-grammar.md)にあります。字句、宣言、項、行、パターン、そして
+EBNF が表せない優先順位と結合方向の表まで、そこに1箇所だけ置いてあります
+（`parser.mly` が最終的な決定権を持つことは変わりません）。
+
+この章のために覚えておく形はこれだけです。
 
 ```
-program     ::= ('#system' ident)? toplevel*
-toplevel    ::= decl | 'type' ident ident* '=' term
-decl        ::= 'val' dpat (':' term)? '=' term
-              | 'fun' ident binder+ (':' term)? '=' term
-dpat        ::= ident | '(' ')' | '(' ident ',' ident ')'
-binder      ::= ident | '(' ident ':' term ')'
-
-term        ::= 'fn' binder+ '=>' term
-              | 'let' decl+ 'in' term 'end'
-              | 'case' term 'of' case ('|' case)*
-              | 'branch' term 'of' bcase ('|' bcase)*
-              | 'forall' ident+ '.' term
-              | 'if' term 'then' term 'else' term
-              | 'select' '`'ident app
-              | term binop term | ('-' | '!' | '?') term
-              | app
-case        ::= pat '=>' term
-bcase       ::= '`'ident ident '=>' term
-app         ::= atom | app atom | '`'ident atom
-atom        ::= ident | int | 'true' | 'false' | '(' ')'
-              | '(' term ')' | '(' term ':' term ')' | '(' term ',' term ')'
-              | atom '.' ident | atom '\' ident
-              | '{' '}' | '{' field* '}' | '{' ident ':' term '|' term '}'
-              | '[' ']' | '[' tickfield* ']'
-              | '+{' tickfield* '}' | '&{' tickfield* '}'
-field       ::= ident '=' term | ident ':' term | ',' '..' term
-tickfield   ::= '`'ident ':' term | ',' '..' term
-pat         ::= ident | '_' | '(' ')' | '(' pat ',' pat ')' | '`'ident pat?
-
-binop（弱い順）::= ';' | '->' | '-o' | '==>' | 'orelse' | 'andalso'
-              | '==' '<>' '<' '<=' '>' '>=' | '+' '-' | '*' 'div' 'mod'
+toplevel  ::= 'val' dpat [':' term] '=' term
+            | 'fun' ident binder+ [':' term] '=' term
+            | 'type' ident ident* '=' term
+binder    ::= ident | '(' ident ':' term ')'
+term      ::= 'fn' binder+ '=>' term | 'let' decl+ 'in' term 'end'
+            | 'case' term 'of' cases | 'if' term 'then' term 'else' term
+            | term binop term | app
+atom      ::= … | '(' term ':' term ')' | '{' ident ':' term '|' term '}' | …
 ```
 
-`if` は `;` より強く結合するので `if p then a else b; c` は `(if p then a else b); c` です
-（ML と同じ）。`fn` と `case` は右へ最大限伸びるので、`case` の腕の中の `|` は内側の
-`case` のものになります。
+読み方で覚えておく価値があるのは3つです。`if` は `;` より強く結合するので
+`if p then a else b; c` は `(if p then a else b); c`（ML と同じ）。`fn` と `case` の本体は
+右へ最大限伸びるので `fn x => e; f` は `fn x => (e; f)`。そして `case` の腕の中に `case` を
+書くと、`|` は内側のものになります。
 
 ## 型の記法一覧
 
 どの記法がどのシステムのものかの表です。**書けるが担当外**のときは、担当を教えるエラーに
 なります。
 
-| 記法 | 意味 | poly | row | refine | linear | dep |
-|---|---|:-:|:-:|:-:|:-:|:-:|
-| `int` `bool` `unit` | 基底型 | ○ | ○ | ○ | ○ | `nat` `unit` |
-| `A -> B` | 関数 | ○ | ○ | ○ | ○ | ○ |
-| `A * B` | 直積 | ○ | ○ | ○ | ○ | ○ |
-| `'a` | 型変数 | ○ | ○ | — | — | — |
-| `forall 'a. A` | 全称量化 | ○ | ○（注釈のみ） | — | — | `(a : Type) ->` |
-| `{ l : A, ... }` | レコード型 | — | ○ | — | — | — |
-| `{ l : A, ..'r }` | 開いたレコード型 | — | ○ | — | — | — |
-| `[ `L : A, ... ]` | ヴァリアント型 | — | ○ | — | — | — |
-| `{ v : int \| p }` | 篩型 | — | — | ○ | — | — |
-| `(x : A) -> B` | 依存関数型 | — | — | ○ | — | ○ |
-| `(x : A) * B` | 依存直積（Σ） | — | — | — | — | ○ |
-| `A -o B` | 線形関数 | — | — | — | ○ | — |
-| `lin A` / `un A` | 修飾子 | — | — | — | ○ | — |
-| `chan S` | チャネル | — | — | — | ○ | — |
-| `!A ; S` `?A ; S` `stop` | セッション | — | — | — | ○ | — |
-| `+{ `l : S }` `&{ `l : S }` | 選択 | — | — | — | ○ | — |
-| `Type` `Type 1` | 宇宙 | — | — | — | — | ○ |
-| `Eq A a b` | 等式 | — | — | — | — | ○ |
+| 記法 | 意味 | hm | poly | row | refine | linear | dep |
+|---|---|:-:|:-:|:-:|:-:|:-:|:-:|
+| `int` `bool` `unit` | 基底型 | ○ | ○ | ○ | ○ | ○ | `nat` `unit` |
+| `A -> B` | 関数 | ○ | ○ | ○ | ○ | ○ | ○ |
+| `A * B` | 直積 | ○ | ○ | ○ | ○ | ○ | ○ |
+| `'a` | 型変数 | ○ | ○ | ○ | — | — | — |
+| `forall 'a. A` | 全称量化 | 読み飛ばす | ○ | ○（注釈のみ） | — | — | `(a : Type) ->` |
+| `{ l : A, ... }` | レコード型 | — | — | ○ | — | — | — |
+| `{ l : A, ..'r }` | 開いたレコード型 | — | — | ○ | — | — | — |
+| `[ `L : A, ... ]` | ヴァリアント型 | — | — | ○ | — | — | — |
+| `{ v : int \| p }` | 篩型 | — | — | — | ○ | — | — |
+| `(x : A) -> B` | 依存関数型 | — | — | — | ○ | — | ○ |
+| `(x : A) * B` | 依存直積（Σ） | — | — | — | — | — | ○ |
+| `A -o B` | 線形関数 | — | — | — | — | ○ | — |
+| `lin A` / `un A` | 修飾子 | — | — | — | — | ○ | — |
+| `chan S` | チャネル | — | — | — | — | ○ | — |
+| `!A ; S` `?A ; S` `stop` | セッション | — | — | — | — | ○ | — |
+| `+{ `l : S }` `&{ `l : S }` | 選択 | — | — | — | — | ○ | — |
+| `Type` `Type 1` | 宇宙 | — | — | — | — | — | ○ |
+| `Eq A a b` | 等式 | — | — | — | — | — | ○ |
 
 ## 推論と注釈の境目
 
@@ -190,6 +172,7 @@ binop（弱い順）::= ';' | '->' | '-o' | '==>' | 'orelse' | 'andalso'
 
 | システム | 注釈なしで通るもの | 注釈が必要なもの |
 |---|---|---|
+| `hm` | 書けるものすべて（関数・対・基底型の範囲では完全推論） | なし。rank-2 は注釈しても書けない（[3章](3-hm.md)） |
 | `poly` | 単型と rank-1 多相のすべて（`fun twice f x = f (f x)` は `forall 'a. ('a -> 'a) -> 'a -> 'a`） | 多相な引数（rank-2 以上）。`fn f => (f 1, f true)` は注釈がないと落ちる |
 | `row` | すべて。レコード・ヴァリアント・行変数まで完全推論 | なし（注釈は制約として働き、剛性型変数になる） |
 | `refine` | 述語のない部分。`val x = 3` は `{ v : int \| v == 3 }` | 関数の引数と戻り値の述語。篩は推論しない |
@@ -213,4 +196,4 @@ tests/errors/rank2.mnk:4:32: type error: cannot make bool a subtype of int
 ```
 
 3行目が通るのは、注釈が「検査モード」を作り、`f` の型が `forall` だと**分かっている**状態で
-本体に入れるからです。これが双方向型検査で注釈が果たす仕事で、[3章](3-poly.md)の主題です。
+本体に入れるからです。これが双方向型検査で注釈が果たす仕事で、[4章](4-poly.md)の主題です。

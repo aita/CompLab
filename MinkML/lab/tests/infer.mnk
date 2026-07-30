@@ -1,0 +1,7 @@
+#system hm
+
+(* What Algorithm W does, step by step, with --dump-infer. *)
+
+fun twice f x = f (f x)
+
+val usedTwice = let val same = fn x => x in (same 1, same true) end

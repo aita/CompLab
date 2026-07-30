@@ -1,3 +1,4 @@
+errors/monomorphic.mnk:6:25: type error: cannot unify int with bool
 errors/rank2.mnk:4:32: type error: cannot make bool a subtype of int
 errors/mismatch.mnk:2:23: type error: cannot make bool a subtype of int
 errors/field.mnk:3:11: type error: there is no field x here

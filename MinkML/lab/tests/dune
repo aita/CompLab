@@ -16,6 +16,16 @@
 
 (rule
  (with-stdout-to
+  hm.out
+  (run %{exe:../src/mink.exe} %{dep:../examples/hm.mnk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff hm.expected hm.out)))
+
+(rule
+ (with-stdout-to
   rows.out
   (run %{exe:../src/mink.exe} %{dep:../examples/rows.mnk})))
 
@@ -77,6 +87,31 @@
  (action
   (diff vc.expected vc.out)))
 
+;; The same program under the two Hindley-Milner implementations: Algorithm W
+;; with substitutions, and destructive unification with levels.  They agree.
+
+(rule
+ (with-stdout-to
+  compare.out
+  (progn
+   (run %{exe:../src/mink.exe} -s hm %{dep:compare.mnk})
+   (run %{exe:../src/mink.exe} -s row %{dep:compare.mnk}))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff compare.expected compare.out)))
+
+(rule
+ (with-stdout-to
+  infer.out
+  (run %{exe:../src/mink.exe} --dump-infer %{dep:infer.mnk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff infer.expected infer.out)))
+
 ; Every program under errors/ is expected to fail; their messages, stdout and
 ; stderr together, are collected into one golden file.
 
@@ -84,6 +119,9 @@
  (with-outputs-to
   errors.out
   (progn
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/mink.exe} %{dep:errors/monomorphic.mnk}))
    (with-accepted-exit-codes
     1
     (run %{exe:../src/mink.exe} %{dep:errors/rank2.mnk}))

@@ -1,6 +1,6 @@
 # The MinkML laboratory
 
-One language, five typecheckers, one machine. This file is the language
+One language, six typecheckers, one machine. This file is the language
 reference and the map of the implementation; the book in [`../doc/`](../doc/index.md)
 explains how each system works.
 
@@ -28,6 +28,7 @@ mink [options] file.mnk
       --list          list the systems and what each one is about
       --dump-anf      print the A-normal form of every binding
       --dump-vc       print every verification condition as SMT-LIB 2
+      --dump-infer    print the unifications inference performs (hm only)
       --smt CMD       decide verification conditions with CMD instead of the
                       built-in procedure (try --smt "z3 -in")
       --trace         print every step the machine takes
@@ -49,8 +50,9 @@ means there.
 
 | system | what it is | inferred | must be written |
 | --- | --- | --- | --- |
+| `hm` | Hindley-Milner as Algorithm W: substitutions composed by hand | everything it can express | nothing (and rank-2 cannot be expressed) |
 | `poly` | higher-rank predicative polymorphism, bidirectional (Dunfield & Krishnaswami 2013) | monotypes, rank-1 generalisation | polymorphic arguments (rank 2 and up) |
-| `row` | Hindley-Milner over row types: extensible records and variants, scoped labels | everything | nothing |
+| `row` | the same inference with mutable cells and levels, over row types: extensible records and variants | everything | nothing |
 | `refine` | refinement types on base types, verified by a solver | nothing about predicates | parameter and result types |
 | `linear` | linear types with `lin`/`un`, and session-typed channels | closure qualifiers | parameter types, protocols |
 | `dep` | dependent types: universes, Π, Σ, `nat`, equality, by normalisation by evaluation | results of application and elimination | argument types, `val` types, pair types |
@@ -91,8 +93,31 @@ val n = (someExpression : int)
 There is no separate grammar of types: a type *is* a term, so `x * y` is one
 node that means multiplication or a product depending on where it stands, and
 each system reads the tree it understands out of the one the parser builds.
-[The syntax chapter](../doc/1-syntax.md) has the whole grammar and the reason
-for that choice.
+[The syntax chapter](../doc/1-syntax.md) explains that choice, and
+[the grammar appendix](../doc/10-grammar.md) has the whole thing in EBNF.
+
+### Inference with nothing written — `hm` and `row`
+
+```sml
+val id = fn x => x                      (* forall 'a. 'a -> 'a *)
+fun twice f x = f (f x)                 (* forall 'a. ('a -> 'a) -> 'a -> 'a *)
+val usedTwice = let val same = fn x => x in (same 1, same true) end
+```
+
+`hm` is Algorithm W written the way it is presented on paper: unification
+returns a substitution, and generalisation asks what is free in the type but not
+in the environment. `row` is the same inference done the way an implementation
+would, with mutable cells and levels — and with rows on top. `--dump-infer`
+shows `hm` working:
+
+```
+$ dune exec src/mink.exe -- --dump-infer tests/infer.mnk
+-- infer twice
+  unify  ?2  ~  ?3 -> ?4
+  solve  ?2 := ?3 -> ?4
+  ...
+  generalise (?5 -> ?5) -> ?5 -> ?5  over env {}  =>  forall 'a. ('a -> 'a) -> 'a -> 'a
+```
 
 ### Records, variants and rows — `row`
 
@@ -175,6 +200,7 @@ One file per concern:
 | `parser.mly` | menhir grammar, conflict-free, one tree for types and terms |
 | `ast.ml` | that tree |
 | `system.ml` | what the command line needs from a type system |
+| `hm.ml` | Hindley-Milner as Algorithm W: substitutions, unification, generalisation |
 | `poly.ml` | ordered contexts, bidirectional checking, higher-rank polymorphism |
 | `row.ml` | unification with levels, row unification, scoped labels |
 | `refine.ml` | refinement types: subtyping becomes implication |
@@ -196,10 +222,13 @@ system uses, and the machine already runs whatever passes.
 
 ```
 src        the implementation
-examples   one file per system: poly, rows, refine, session, dep
+examples   one file per system: hm, poly, rows, refine, session, dep
 tests      golden tests, and errors/ for the messages
 ```
 
-The examples are the tests: `dune test` runs all five and diffs their output,
+The examples are the tests: `dune test` runs them all and diffs their output,
 and every program in `tests/errors/` is expected to fail with the message in
-`tests/errors.expected`.
+`tests/errors.expected`. Three tests are about the machinery rather than a
+system: `anf.mnk` dumps A-normal form, `vc.mnk` dumps verification conditions,
+and `compare.mnk` is checked by `hm` and by `row` so that the two Hindley-Milner
+implementations can be seen agreeing.

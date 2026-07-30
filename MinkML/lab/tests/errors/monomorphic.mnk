@@ -1,0 +1,6 @@
+#system hm
+(* A lambda-bound variable is not generalised, so it has one type, and the
+   second use has to agree with the first.  In the `poly` system the same
+   program can be made to work by annotating the parameter; here there is no
+   type to annotate it with. *)
+val bad = fn f => (f 1, f true)

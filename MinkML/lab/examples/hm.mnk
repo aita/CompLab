@@ -1,0 +1,43 @@
+#system hm
+
+(* Hindley-Milner inference, as Algorithm W.  Nothing here is annotated, and
+   nothing needs to be: this is the fragment where inference is complete.
+
+   Run with --dump-infer to watch the substitutions being built. *)
+
+val id = fn x => x
+
+fun twice f x = f (f x)
+
+fun compose f g x = f (g x)
+
+val pair = fn x => fn y => (x, y)
+
+(* Let-polymorphism: `same` is generalised at its binding, so the two uses may
+   instantiate it differently.  This is the whole content of HM. *)
+val usedTwice =
+  let val same = fn x => x
+  in (same 1, same true) end
+
+(* A lambda-bound variable is *not* generalised, so the same body fails when
+   `same` is a parameter instead of a `let`.  That is the boundary between HM
+   and the `poly` system, which can be told about it with an annotation. *)
+val lambdaBound = fn same => (same 1, same 1)
+
+fun fact n = if n == 0 then 1 else n * fact (n - 1)
+
+val f6 = fact 6
+
+fun length xs = 0 (* no lists here; see the row system for structural data *)
+
+(* Recursion is monomorphic: `go` is in scope as a monotype while its own body
+   is checked, and generalised only afterwards. *)
+fun sumTo n =
+  let fun go i acc = if i > n then acc else go (i + 1) (acc + i)
+  in go 0 0 end
+
+val s10 = sumTo 10
+
+val applied = twice (compose (fn x => x + 1) (fn x => x * 2)) 5
+
+val nested = pair (pair 1 true) (id id)

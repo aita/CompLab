@@ -1,0 +1,16 @@
+id : forall 'a. 'a -> 'a = <fun>
+twice : forall 'a. ('a -> 'a) -> 'a -> 'a = <fun>
+compose : forall 'a 'b 'c. ('a -> 'b) -> ('c -> 'a) -> 'c -> 'b = <fun>
+pair : forall 'a 'b. 'a -> 'b -> 'a * 'b = <fun>
+usedTwice : int * bool = (1, true)
+fact : int -> int = <fun>
+nested : forall 'a. (int * bool) * ('a -> 'a) = ((1, true), <fun>)
+applied : int = 42
+id : 'a -> 'a = <fun>
+twice : ('a -> 'a) -> 'a -> 'a = <fun>
+compose : ('a -> 'b) -> ('c -> 'a) -> 'c -> 'b = <fun>
+pair : 'a -> 'b -> 'a * 'b = <fun>
+usedTwice : int * bool = (1, true)
+fact : int -> int = <fun>
+nested : (int * bool) * ('a -> 'a) = ((1, true), <fun>)
+applied : int = 42

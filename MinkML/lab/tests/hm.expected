@@ -1,0 +1,13 @@
+id : forall 'a. 'a -> 'a = <fun>
+twice : forall 'a. ('a -> 'a) -> 'a -> 'a = <fun>
+compose : forall 'a 'b 'c. ('a -> 'b) -> ('c -> 'a) -> 'c -> 'b = <fun>
+pair : forall 'a 'b. 'a -> 'b -> 'a * 'b = <fun>
+usedTwice : int * bool = (1, true)
+lambdaBound : forall 'a. (int -> 'a) -> 'a * 'a = <fun>
+fact : int -> int = <fun>
+f6 : int = 720
+length : forall 'a. 'a -> int = <fun>
+sumTo : int -> int = <fun>
+s10 : int = 55
+applied : int = 23
+nested : forall 'a. (int * bool) * ('a -> 'a) = ((1, true), <fun>)

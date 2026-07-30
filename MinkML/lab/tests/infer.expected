@@ -1,0 +1,29 @@
+-- infer twice
+  unify  ?2  ~  ?3 -> ?4
+  solve  ?2 := ?3 -> ?4
+  unify  ?3 -> ?4  ~  ?4 -> ?5
+  unify  ?3  ~  ?4
+  solve  ?3 := ?4
+  unify  ?4  ~  ?5
+  solve  ?4 := ?5
+  unify  ?1  ~  (?5 -> ?5) -> ?5 -> ?5
+  solve  ?1 := (?5 -> ?5) -> ?5 -> ?5
+  generalise (?5 -> ?5) -> ?5 -> ?5  over env {}  =>  forall 'a. ('a -> 'a) -> 'a -> 'a
+-- infer usedTwice
+-- infer same
+  generalise ?6 -> ?6  over env {}  =>  forall 'a. 'a -> 'a
+  instantiate forall 'a. 'a -> 'a  as  ?7 -> ?7
+  unify  ?7 -> ?7  ~  int -> ?8
+  unify  ?7  ~  int
+  solve  ?7 := int
+  unify  int  ~  ?8
+  solve  ?8 := int
+  instantiate forall 'a. 'a -> 'a  as  ?9 -> ?9
+  unify  ?9 -> ?9  ~  bool -> ?10
+  unify  ?9  ~  bool
+  solve  ?9 := bool
+  unify  bool  ~  ?10
+  solve  ?10 := bool
+  generalise int * bool  over env {}  =>  int * bool
+twice : forall 'a. ('a -> 'a) -> 'a -> 'a = <fun>
+usedTwice : int * bool = (1, true)

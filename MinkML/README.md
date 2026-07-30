@@ -1,6 +1,6 @@
 # MinkML
 
-One small ML, and five type systems to check it with. The syntax is SML's, the
+One small ML, and six type systems to check it with. The syntax is SML's, the
 runtime is shared, and the first line of a program says which type theory it
 should be held to.
 
@@ -27,8 +27,9 @@ like. Here they share all of that, so what is left is the type theory.
 
 | system | what it explores |
 | --- | --- |
+| `hm` | Hindley-Milner as Algorithm W — the baseline the others are variations on |
 | `poly` | higher-rank polymorphism, checked bidirectionally with ordered contexts |
-| `row` | row polymorphism: extensible records and variants, scoped labels, full inference |
+| `row` | the same inference with levels and destructive unification, plus rows: extensible records and variants |
 | `refine` | refinement types, verification conditions, and a solver to discharge them |
 | `linear` | linear types, and session-typed channels on top of them |
 | `dep` | dependent types: universes, Π and Σ, `nat` and equality, normalisation by evaluation |
@@ -59,7 +60,7 @@ Everything up to the typechecker is shared, and everything after it too.
 ```
    .mnk  ->  lexer  ->  parser  ->  one syntax tree
                                         |
-                     #system chooses one of five checkers
+                     #system chooses one of six checkers
                                         |
                             A-normal form  ->  CEK machine
 ```
@@ -74,8 +75,9 @@ $ ./_build/default/src/mink.exe -s poly examples/rows.mnk
 examples/rows.mnk:6:22: type error: records and variants belong to #system row
 ```
 
-What is *not* shared is the type representation. `poly` has ordered contexts
-and existential variables, `row` has mutable unification variables and rows,
+What is *not* shared is the type representation. `hm` has substitutions, `poly`
+has ordered contexts and existential variables, `row` has mutable unification
+variables and rows,
 `refine` has predicates, `linear` has qualifiers, and `dep` does not distinguish
 types from terms at all. Sharing those would mean every system paying for every
 other system's needs.
@@ -100,7 +102,7 @@ Any real solver can be used instead, over SMT-LIB 2 on standard input:
 ## What is deliberately missing
 
 No modules, no separate compilation, no optimiser, no type classes. Recursion is
-`fun`, and in `dep` there is none at all. `poly` does not do polymorphic
+`fun`, and in `dep` there is none at all. `hm` and `poly` do not do polymorphic
 recursion, `row` has no record subtyping, `refine` does not infer refinements
 (liquid typing's Horn constraints are absent — a function says what it
 promises), `linear` has no recursive session types, and `dep` has no inductive

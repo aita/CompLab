@@ -76,8 +76,17 @@ let show ty =
     | TCon c -> c
     | TVar { contents = TUnbound (id, _) } -> name_of id
     | TVar _ -> assert false
-    | TArrow (a, b) -> paren 1 (Printf.sprintf "%s -> %s" (go 2 a) (go 1 b))
-    | TPair (a, b) -> paren 3 (Printf.sprintf "%s * %s" (go 4 a) (go 4 b))
+    (* The parts are named in order, left to right: OCaml evaluates the
+       arguments of an application right to left, so the printer would
+       otherwise call the first variable it prints 'b. *)
+    | TArrow (a, b) ->
+        let l = go 2 a in
+        let r = go 1 b in
+        paren 1 (Printf.sprintf "%s -> %s" l r)
+    | TPair (a, b) ->
+        let l = go 4 a in
+        let r = go 4 b in
+        paren 3 (Printf.sprintf "%s * %s" l r)
     | TRecord r -> Printf.sprintf "{ %s }" (row_str "" r)
     | TVariant r -> Printf.sprintf "[ %s ]" (row_str "`" r)
   and row_str tick r =
@@ -93,7 +102,11 @@ let show ty =
     in
     let fs, tail = fields r in
     let parts =
-      List.map (fun (l, t) -> Printf.sprintf "%s%s : %s" tick l (go 0 t)) fs
+      List.map
+        (fun (l, t) ->
+          let shown = go 0 t in
+          Printf.sprintf "%s%s : %s" tick l shown)
+        fs
     in
     let parts = parts @ (match tail with None -> [] | Some n -> [ ".." ^ n ]) in
     String.concat ", " parts

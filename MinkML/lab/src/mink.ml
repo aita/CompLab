@@ -4,7 +4,8 @@
    directive at the top of the file to decide which typechecker to hand the
    program to, and `-s` overrides it.  Everything else is a dump switch. *)
 
-let systems : System.t list = [ Poly.system; Row.system; Refine.system; Linear.system; Dep.system ]
+let systems : System.t list =
+  [ Hm.system; Poly.system; Row.system; Refine.system; Linear.system; Dep.system ]
 
 let find_system name =
   match List.find_opt (fun (s : System.t) -> s.name = name) systems with
@@ -28,6 +29,7 @@ let usage () =
     \      --list          list the systems and what each one is about\n\
     \      --dump-anf      print the A-normal form of every binding\n\
     \      --dump-vc       print every verification condition as SMT-LIB 2\n\
+    \      --dump-infer    print the unifications inference performs (hm only)\n\
     \      --smt CMD       decide verification conditions with CMD, not the\n\
     \                      built-in procedure (try --smt \"z3 -in\")\n\
     \      --trace         print every step the machine takes\n\
@@ -115,6 +117,9 @@ let () =
         args rest
     | "--dump-vc" :: rest ->
         Smt.dump := true;
+        args rest
+    | "--dump-infer" :: rest ->
+        Hm.trace := true;
         args rest
     | "--smt" :: cmd :: rest ->
         Smt.backend := Smt.External cmd;

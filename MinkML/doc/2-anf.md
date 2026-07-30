@@ -1,6 +1,6 @@
 # 2. ANF と CEK マシン
 
-型検査を通ったプログラムは A正規形（ANF）に落ち、CEK 風の機械で走ります。5つの型システムは
+型検査を通ったプログラムは A正規形（ANF）に落ち、CEK 風の機械で走ります。6つの型システムは
 「どのプログラムが正しいか」で意見が分かれますが、「正しいプログラムがどう走るか」では完全に
 一致するので、この2つは共有されます。
 
@@ -16,7 +16,7 @@
    実装の性質ではなく IR の性質になります。
 3. **中間結果に名前がある。** これは篩型システムが独立に必要としたものでもあります。
    `refine.ml` の `value_of` は、述語に現れる式を変数に束縛し直します——ANF がやることを、
-   型検査の側で必要に応じてやっている（[5章](5-refine.md)）。
+   型検査の側で必要に応じてやっている（[6章](6-refine.md)）。
 
 ## 何を採らなかったか
 
@@ -163,7 +163,7 @@ cell := VClos (param, body, env);
 ## この2つを共有したことの帰結
 
 型システムを1つ足すときに書くのは検査器だけで、実行系には触りません。注釈だけで書いた
-プログラムは、4つのシステムのどれに渡しても同じ ANF になり同じ値を出します。
+プログラムは、5つのシステム（`dep` 以外）のどれに渡しても同じ ANF になり同じ値を出します。
 
 ```sml
 fun inc (n : int) : int = n + 1
@@ -171,7 +171,9 @@ val four = inc 3
 ```
 
 ```
-$ for s in poly row refine linear; do mink -s $s both.mnk; done
+$ for s in hm poly row refine linear; do mink -s $s both.mnk; done
+inc : int -> int = <fun>
+four : int = 4
 inc : int -> int = <fun>
 four : int = 4
 inc : int -> int = <fun>

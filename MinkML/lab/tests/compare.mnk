@@ -1,0 +1,12 @@
+(* No #system line: this file is checked by hm and by row, and the two outputs
+   are collected side by side.  Algorithm W and destructive unification with
+   levels infer the same types; only the mechanism differs. *)
+
+val id = fn x => x
+fun twice f x = f (f x)
+fun compose f g x = f (g x)
+val pair = fn x => fn y => (x, y)
+val usedTwice = let val same = fn x => x in (same 1, same true) end
+fun fact n = if n == 0 then 1 else n * fact (n - 1)
+val nested = pair (pair 1 true) (id id)
+val applied = twice (fn x => x + 1) 40
