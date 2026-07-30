@@ -273,8 +273,8 @@ CPS 側のクロージャ変換の主題になります。
 
 | ファイル | 何が |
 |---|---|
-| `src/interpreter/core.ml` | IR の定義（1節）、`fresh_name`（5節）、`item`（6節）、`print_block` 系（ダンプ） |
-| `src/interpreter/elab.ml` | `dest`/`ret`/`emit`（2節）、`infer`（2節）、`elab_fun`（3節）、`elab_dec`（2・6節）、`program`（6節） |
+| `src/front/core.ml` | IR の定義（1節）、`fresh_name`（5節）、`item`（6節）、`print_block` 系（ダンプ） |
+| `src/front/elab.ml` | `dest`/`ret`/`emit`（2節）、`infer`（2節）、`elab_fun`（3節）、`elab_dec`（2・6節）、`program`（6節） |
 
 ---
 

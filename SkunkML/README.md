@@ -101,8 +101,10 @@ function, and the passes after elaboration have never heard of either.
 
 ## And a compiler
 
-There is a second back end in [`src/compiler/`](src/compiler), sharing the
-front end. It starts from Flat — where there are no modules, no patterns and no
+There is a second back end in [`src/compiler/`](src/compiler). The front end it
+shares with the interpreter is a directory of its own,
+[`src/front/`](src/front): neither back end appears in it, and neither depends
+on the other. It starts from Flat — where there are no modules, no patterns and no
 nested functions left — and builds **value SSA**: a value is an operation
 together with the values it uses, not a name something was assigned to.
 

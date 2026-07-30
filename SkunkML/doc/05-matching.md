@@ -281,9 +281,9 @@ let joins =
 
 | ファイル | 何が |
 |---|---|
-| `src/interpreter/patmat.ml` | `row`/`tree`（2節）、`strip`/`simplify`（2節）、`build`（3・4節）、`count`/`reaches_fail`（6節）、`compile_case`（5・6・7節）、`binders`/`binder_types`（7節） |
-| `src/interpreter/elab.ml` | `check_pat`（1節）、`match_arms_d`（`case` を Core の `Case` にする） |
-| `src/interpreter/core.ml` | `pat`/`key`/`Case`/`Switch`（IR の側） |
+| `src/front/patmat.ml` | `row`/`tree`（2節）、`strip`/`simplify`（2節）、`build`（3・4節）、`count`/`reaches_fail`（6節）、`compile_case`（5・6・7節）、`binders`/`binder_types`（7節） |
+| `src/front/elab.ml` | `check_pat`（1節）、`match_arms_d`（`case` を Core の `Case` にする） |
+| `src/front/core.ml` | `pat`/`key`/`Case`/`Switch`（IR の側） |
 
 ---
 

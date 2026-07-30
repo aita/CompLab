@@ -335,10 +335,10 @@ code inline$3 (a1.21) =
 
 | ファイル | 何が |
 |---|---|
-| `src/interpreter/elab.ml` | `with_join`（4節）。`EIf`・`ECase` が呼ぶ |
-| `src/interpreter/patmat.ml` | `compile_case` の `joins`（5節）、`emit` の `TLeaf`（跳ぶか書き出すか） |
-| `src/interpreter/core.ml` / `src/interpreter/flat.ml` | `Join`/`Jump`（6節）。Flat 側では型が落ちるだけで形は同じ |
-| `src/interpreter/closure.ml` | `conv` の `C.Join`。触らないことがコードに見える（[7章](07-closure.md)） |
+| `src/front/elab.ml` | `with_join`（4節）。`EIf`・`ECase` が呼ぶ |
+| `src/front/patmat.ml` | `compile_case` の `joins`（5節）、`emit` の `TLeaf`（跳ぶか書き出すか） |
+| `src/front/core.ml` / `src/front/flat.ml` | `Join`/`Jump`（6節）。Flat 側では型が落ちるだけで形は同じ |
+| `src/front/closure.ml` | `conv` の `C.Join`。触らないことがコードに見える（[7章](07-closure.md)） |
 | `src/interpreter/machine.ml` | `env.joins`、`F.Join`、`F.Jump`（8節） |
 
 ---

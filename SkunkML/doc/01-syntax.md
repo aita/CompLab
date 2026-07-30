@@ -188,9 +188,9 @@ this clause of f takes 2 arguments, the first takes 1
 
 | ファイル | 何が |
 |---|---|
-| `src/interpreter/lexer.mll` | `split_path` が `List.map` を1トークンにする。`comment` が入れ子、`string` がエスケープ |
-| `src/interpreter/parser.mly` | 冒頭の優先順位宣言（2節）、`fun_bind` が節を揃える（5節）、`ty`/`ty_tuple`/`ty_app`/`ty_atom` が型の文法（4節） |
-| `src/interpreter/ast.ml` | 表層構文木。型を知らず、名前が構成子かどうかも知らない |
+| `src/front/lexer.mll` | `split_path` が `List.map` を1トークンにする。`comment` が入れ子、`string` がエスケープ |
+| `src/front/parser.mly` | 冒頭の優先順位宣言（2節）、`fun_bind` が節を揃える（5節）、`ty`/`ty_tuple`/`ty_app`/`ty_atom` が型の文法（4節） |
+| `src/front/ast.ml` | 表層構文木。型を知らず、名前が構成子かどうかも知らない |
 
 ---
 

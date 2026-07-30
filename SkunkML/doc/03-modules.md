@@ -275,9 +275,9 @@ $ skunk --trace examples/modules.sk
 
 | ファイル | 何が |
 |---|---|
-| `src/interpreter/sem.ml` | `sg`/`tyfun`/`fct`/`env` の定義（1節）、`elab_sig`・`elab_spec`（1・4節）、`match_sig`・`more_general`・`match_datatype`（2節）、`refresh`・`instantiate_functor`（5節）、`open_sg`・`map_sg` |
-| `src/interpreter/elab.ml` | `elab_str`（3・7節）、`elab_topdec` の `TStr`/`TFun`（4・5・6節）、`qualify`（6節）、`struct_ty`（レコードとしての構造の型） |
-| `src/interpreter/types.ml` | `tycon.tid`（1節）、`copy`/`realise`（2・5節）、`mark`/`since`（5節） |
+| `src/front/sem.ml` | `sg`/`tyfun`/`fct`/`env` の定義（1節）、`elab_sig`・`elab_spec`（1・4節）、`match_sig`・`more_general`・`match_datatype`（2節）、`refresh`・`instantiate_functor`（5節）、`open_sg`・`map_sg` |
+| `src/front/elab.ml` | `elab_str`（3・7節）、`elab_topdec` の `TStr`/`TFun`（4・5・6節）、`qualify`（6節）、`struct_ty`（レコードとしての構造の型） |
+| `src/front/types.ml` | `tycon.tid`（1節）、`copy`/`realise`（2・5節）、`mark`/`since`（5節） |
 
 ---
 

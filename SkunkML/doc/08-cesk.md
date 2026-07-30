@@ -255,8 +255,8 @@ errors/nomatch.sk:1:5: match failure: no pattern matched
 
 | ファイル | 何が |
 |---|---|
-| `src/interpreter/machine.ml` | `value`/`env`/`frame`/`world`（1節）、`alloc`/`get`/`set`/`bind`（1・2節）、`enter`（4節）、`run`（3・5節）、`prim`/`call_prim`（基盤）、`show`（7節） |
-| `src/interpreter/basis.ml` | 初期環境と、SkunkML で書いたプレリュード |
+| `src/interpreter/machine.ml` | `value`/`env`/`frame`/`world`（1節）、`alloc`/`get`/`set`/`bind`（1・2節）、`enter`（4節）、`run`（3・5節）、`prim`/`call_prim`（基盤）、`install_basis`（`basis.ml` が宣言した名前を機械の側で束縛する）、`show`（7節） |
+| `src/front/basis.ml` | 初期環境に何という名前があり、その型が何かという宣言と、SkunkML で書いたプレリュード。**どちらのバックエンドがどう提供するかは書いていない** — 共通の前段だから |
 | `src/interpreter/skunk.ml` | 単位ごとのコンパイルと実行、`--trace`/`--steps` |
 
 ---

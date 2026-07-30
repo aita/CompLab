@@ -6,13 +6,16 @@ language reference and the map of the source; the book in
 [`../doc/`](../doc/index.md) explains how each pass works.
 
 ```
-src/interpreter/   the front end, and the CESK machine        -> skunk
+src/front/         the front end, shared by both              -> a library
+src/interpreter/   the CESK machine                           -> skunk
 src/compiler/      SSA, amd64, and the assembler and linker   -> skunkc
 ```
 
-The front end is a library the two share. By the time it is finished the
-program has no modules, no patterns and no nested functions left, so neither
-back end has heard of any of them.
+The front end is its own directory because that is what it is: neither back end
+appears in it, and it does not know which one will run. By the time it is
+finished the program has no modules, no patterns and no nested functions left,
+so neither back end has heard of any of them -- and neither back end depends on
+the other, only on this.
 
 ## Building and running
 
@@ -288,6 +291,8 @@ else a` is `int * int -> int`, exactly as in SML.
           a static ELF64, with the runtime from rt.ml assembled into it
 ```
 
+In `src/front/`, which is everything up to and including Flat:
+
 | file | lines | what it does |
 | --- | --- | --- |
 | `loc.ml` | 37 | source positions, the one exception, the warning list |
@@ -300,12 +305,17 @@ else a` is `int * int -> int`, exactly as in SML.
 | `elab.ml` | 1010 | inference and normalisation in one pass; modules become records |
 | `patmat.ml` | 335 | pattern matrices, decision trees, exhaustiveness |
 | `flat.ml` | 152 | the flat IR, and its printer |
-| `closure.ml` | 116 | code blocks, captures, and what is deliberately not captured |
-| `machine.ml` | 498 | the CESK machine and the primitives |
-| `basis.ml` | 162 | the initial environment, and the prelude source |
+| `closure.ml` | 142 | code blocks, captures, and what is deliberately not captured |
+| `basis.ml` | 155 | what the names in the initial environment are, and the prelude source |
+
+And the two back ends. In `src/interpreter/`:
+
+| file | lines | what it does |
+| --- | --- | --- |
+| `machine.ml` | 514 | the CESK machine, the primitives, and the basis in its store |
 | `skunk.ml` | 148 | the command line |
 
-And the compiler, in `src/compiler/`:
+In `src/compiler/`:
 
 | file | lines | what it does |
 | --- | --- | --- |
@@ -331,7 +341,8 @@ And the compiler, in `src/compiler/`:
 ## Layout
 
 ```
-src/interpreter   the front end and the machine   -> skunk
+src/front         the front end, shared           -> a library
+src/interpreter   the CESK machine                -> skunk
 src/compiler      SSA, amd64, assembler, linker   -> skunkc
 examples          tour, matching, modules, store
 tests             golden tests, and errors/ for the messages

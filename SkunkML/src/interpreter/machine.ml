@@ -498,3 +498,17 @@ let define w name v = Hashtbl.replace w.globals name v
 
 let run_block w block =
   run w { ctrl = block; env = empty_env; ks = [] }
+
+(* The machine's half of the basis: the names [basis.ml] declares, bound to the
+   primitives above.  A structure is a record, and its fields are sorted,
+   because that is what a record is here -- `Sem.struct_ty` decided the layout
+   and a field is reached by offset, not by name. *)
+let install_basis w =
+  List.iter (fun (n, _) -> define w n (VPrim n)) Basis.toplevel_vals;
+  List.iter
+    (fun (n, sg) ->
+      define w n
+        (VRecord
+           (Types.sort_fields
+              (List.map (fun (f, _) -> (f, VPrim (n ^ "." ^ f))) sg.Sem.sg_vals))))
+    Basis.structures

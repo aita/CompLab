@@ -209,10 +209,10 @@ code twice$3 (a1.20) =
 
 | ファイル | 何が |
 |---|---|
-| `src/interpreter/closure.ml` | `make_closure`（1節）、`conv_closure`（ラムダを閉じる唯一の場所）、`conv` の `C.Join`（2節）、`conv` の `C.Fix`（3節）、`program`（グローバルの受け取り） |
-| `src/interpreter/flat.ml` | `Closure`/`Capture`/`Fix`/`code`（1・3節）、`program_to_string`（ダンプ） |
+| `src/front/closure.ml` | `make_closure`（1節）、`conv_closure`（ラムダを閉じる唯一の場所）、`conv` の `C.Join`（2節）、`conv` の `C.Fix`（3節）、`program`（グローバルの受け取り） |
+| `src/front/flat.ml` | `Closure`/`Capture`/`Fix`/`code`（1・3節）、`program_to_string`（ダンプ） |
 | `src/interpreter/machine.ml` | `enter`（クロージャに入る）、`F.Fix`（3節）、`eval` の `F.Closure`/`F.Capture` |
-| `src/interpreter/core.ml` | `free_vars`/`free_rhs`/`free_tail`（2節）。自由変数は IR のものなので IR の側に置いてあります |
+| `src/front/core.ml` | `free_vars`/`free_rhs`/`free_tail`（2節）。自由変数は IR のものなので IR の側に置いてあります |
 
 ---
 

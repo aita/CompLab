@@ -127,7 +127,7 @@ let () =
       Types.reset ();
       Core.reset ();
       let w = Machine.create () in
-      Basis.install w;
+      Machine.install_basis w;
       (try
          let env, globals =
            if !no_prelude then (Basis.env (), Basis.globals ())

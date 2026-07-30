@@ -1,12 +1,16 @@
 (* The basis: what a program can use before it defines anything.
 
-   Two halves.  What the machine has to do itself -- arithmetic, strings, the
-   store -- is OCaml, reached through [Machine.VPrim]; every one of those takes
-   a single argument, a tuple where it needs more, which is how SML's own basis
-   is shaped.  Everything that can be said in the language is said in the
-   language, in [prelude] at the bottom of this file, and goes through the same
-   parser, the same inference, the same decision-tree compiler and the same
-   machine as a user's program. *)
+   Two halves.  What a back end has to do itself -- arithmetic, strings, the
+   store -- is named here and implemented there: the interpreter reaches it
+   through [Machine.VPrim] and the compiler through a stub that calls a runtime
+   routine.  Every one of those takes a single argument, a tuple where it needs
+   more, which is how SML's own basis is shaped.  Everything that can be said in
+   the language is said in the language, in [prelude] at the bottom of this file,
+   and goes through the same parser, the same inference, the same decision-tree
+   compiler and both back ends, exactly like a user's program.
+
+   This file is in the shared front end, so it says what the names are and what
+   their types are, and nothing about how either back end provides them. *)
 
 open Types
 
@@ -90,18 +94,6 @@ let env () =
    function that calls `print` does not capture it. *)
 let globals () =
   List.map fst toplevel_vals @ List.map fst structures
-
-let install w =
-  List.iter (fun (n, _) -> Machine.define w n (Machine.VPrim n)) toplevel_vals;
-  List.iter
-    (fun (n, sg) ->
-      (* Sorted, because that is what a record is: `Sem.struct_ty` says the
-         layout and a field is now reached by offset, not by name. *)
-      Machine.define w n
-        (Machine.VRecord
-           (sort_fields
-              (List.map (fun (f, _) -> (f, Machine.VPrim (n ^ "." ^ f))) sg.Sem.sg_vals))))
-    structures
 
 (* The half of the basis that is written in the language it belongs to. *)
 let prelude =

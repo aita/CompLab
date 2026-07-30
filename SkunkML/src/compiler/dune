@@ -1,12 +1,12 @@
 ; The compiler is a library so that a test can drive one pass, and an
-; executable so that a program can be compiled.  It depends on the
-; interpreter's library for everything up to and including Flat: the two share
-; a front end, and the compiler starts where closure conversion left off.
+; executable so that a program can be compiled.  It depends on the shared front
+; end and not on the interpreter: the two back ends have nothing to say to each
+; other, and this one starts where closure conversion left off.
 
 (library
  (name skunkc_lib)
  (wrapped false)
- (libraries skunkml unix)
+ (libraries skunk_front unix)
  (modules
   (:standard \ skunkc))
  (flags

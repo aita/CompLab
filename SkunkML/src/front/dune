@@ -1,0 +1,18 @@
+; The front end, shared.  Both back ends depend on this and neither appears in
+; it: by the time it is finished the program has no modules, no patterns and no
+; nested functions left, so `machine.ml` and `select.ml` have never heard of any
+; of them.
+;
+; `wrapped false` keeps the module names flat: `Elab` is `Elab` from either side.
+
+(library
+ (name skunk_front)
+ (wrapped false)
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
+
+(ocamllex lexer)
+
+(menhir
+ (modules parser)
+ (flags --explain))
