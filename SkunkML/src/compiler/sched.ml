@@ -36,9 +36,13 @@
    having, since that is the longest latency in the block.
 
    The textbook answer is to schedule twice, once on each side, with the first
-   pass aware of register pressure.  That is the thing this does not do. *)
+   pass aware of register pressure (Goodman and Hsu).  That pass is `pre` below.
+   It is written, it is measured, and it is *off*: on this corpus it buys nothing
+   and costs a little, so it is behind an environment variable rather than in the
+   pipeline ([17章](../doc/17-loops.md)). *)
 
 module M = Mach
+module IS = Regalloc.IS
 
 let flags_written = function
   | M.Alu _ | M.Sar _ | M.Shl _ | M.Neg _ | M.Cmp _ | M.Setcc _ | M.Idiv _ | M.Cqo | M.Call _
@@ -101,35 +105,45 @@ let latency = function
   | M.RepMovsb -> 8
   | _ -> 1
 
+(* j depends on i, for i < j, if any of the four kinds holds. *)
+let dependences code rw =
+  let n = Array.length code in
+  let deps = Array.make n [] in
+  for j = 0 to n - 1 do
+    let rj, wj = rw.(j) in
+    for i = 0 to j - 1 do
+      let ri, wi = rw.(i) in
+      let shares a b = List.exists (fun x -> List.mem x b) a in
+      let dep =
+        shares wi rj (* true *) || shares ri wj (* anti *) || shares wi wj (* output *)
+        || (touches_memory code.(i) && touches_memory code.(j))
+        || (flags_written code.(i) && flags_written code.(j))
+      in
+      if dep then deps.(j) <- i :: deps.(j)
+    done
+  done;
+  deps
+
+(* The height: the longest path from here to the end, in latencies.  One
+   backwards pass, because a dependence only ever points at a lower index. *)
+let heights code deps =
+  let n = Array.length code in
+  let height = Array.make n 0 in
+  for i = n - 1 downto 0 do
+    height.(i) <- latency code.(i);
+    for j = i + 1 to n - 1 do
+      if List.mem i deps.(j) then height.(i) <- max height.(i) (latency code.(i) + height.(j))
+    done
+  done;
+  height
+
 let block (b : M.block) =
   let code = Array.of_list (List.rev b.M.code) in
   let n = Array.length code in
   if n > 1 then begin
     let rw = Array.map reads_writes code in
-    let deps = Array.make n [] in
-    (* j depends on i, for i < j, if any of the four kinds holds. *)
-    for j = 0 to n - 1 do
-      let rj, wj = rw.(j) in
-      for i = 0 to j - 1 do
-        let ri, wi = rw.(i) in
-        let shares a b = List.exists (fun x -> List.mem x b) a in
-        let dep =
-          shares wi rj (* true *) || shares ri wj (* anti *) || shares wi wj (* output *)
-          || (touches_memory code.(i) && touches_memory code.(j))
-          || (flags_written code.(i) && flags_written code.(j))
-        in
-        if dep then deps.(j) <- i :: deps.(j)
-      done
-    done;
-    (* The height: the longest path from here to the end, in latencies.  One
-       backwards pass, because a dependence only ever points at a lower index. *)
-    let height = Array.make n 0 in
-    for i = n - 1 downto 0 do
-      height.(i) <- latency code.(i);
-      for j = i + 1 to n - 1 do
-        if List.mem i deps.(j) then height.(i) <- max height.(i) (latency code.(i) + height.(j))
-      done
-    done;
+    let deps = dependences code rw in
+    let height = heights code deps in
     let issued = Array.make n false in
     let ready_at = Array.make n 0 in
     let out = ref [] in
@@ -167,3 +181,139 @@ let block (b : M.block) =
 
 let func (f : M.func) = List.iter block f.M.blocks
 let program (p : M.prog) = List.iter func p.M.funcs
+
+(* ---- the pass on the other side: scheduling that watches the pressure ----- *)
+
+(* Goodman and Hsu.  The pass above runs after allocation, where the frame is
+   already fixed and no schedule can cost anything; this one runs before it, on
+   virtual registers, where there is far more room and every extra instruction
+   between a definition and its last use is a value the allocator has to keep
+   somewhere.
+
+   So the priority is switched rather than fixed.  While few values are live,
+   pick by height, exactly as above -- latency is the thing worth chasing and
+   there are colours to spare.  Once the number of live values crosses a
+   threshold, stop chasing latency and pick the instruction that *reduces* the
+   live count most: the one whose operands die here and whose result nobody
+   wants.  Below the threshold the schedule is as good as it can be; above it,
+   it is as small as it can be.
+
+   Whether a use kills its value is the only new question, and it is answered by
+   counting: for each register, how many instructions that have not issued yet
+   still read it.  When that reaches zero and the register is not live out of the
+   block, the value is gone.  The count is kept as the schedule is built rather
+   than read off the original order, because the order is exactly what is being
+   changed.
+
+   The pressure model reads the *allocator's* table and not `reads_writes`
+   above.  The one above is deliberately conservative -- a call reads and writes
+   every caller-saved register so that nothing drifts across it -- and that is
+   right for dependences and quite wrong for pressure: a call does not really
+   make nine values live. *)
+
+(* Where "low pressure" stops.  The natural value is the number of colours --
+   below it the allocator has room, at it something is about to be pushed out --
+   and on these programs the natural value never fires: a block here rarely
+   holds fourteen live values, so a threshold of K leaves the pass picking by
+   height from beginning to end, which is the thing 17.6 already rejected.  Four
+   is where the sweep in 17.6 bottomed out. *)
+let pressure_limit = ref 4
+
+let pre_block live_in live_out (b : M.block) =
+  let code = Array.of_list (List.rev b.M.code) in
+  let n = Array.length code in
+  if n > 1 then begin
+    let rw = Array.map reads_writes code in
+    let deps = dependences code rw in
+    let height = heights code deps in
+    let du =
+      Array.map
+        (fun i ->
+          let d, u = Regalloc.defs_uses i in
+          (List.sort_uniq compare (Regalloc.nodes d), List.sort_uniq compare (Regalloc.nodes u)))
+        code
+    in
+    (* How many instructions that have not issued yet still read this value. *)
+    let remaining = Hashtbl.create 32 in
+    let left r = try Hashtbl.find remaining r with Not_found -> 0 in
+    Array.iter (fun (_, u) -> List.iter (fun r -> Hashtbl.replace remaining r (left r + 1)) u) du;
+    let live = ref live_in in
+    (* What issuing i would do to the live set: the values whose last reader it
+       is, and the values it starts.  A definition nobody reads and that is not
+       live out never becomes live at all -- which is what keeps the nine
+       registers a call writes from looking like nine values. *)
+    let shift i =
+      let d, u = du.(i) in
+      let after r = left r - if List.mem r u then 1 else 0 in
+      let dead r = after r = 0 && not (IS.mem r live_out) in
+      let gone =
+        List.filter (fun r -> dead r && IS.mem r !live) (List.sort_uniq compare (u @ d))
+      in
+      let born = List.filter (fun r -> (not (dead r)) && not (IS.mem r !live)) d in
+      (gone, born)
+    in
+    let issued = Array.make n false in
+    let ready_at = Array.make n 0 in
+    let out = ref [] in
+    let clock = ref 0 in
+    for _ = 1 to n do
+      let candidates = ref [] in
+      for i = 0 to n - 1 do
+        if (not issued.(i)) && List.for_all (fun d -> issued.(d)) deps.(i) then
+          candidates := i :: !candidates
+      done;
+      let tight = IS.cardinal !live >= !pressure_limit in
+      (* Under pressure the clock is not worth obeying: waiting for a latency is
+         waiting with everything still live. *)
+      let pool =
+        if tight then !candidates
+        else
+          match List.filter (fun i -> ready_at.(i) <= !clock) !candidates with
+          | [] -> !candidates
+          | ok -> ok
+      in
+      let delta i =
+        let gone, born = shift i in
+        List.length born - List.length gone
+      in
+      let better i best =
+        if tight then delta i < delta best || (delta i = delta best && i < best)
+        else height.(i) > height.(best) || (height.(i) = height.(best) && i < best)
+      in
+      let pick =
+        List.fold_left (fun best i -> if better i best then i else best) (List.hd pool) pool
+      in
+      let gone, born = shift pick in
+      List.iter (fun r -> Hashtbl.replace remaining r (left r - 1)) (snd du.(pick));
+      live := List.fold_left (fun s r -> IS.remove r s) !live gone;
+      live := List.fold_left (fun s r -> IS.add r s) !live born;
+      if ready_at.(pick) > !clock then clock := ready_at.(pick);
+      issued.(pick) <- true;
+      out := code.(pick) :: !out;
+      clock := !clock + 1;
+      for j = 0 to n - 1 do
+        if List.mem pick deps.(j) then
+          ready_at.(j) <- max ready_at.(j) (!clock - 1 + latency code.(pick))
+      done
+    done;
+    (* At this point the live set is exactly the block's live-out again, which is
+       the one check this model has on itself. *)
+    b.M.code <- !out
+  end
+
+let pre_func (f : M.func) =
+  let live_in, live_out = Regalloc.liveness f in
+  List.iter
+    (fun (b : M.block) ->
+      pre_block (Hashtbl.find live_in b.M.id) (Hashtbl.find live_out b.M.id) b)
+    f.M.blocks
+
+(* Off unless the environment asks for it, because it did not pay: see 17.6.
+   `SKUNK_SCHED_PRE=1` turns it on, and a number turns it on with that as the
+   pressure threshold, which is how the table there was made. *)
+let pre (p : M.prog) =
+  match Sys.getenv_opt "SKUNK_SCHED_PRE" with
+  | None | Some "" | Some "0" -> ()
+  | Some v ->
+      (match int_of_string_opt v with Some n when n > 1 -> pressure_limit := n | _ -> ());
+      List.iter pre_func p.M.funcs

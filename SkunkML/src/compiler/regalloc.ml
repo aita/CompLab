@@ -154,10 +154,27 @@ let spill_costs (f : M.func) =
     f.M.blocks;
   cost
 
+(* A phi is not an instruction, so liveness has to read it separately: its
+   destination is defined at the top of its own block, and its sources are live
+   out of the predecessor named beside them and of nobody else.  By the time the
+   allocator runs there are no phis left, so both of these are empty and this
+   costs nothing -- they are here for the pressure-aware scheduler, which runs
+   before out-of-SSA and asks the same question ([17章](../doc/17-loops.md)). *)
+let phi_defs (b : M.block) = nodes (List.map fst b.M.phis)
+
+let phi_uses (b : M.block) pred =
+  nodes
+    (List.concat_map
+       (fun (_, srcs) ->
+         match List.assoc_opt pred srcs with Some o -> regs_in o | None -> [])
+       b.M.phis)
+
 let liveness (f : M.func) =
   let live_in = Hashtbl.create 32 and live_out = Hashtbl.create 32 in
+  let by_id = Hashtbl.create 32 in
   List.iter
     (fun (b : M.block) ->
+      Hashtbl.replace by_id b.M.id b;
       Hashtbl.replace live_in b.M.id IS.empty;
       Hashtbl.replace live_out b.M.id IS.empty)
     f.M.blocks;
@@ -168,7 +185,12 @@ let liveness (f : M.func) =
       (fun (b : M.block) ->
         let out =
           List.fold_left
-            (fun acc s -> IS.union acc (Hashtbl.find live_in s))
+            (fun acc s ->
+              let sb = Hashtbl.find by_id s in
+              IS.union acc
+                (IS.union
+                   (IS.diff (Hashtbl.find live_in s) (IS.of_list (phi_defs sb)))
+                   (IS.of_list (phi_uses sb b.M.id))))
             IS.empty (succs b)
         in
         let live = ref (IS.union out (IS.of_list (nodes (term_uses b.M.term)))) in
@@ -180,6 +202,7 @@ let liveness (f : M.func) =
             live := IS.diff !live (IS.of_list (nodes d));
             live := IS.union !live (IS.of_list (nodes u)))
           b.M.code;
+        live := IS.union !live (IS.of_list (phi_defs b));
         if not (IS.equal out (Hashtbl.find live_out b.M.id)) then changed := true;
         if not (IS.equal !live (Hashtbl.find live_in b.M.id)) then changed := true;
         Hashtbl.replace live_out b.M.id out;

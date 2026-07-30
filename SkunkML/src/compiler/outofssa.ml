@@ -148,4 +148,11 @@ let func (f : M.func) =
       end)
     f.M.blocks
 
-let program (p : M.prog) = List.iter func p.M.funcs
+(* The pressure-aware scheduling pass runs here rather than from the driver,
+   because "before out-of-SSA" is the whole of where it goes: it wants the phis
+   still standing, so that the copies this pass is about to invent are not
+   instructions it can move ([17章](../doc/17-loops.md)).  It is off unless the
+   environment turns it on. *)
+let program (p : M.prog) =
+  Sched.pre p;
+  List.iter func p.M.funcs
