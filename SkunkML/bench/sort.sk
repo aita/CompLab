@@ -1,5 +1,15 @@
-(* 配列と参照。A1（`!`・`:=`・`Array.sub`・`Array.update` を命令に展開）が
-   いちばん出るはず。 *)
+(* Arrays and refs.
+
+   Insertion sort over seven thousand elements is quadratic on purpose: the
+   inner loop is nothing but `Array.sub`, a comparison and `Array.update`, so
+   the time is a direct reading of how well those three turn into instructions
+   rather than calls into the runtime.  The checksum loop adds a `ref` to the
+   mix for the same reason -- `!` and `:=` on a cell that never escapes ought
+   to cost no more than a register.
+
+   The array is built inside the `let` rather than at the top level, because a
+   top-level binding is echoed, and seven thousand ints ahead of one checksum
+   line is not a benchmark's idea of output. *)
 fun build (a, i, n, seed) =
   if i >= n then ()
   else
@@ -19,12 +29,17 @@ fun insert (a, i, n) =
     in Array.update (a, at, x); insert (a, i + 1, n)
     end
 
-val n = 4000
-val a = Array.array (n, 0)
-val () = build (a, 0, n, 7)
-val () = insert (a, 1, n)
-val total = let val s = ref 0
-                fun add i = if i >= n then !s else (s := !s + Array.sub (a, i); add (i + 1))
-            in add 0
-            end
-val () = print (Int.toString (Array.sub (a, 0)) ^ " " ^ Int.toString total ^ "\n")
+fun checksum (a, n) =
+  let val s = ref 0
+      fun add i = if i >= n then !s else (s := !s + Array.sub (a, i); add (i + 1))
+  in add 0
+  end
+
+val n = 7000
+
+val () =
+  let val a = Array.array (n, 0)
+      val () = build (a, 0, n, 7)
+      val () = insert (a, 1, n)
+  in print (Int.toString (Array.sub (a, 0)) ^ " " ^ Int.toString (checksum (a, n)) ^ "\n")
+  end

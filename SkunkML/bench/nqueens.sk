@@ -1,4 +1,13 @@
-(* リストと確保。cons セルと組を大量に作るので、A4 とガベージコレクタが出る。 *)
+(* Lists and allocation.
+
+   Every partial solution is a fresh cons cell and every call carries a tuple,
+   so the search spends most of its time in the allocator and walking the cells
+   it just made.  `ok` reads a list it will never write, which is what makes it
+   worth watching: whether the argument tuple survives to the heap, and whether
+   the cons cells that die one recursion later cost anything.
+
+   Eleven queens has 2680 solutions -- large enough to run for a while, small
+   enough that the tree-walking interpreter still finishes. *)
 fun ok (q, ds, n) =
   case ds of
       [] => true
@@ -15,4 +24,4 @@ fun place (n, row, ds) =
     in tryAll (1, 0)
     end
 
-val () = print (Int.toString (place (9, 9, [])) ^ "\n")
+val () = print (Int.toString (place (11, 11, [])) ^ "\n")
