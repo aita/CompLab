@@ -1,0 +1,47 @@
+fun show (label : string, n : int) =
+  print (label ^ " = " ^ intToString (n) ^ "\n")
+
+var i = 0
+var total = 0
+val () = while i < 10 do (total := total + i; i := i + 1)
+val () = show ("while", total)
+
+var product = 1
+val () = for j = 1 to 6 do product := product * j
+val () = show ("for", product)
+
+fun firstMultiple (of : int, over : int) : int =
+  let var k = 1
+      var found = 0
+  in
+    while true do (
+      if k * of > over then (found := k * of; break) else ();
+      k := k + 1
+    );
+    found
+  end
+
+val () = show ("break", firstMultiple (7, 100))
+
+fun classify (n : int) : string =
+  if n < 0 then "negative"
+  else if n = 0 then "zero"
+  else if n < 10 then "small"
+  else "large"
+
+val () = print (classify (~1) ^ " " ^ classify (0) ^ " " ^ classify (5) ^ " "
+                ^ classify (500) ^ "\n")
+
+var nested = 0
+val () =
+  for a = 1 to 3 do
+    for b = 1 to 3 do
+      if a = b then nested := nested + a * b else ()
+val () = show ("nested", nested)
+
+fun ackermann (m : int, n : int) : int =
+  if m = 0 then n + 1
+  else if n = 0 then ackermann (m - 1, 1)
+  else ackermann (m - 1, ackermann (m, n - 1))
+
+val () = show ("ackermann", ackermann (2, 3))

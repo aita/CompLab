@@ -26,3 +26,8 @@
   the phi-functions of value SSA without ever computing a dominance frontier.
   The book is in [`SkunkML/doc/`](SkunkML/doc/index.md), a chapter per pass, in
   Japanese.
+- [`WolverineML/`](WolverineML) — Tiger's language in SML's syntax, compiled to
+  ARMv8 in Python: records, arrays and nested functions with static links, SSA
+  built the textbook way with dominance frontiers, and register allocation on
+  SSA — colouring in dominance order, because an SSA interference graph is
+  chordal and there is no graph to build.
