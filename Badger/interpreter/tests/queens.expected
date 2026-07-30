@@ -1,0 +1,13 @@
+8 queens: [4,2,7,3,6,8,5,1]
+
+. . . Q . . . . 
+. Q . . . . . . 
+. . . . . . Q . 
+. . Q . . . . . 
+. . . . . Q . . 
+. . . . . . . Q 
+. . . . Q . . . 
+Q . . . . . . . 
+
+solutions on a 6x6 board: 4
+both programs found the same 4 boards

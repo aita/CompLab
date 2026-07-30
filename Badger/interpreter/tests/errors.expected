@@ -1,0 +1,11 @@
+errors/syntax.pl:4:18: = needs a right operand
+errors/undefined.pl: existence_error(procedure,no_such_predicate/1) ('no_such_predicate/1')
+errors/arity.pl: existence_error(procedure,p/2) ('p/2')
+errors/type.pl: type_error(evaluable,a/0) ('is/2')
+errors/instantiation.pl: instantiation_error ('is/2')
+errors/zero_divisor.pl: evaluation_error(zero_divisor) ('is/2')
+errors/list.pl: type_error(list,not_a_list) ('msort/2')
+errors/permission.pl: permission_error(modify,static_procedure,atom/1) ('assertz/1')
+errors/redefine.pl: cannot redefine the built-in (is)/2
+errors/no_file.pl: existence_error(source_sink,'there/is/no/such/file.pl') ('consult/1')
+errors/uncaught.pl: unhandled exception my_ball

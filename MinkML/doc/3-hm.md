@@ -14,6 +14,37 @@ compose : forall 'a 'b 'c. ('a -> 'b) -> ('c -> 'a) -> 'c -> 'b = <fun>
 usedTwice : int * bool = (1, true)
 ```
 
+## 用語 — 置換・単一化・主要型
+
+**置換 (substitution)** は型変数から型への有限写像です。`[?1 := int, ?2 := bool -> ?3]` のように
+書き、型に**適用 (apply)** すると変数がその像に置き換わります。2つの置換 `s1`・`s2` の
+**合成 (composition)** `s2 ∘ s1` は「`s1` を適用してから `s2` を適用する」のと同じ1つの置換です。
+Algorithm W が持ち回るのはこれで、破壊的な代入は使いません。
+
+**単一化 (unification)** は2つの型を等しくする置換を求めることです。求まる置換のうち
+「余計な決定をしていない」もの——**最汎単一化子 (most general unifier, mgu)**——が一意に存在
+することが Robinson の結果で、そのおかげで HM は**主要型 (principal type)** を出せます:
+推論した型は、その項が持ちうる型のうち最も一般的なものです。
+
+**出現検査 (occurs check)** は `?1` と `?1 -> int` の単一化を止めます。これを省くと無限の型が
+できます。
+
+**単型 (monotype)** は `forall` を含まない型、**型スキーム (type scheme)** は
+`forall 'a … . τ` です。環境に入るのはスキームで、**一般化 (generalization)** が単型を
+スキームにし（`let` の境目）、**具体化 (instantiation)** がスキームを単型に開きます（変数を
+使うたび）。同じ束縛を2つの型で使えるのはこれのおかげで、**let 多相**と呼びます。
+
+| | |
+|---|---|
+| 置換 | 型変数 → 型の有限写像。`apply` で効かせ、`compose` で繋ぐ |
+| mgu | 余計な決定をしない単一化子。一意に存在する |
+| 主要型 | その項が持ちうる型のうち最も一般的なもの |
+| 一般化 | 単型 → スキーム。ここでは `ftv(型) \ ftv(環境)` で判定する |
+| 具体化 | スキーム → 単型。量化変数を新しい単一化変数に開く |
+
+**rank-1** は「`forall` が型の先頭にしかない」ことです。HM の型スキームはこれだけで、
+`(forall 'a. 'a -> 'a) -> …` のような rank-2 は型の文法に入りません（[4章](4-poly.md)）。
+
 ## 型・スキーム・置換
 
 型に量化子はありません。量化するのは**スキーム**で、それは `let` と（トップレベルの）束縛
@@ -194,3 +225,22 @@ rank-2 を「注釈で受け取る」ために双方向型検査が必要にな�
   素の HM です。
 - **効率。** 置換の合成と環境走査を素直にやるので、深い `let` の入れ子では `row` より遅く
   なります。それが次章の主題です。
+
+## 参考文献
+
+- R. Milner, [*A theory of type polymorphism in programming*][milner78], JCSS 17(3), 1978。
+  Algorithm W の原型と、let 多相。
+- L. Damas, R. Milner, [*Principal type-schemes for functional programs*][dm82], POPL 1982。
+  この章が写した提示。W の健全性と完全性、主要型の存在。
+- J. A. Robinson, [*A machine-oriented logic based on the resolution principle*][robinson],
+  JACM 12(1), 1965。単一化と最汎単一化子。
+- D. Rémy, [*Extension of ML type system with a sorted equational theory on types*][remy],
+  INRIA RR-1766, 1992。環境走査をレベルに置き換える方。実装は[5章](5-rows.md)にあります。
+- O. Kiselyov, [*Efficient and Insightful Generalization*][oleg]、2013。レベル方式の解説として
+  読みやすく、この章との対応が付けやすい。
+
+[milner78]: https://doi.org/10.1016/0022-0000(78)90014-4
+[dm82]: https://doi.org/10.1145/582153.582176
+[robinson]: https://doi.org/10.1145/321250.321253
+[remy]: https://hal.inria.fr/inria-00077006
+[oleg]: https://okmij.org/ftp/ML/generalization.html

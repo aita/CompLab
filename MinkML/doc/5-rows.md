@@ -15,6 +15,46 @@ count : [ `Some : int, ..'a ] -> int = <fun>
 `..'b` が行変数です。「他に何のフィールドがあってもよい」を型が言っている状態で、これが
 注釈なしに推論されます。
 
+## 用語 — Hindley–Milner とは何か
+
+このシステムの土台は Hindley–Milner（HM）で、行はその上の追加です。HM の道具は3つです。
+
+**単一化 (unification)。** 2つの型を「等しくなるように変数を決める」操作です。`'a -> int` と
+`bool -> 'b` を単一化すると `'a = bool`、`'b = int`。結果は**最汎単一化子 (most general
+unifier)** ——余計な決定をしない、一番緩い解——であることが保証されます。だから HM は
+**主要型 (principal type)** を出せます: 推論した型は、その項が持ちうる型のうち最も一般的なもの
+です。
+
+実装は変数を可変参照にして、解けたら相手を指す（**破壊的リンク**）方式です。`force`（別名
+`find`）がリンクを辿る union-find の `find` に当たります。
+
+**出現検査 (occurs check)。** `'a` と `'a -> int` を単一化しようとすると無限型ができるので、
+「左辺の変数が右辺に現れないか」を先に見ます。行にも必要で、`occurs_rvar` がそれです。
+
+**一般化 (generalization) と具体化 (instantiation)。** `let` の右辺を推論し終えたら、残った
+変数を `forall` で束縛して**型スキーム**にします（一般化）。その名前を使うたびに `forall` を
+新しい変数に開き直します（具体化）。**同じ `let` 束縛を別の型で2回使えるのはこれのおかげ**で、
+これを **let 多相**と呼びます。
+
+古典的な提示は **Algorithm W**（Damas–Milner 1982）で、代入を明示的に持ち回ります。**それを
+そのまま書いたのが[3章](3-hm.md)の `hm` システム**で、この章はその同じ推論を可変参照とレベルで
+やり直したものです。両者の対応は[9章](9-inference.md)に表があります。
+
+| | |
+|---|---|
+| 単型 (monotype) | `forall` を含まない型。単一化変数を含んでよい |
+| 型スキーム (type scheme) | `forall 'a ... . τ`。環境に入るのはこちら |
+| 一般化 | 単型 → 型スキーム。`let` の境目で起きる |
+| 具体化 | 型スキーム → 単型。変数を使うたびに起きる |
+| 剛性変数 (rigid) | 注釈由来。何とも単一化しない（「注釈は約束として扱う」の節） |
+
+**なぜ rank-1 に限ると完全推論になるのか。** 一般化と具体化がこの形で成立するのは、`forall` が
+型の先頭にしか来ないからです。矢印の左に `forall` が入ると「引数として多相な関数を要求する」に
+なり、単一化変数では表せません。そこが[4章](4-poly.md)の話で、この2章は**同じ問題の両側**です。
+
+行が足すのは型の種類（`TRecord` / `TVariant`）と、単一化の相手として**行**を増やすことだけ
+です。HM の3つの道具はそのまま使えます。
+
 ## 型と行
 
 型と行は別の OCaml 型にしてあります。こうすると「行を型の位置に書く」ような間違いが構文的に
@@ -202,3 +242,23 @@ count : [ `Some : int, ..'a ] -> int
 - **第一級ラベル。** ラベルを値として取り回すことはできません。
 - **多相な `case` の網羅性検査。** 開いた行に対する網羅性は落穂拾いの腕の有無だけで決まり、
   決定木も生成しません（それは MartenML の主題です）。
+
+## 参考文献
+
+- L. Damas, R. Milner, [*Principal type-schemes for functional programs*][dm82], POPL 1982。
+  Algorithm W と主要型。上の「単一化・一般化・具体化」の出どころ。
+- J. A. Robinson, [*A machine-oriented logic based on the resolution principle*][robinson],
+  JACM 12(1), 1965。単一化アルゴリズムそのもの。最汎単一化子の存在はここです。
+- D. Rémy, [*Extension of ML type system with a sorted equational theory on
+  types*][remy-rows], INRIA RR-1766, 1992。行多相と、絶対制約（lacks constraints）を持つ流派。
+  レベルによる一般化もこの系譜です。
+- D. Leijen, [*Extensible records with scoped labels*][leijen], TFP 2005。この章が採った方、
+  重複ラベルを許す `rewrite` 1つで済ませる流派。
+- O. Kiselyov, R. Lämmel, K. Schupke, [*Strongly typed heterogeneous
+  collections*][hlist], Haskell Workshop 2004。行を型クラスで再現する側の代表。比較用。
+
+[dm82]: https://doi.org/10.1145/582153.582176
+[robinson]: https://doi.org/10.1145/321250.321253
+[remy-rows]: https://hal.inria.fr/inria-00077006
+[leijen]: https://doi.org/10.1007/11964681_11
+[hlist]: https://doi.org/10.1145/1017472.1017488
