@@ -56,29 +56,25 @@ func both$4:
 -- val answer : bool -> string
 func $answer:
   b0:
-    v0 = global answer
-    v1 = mkclos answer$1, 0                ; answer
+    v0 = mkclos answer$1, 0                ; answer
     ret v0
 
 -- val describe : bool -> string
 func $describe:
   b0:
-    v0 = global describe
-    v1 = mkclos describe$2, 0              ; describe
+    v0 = mkclos describe$2, 0              ; describe
     ret v0
 
 -- val inline : bool -> string
 func $inline:
   b0:
-    v0 = global inline
-    v1 = mkclos inline$3, 0                ; inline
+    v0 = mkclos inline$3, 0                ; inline
     ret v0
 
 -- val both : bool * int -> string
 func $both:
   b0:
-    v0 = global both
-    v1 = mkclos both$4, 0                  ; both
+    v0 = mkclos both$4, 0                  ; both
     ret v0
 
 -- val shown : string * string * string * string
@@ -89,16 +85,15 @@ func $shown:
     v2 = global inline
     v3 = const 1
     v4 = global both
-    v5 = global shown
-    v6 = con true/1                        ; t.63
-    v7 = call v0, v6                       ; t.64
-    v8 = con false/0                       ; t.65
-    v9 = call v1, v8                       ; t.66
-    v10 = con true/1                       ; t.67
-    v11 = call v2, v10                     ; t.68
-    v12 = con true/1                       ; t.69
-    v13 = record { 1 = v12, 2 = v3 }       ; t.70
-    v14 = call v4, v13                     ; t.71
-    v15 = record { 1 = v7, 2 = v9, 3 = v11, 4 = v14 } ; t.72
-    ret v5
+    v5 = con true/1                        ; t.63
+    v6 = call v0, v5                       ; t.64
+    v7 = con false/0                       ; t.65
+    v8 = call v1, v7                       ; t.66
+    v9 = con true/1                        ; t.67
+    v10 = call v2, v9                      ; t.68
+    v11 = con true/1                       ; t.69
+    v12 = record { 1 = v11, 2 = v3 }       ; t.70
+    v13 = call v4, v12                     ; t.71
+    v14 = record { 1 = v6, 2 = v8, 3 = v10, 4 = v13 } ; t.72
+    ret v14
 

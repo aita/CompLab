@@ -18,6 +18,8 @@ let usage () =
      definition\n\
     \      --selftest F  write a hand-built ELF to F: checks the assembler,\n\
     \                    the linker and the ELF writer on their own\n\
+    \      --dump-mach   print the amd64 graph after register allocation\n\
+    \  -o FILE           write the executable here (the default is a.out)\n\
     \      --dump-encoding\n\
     \                    print the bytes for the tricky addressing modes\n\
     \  -h, --help        this\n"
@@ -27,6 +29,8 @@ let dump_dom = ref false
 let dump_flat = ref false
 let verify = ref true
 let selftest_to = ref None
+let dump_mach = ref false
+let out = ref None
 
 let parse ~file source =
   let lexbuf = Lexing.from_string source in
@@ -130,12 +134,12 @@ let selftest path =
     @ [ lea rdi (glob "t_str2"); Cl "skunk_print" ]
     @ [ Ret ]);
   Rt.text text;
-  descriptor data "t_pair_desc" ~kind:0 ~nfields:2 ~con:None ~labels:None ~list:0;
-  descriptor data "t_rec_desc" ~kind:0 ~nfields:2 ~con:None ~labels:(Some "t_rec_labels") ~list:0;
-  descriptor data "t_nil_desc" ~kind:1 ~nfields:0 ~con:(Some (lit "nil")) ~labels:None ~list:1;
-  descriptor data "t_cons_desc" ~kind:1 ~nfields:1 ~con:(Some (lit "::")) ~labels:None ~list:2;
-  descriptor data "t_con_desc" ~kind:1 ~nfields:1 ~con:(Some (lit "Leaf")) ~labels:None ~list:0;
-  descriptor data "t_clos_desc" ~kind:3 ~nfields:1 ~con:None ~labels:None ~list:0;
+  descriptor data "t_pair_desc" ~kind:0 ~nfields:2 ~con:None ~labels:None ~list:0 ~tag:0;
+  descriptor data "t_rec_desc" ~kind:0 ~nfields:2 ~con:None ~labels:(Some "t_rec_labels") ~list:0 ~tag:0;
+  descriptor data "t_nil_desc" ~kind:1 ~nfields:0 ~con:(Some (lit "nil")) ~labels:None ~list:1 ~tag:0;
+  descriptor data "t_cons_desc" ~kind:1 ~nfields:1 ~con:(Some (lit "::")) ~labels:None ~list:2 ~tag:0;
+  descriptor data "t_con_desc" ~kind:1 ~nfields:1 ~con:(Some (lit "Leaf")) ~labels:None ~list:0 ~tag:0;
+  descriptor data "t_clos_desc" ~kind:3 ~nfields:1 ~con:None ~labels:None ~list:0 ~tag:0;
   Asm.align data 8;
   Asm.label data "t_rec_labels";
   Asm.dq_sym data (lit "age");
@@ -202,7 +206,7 @@ let encodings () =
     M.Idiv (M.R rcx);
     M.Push (r rbx);
     M.Pop (r r13);
-    M.CallReg (M.R r11, None);
+    M.CallReg (M.R r11);
     M.Syscall;
   ]
 
@@ -228,6 +232,12 @@ let () =
         args rest
     | "--dump-flat" :: rest ->
         dump_flat := true;
+        args rest
+    | "--dump-mach" :: rest ->
+        dump_mach := true;
+        args rest
+    | "-o" :: f :: rest ->
+        out := Some f;
         args rest
     | "--no-verify" :: rest ->
         verify := false;
@@ -274,17 +284,29 @@ let () =
       Types.reset ();
       Core.reset ();
       (try
-         (* The basis first, so that its globals exist; only the program is
-            dumped, because nobody asked to read the prelude. *)
-         let env, globals, _ =
+         (* The basis first.  Its half that is written in SkunkML is compiled
+            exactly like the program -- same parser, same inference, same
+            decision trees, same back end -- and its top-level bindings run
+            first, silently: nothing prints while the prelude is defining
+            `map` and `foldl`. *)
+         let env, globals, basis_flat =
            to_flat (Basis.env ()) (Basis.globals ()) ~file:"<basis>"
              ~source:Basis.prelude
          in
          let _, globals, flat = to_flat env globals ~file:path ~source in
          if !dump_flat then print_string (Flat.program_to_string flat);
+         let basis = Build.program globals basis_flat in
          let prog = Build.program globals flat in
+         let whole =
+           {
+             Ssa.funcs = basis.Ssa.funcs @ prog.Ssa.funcs;
+             items =
+               List.map (fun (i : Ssa.item) -> { i with Ssa.ilabel = None }) basis.Ssa.items
+               @ prog.Ssa.items;
+           }
+         in
          (if !verify then
-            match Dom.check_prog prog with
+            match Dom.check_prog whole with
             | [] -> ()
             | bad ->
                 flush stdout;
@@ -293,8 +315,15 @@ let () =
          if !dump_ssa then print_string (Ssa.prog_to_string prog);
          if !dump_dom then
            List.iter (fun f -> print_string (Dom.to_string f)) (Dom.all_funcs prog);
-         if (not !dump_ssa) && (not !dump_dom) && not !dump_flat then
-           prerr_endline "skunkc: the back end stops at SSA for now; try --dump-ssa"
+         (* The back end.  Selection needs the basis to exist first, because a
+            program that mentions `print` wants the global that holds it. *)
+         Statics.reset ();
+         Stubs.register ();
+         let mach = Select.program whole in
+         Outofssa.program mach;
+         Regalloc.program mach;
+         if !dump_mach then print_string (Mach.to_string mach);
+         Emit.program mach ~path:(Option.value !out ~default:"a.out")
        with Loc.Error { loc; where; msg } ->
          flush stdout;
          Printf.eprintf "%s: %s: %s\n" (Loc.to_string loc) where msg;

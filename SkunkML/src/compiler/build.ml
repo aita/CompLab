@@ -81,12 +81,15 @@ let global st entry name =
   | None -> emit_head st entry (S.Global name)
 
 let atom st entry : F.atom -> S.value = function
+  (* A local binding first: a top-level `val x = ...` binds `x` locally inside
+     its own body before it becomes the global of that name, and the local is
+     what the body means. *)
   | F.AVar x -> (
-      if Hashtbl.mem st.globals x then global st entry x
-      else
-        match Map.find_opt x st.names with
-        | Some v -> v
-        | None -> failwith ("build: unbound " ^ x))
+      match Map.find_opt x st.names with
+      | Some v -> v
+      | None ->
+          if Hashtbl.mem st.globals x then global st entry x
+          else failwith ("build: unbound " ^ x))
   | F.AInt n -> constant st entry (S.CInt n)
   | F.AStr s -> constant st entry (S.CStr s)
   | F.AUnit -> constant st entry S.CUnit

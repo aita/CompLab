@@ -1,16 +1,17 @@
 (* amd64 instructions, still in a control-flow graph and still in SSA.
 
-   Selection produces this; register allocation colours it; going out of SSA
-   turns the phis into copies; emission prints it.  Two things are unusual
-   about the order:
+   Three passes run over it: selection produces it, `outofssa.ml` replaces the
+   phis with copies, and `regalloc.ml` colours what is left.
 
-     * The phis survive selection.  Register allocation wants them, because an
-       SSA interference graph is chordal and a chordal graph can be coloured
-       greedily -- and that property is lost the moment the phis become copies.
-       So the copies come after the colours.
-     * Operands are *virtual* registers until then.  A virtual register is
-       exactly one SSA value, so "which value is live here" and "which register
-       does this need" are the same question.
+   The phis survive selection because selection is a change of instruction set,
+   not a change of control flow, and a phi is a fact about control flow.  They
+   are gone before colouring, because the interference graph is much easier to
+   reason about when every instruction is an ordinary one -- which is the order
+   Chaitin's algorithm was written for.
+
+   Operands are *virtual* registers until then.  A virtual register is exactly
+   one SSA value, so "which value is live here" and "which register does this
+   need" are the same question.
 
    The instruction set is small on purpose.  Anything that would need a loop or
    a heap walk -- allocation, structural equality, printing, string and list
@@ -72,8 +73,8 @@ type instr =
   | Setcc of string * reg (* dst gets 0 or 1 *)
   | Idiv of reg (* rax:rdx / reg, quotient in rax, remainder in rdx *)
   | Cqo
-  | Call of string * reg option (* a known symbol, result *)
-  | CallReg of reg * reg option (* through a register *)
+  | Call of string (* a known symbol; the result is in rax *)
+  | CallReg of reg (* through a register *)
   | Push of operand
   | Pop of operand
   (* Byte-wide moves, for the inside of a string; [Loadb] zero-extends. *)
@@ -87,10 +88,10 @@ type term =
   | Ret of operand
   | Jmp of int (* block id *)
   | Jcc of string * int * int (* condition, then, else *)
-  (* A tail call: the frame is dropped and control leaves without returning. *)
-  | TailCall of reg
-  | Switch of operand * (int * int) list * int option (* value, (key, block), default *)
-  | Halt of string (* a match failure: report and exit *)
+  (* A tail call: the frame is dropped and control leaves without returning.
+     The closure is already in rdi and its argument in rsi. *)
+  | TailCall
+  | Halt of string (* a match failure: report where and exit *)
 
 type block = {
   id : int;
@@ -104,25 +105,22 @@ type func = {
   name : string;
   entry : int;
   mutable blocks : block list;
+  mutable nvreg : int;
   (* Filled in by register allocation. *)
   mutable nspill : int;
   mutable used_callee : int list;
 }
 
-type prog = {
-  funcs : func list;
-  (* Static data: descriptors, string literals, the global table. *)
-  mutable data : (string * dat) list;
-  globals : string list;
-  (* What `main` does: run each item, store the result, report it. *)
-  items : (string * string * string Lazy.t option * bool) list;
+type item = {
+  (* The global this fills in, the label of the code that computes it, and what
+     to print afterwards. *)
+  it_global : string option;
+  it_code : string option;
+  it_label : string option;
+  it_show : bool;
 }
 
-and dat =
-  | DWords of int list
-  | DSyms of string option list (* NULL, or a label *)
-  | DBytes of string
-  | DDesc of { kind : int; nfields : int; con : string option; labels : string option }
+type prog = { funcs : func list; globals : string list; items : item list }
 
 let reg_str = function
   | R i -> "%" ^ reg_name.(i)
@@ -158,8 +156,8 @@ let instr_str = function
   | Setcc (c, r) -> Printf.sprintf "set%s %s" c (reg_str r)
   | Idiv r -> Printf.sprintf "idiv %s" (reg_str r)
   | Cqo -> "cqo"
-  | Call (s, _) -> Printf.sprintf "call %s" s
-  | CallReg (r, _) -> Printf.sprintf "call *%s" (reg_str r)
+  | Call s -> Printf.sprintf "call %s" s
+  | CallReg r -> Printf.sprintf "call *%s" (reg_str r)
   | Loadb (d, s) -> Printf.sprintf "movzbq %s, %s" (operand_str s) (reg_str d)
   | Storeb (d, s) -> Printf.sprintf "movb %s, %s" (reg_str s) (operand_str d)
   | RepMovsb -> "rep movsb"
@@ -172,12 +170,8 @@ let term_str = function
   | Ret o -> Printf.sprintf "ret %s" (operand_str o)
   | Jmp b -> Printf.sprintf "jmp b%d" b
   | Jcc (c, t, e) -> Printf.sprintf "j%s b%d else b%d" c t e
-  | TailCall r -> Printf.sprintf "tailcall %s" (reg_str r)
+  | TailCall -> "tailcall"
   | Halt m -> Printf.sprintf "halt %S" m
-  | Switch (o, arms, d) ->
-      Printf.sprintf "switch %s [%s%s]" (operand_str o)
-        (String.concat ", " (List.map (fun (k, b) -> Printf.sprintf "%d -> b%d" k b) arms))
-        (match d with None -> "" | Some b -> Printf.sprintf ", _ -> b%d" b)
 
 let to_string (p : prog) =
   let buf = Buffer.create 1024 in

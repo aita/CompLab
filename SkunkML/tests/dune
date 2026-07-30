@@ -249,3 +249,74 @@
  (alias runtest)
  (action
   (diff selftest.expected selftest.interp.out)))
+
+; The compiler, end to end.  Each program is compiled to an executable, run,
+; and its output diffed against the interpreter's for the same program.  That is
+; the whole point of the back end: it may pick different instructions every time
+; it changes, but it may not print anything different.
+
+(rule
+ (targets tour.bin matching.bin modules.bin store.bin selftest.bin)
+ (deps
+  ../examples/tour.sk
+  ../examples/matching.sk
+  ../examples/modules.sk
+  ../examples/store.sk
+  selftest.sk)
+ (action
+  (progn
+   (run %{exe:../src/compiler/skunkc.exe} -o tour.bin ../examples/tour.sk)
+   (run %{exe:../src/compiler/skunkc.exe} -o matching.bin ../examples/matching.sk)
+   (run %{exe:../src/compiler/skunkc.exe} -o modules.bin ../examples/modules.sk)
+   (run %{exe:../src/compiler/skunkc.exe} -o store.bin ../examples/store.sk)
+   (run %{exe:../src/compiler/skunkc.exe} -o selftest.bin selftest.sk))))
+
+(rule
+ (with-stdout-to
+  tour.bin.out
+  (run %{dep:tour.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.bin.out)))
+
+(rule
+ (with-stdout-to
+  matching.bin.out
+  (run %{dep:matching.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff matching.expected matching.bin.out)))
+
+(rule
+ (with-stdout-to
+  modules.bin.out
+  (run %{dep:modules.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff modules.expected modules.bin.out)))
+
+(rule
+ (with-stdout-to
+  store.bin.out
+  (run %{dep:store.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff store.expected store.bin.out)))
+
+(rule
+ (with-stdout-to
+  selftest.bin.out
+  (run %{dep:selftest.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff selftest.expected selftest.bin.out)))

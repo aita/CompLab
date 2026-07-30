@@ -262,10 +262,10 @@ let rec instr st (i : M.instr) =
       put_rex st rx;
       byte st 0xf7;
       put ()
-  | M.Call (sym, _) ->
+  | M.Call sym ->
       byte st 0xe8;
       reloc st Rel32 sym (-4)
-  | M.CallReg (r, _) ->
+  | M.CallReg r ->
       let put, rx = modrm st ~reg:2 ~rm:(M.Reg r) in
       put_rex st { rx with w = false };
       byte st 0xff;

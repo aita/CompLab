@@ -24,11 +24,15 @@
      16  con       the constructor's name as a string block, or 0
      24  labels    an array of string blocks, one per field, or 0 for a tuple
      32  list      0 ordinary, 1 nil, 2 cons
+     40  tag       which constructor of its datatype this is
 
-   The last word is the one thing the C version did not have.  Printing a list
+   The last two words are the ones the C version did not have.  Printing a list
    as `[1, 2, 3]` is a statement about one particular datatype, and the compiler
    is where that datatype is known, so the descriptor says so outright instead
-   of the runtime comparing constructor names at every step.
+   of the runtime comparing constructor names at every step.  The tag is there
+   for the generated code rather than for the runtime: a `case` over a datatype
+   compares tags, and comparing a small integer is what makes a jump table
+   possible later.
 
    A string block is [length][bytes...][NUL], with the value pointing at the
    length word.  The NUL is not counted; it is there so that a string can be
@@ -65,7 +69,7 @@ let emit st items =
       | Jump l -> A.jmp st l
       | Br (c, l) -> A.jcc st c l
       | Ret -> A.ret st
-      | Cl s -> A.instr st (M.Call (s, None)))
+      | Cl s -> A.instr st (M.Call s))
     items
 
 let rax = M.R 0
@@ -119,6 +123,7 @@ let d_nfields = 8
 let d_con = 16
 let d_labels = 24
 let d_list = 32
+let d_tag = 40
 let k_record = 0
 let k_con = 1
 let k_string = 2
@@ -219,19 +224,27 @@ let output =
     load rsi (at rdi);
     add rdi (imm 8);
     Jump "rt_out";
-    (* errs(rdi = string block): stderr, after flushing stdout *)
-    L "rt_errs";
+    (* errout(rdi = bytes, rsi = count): stderr, after flushing stdout, so that
+       the two streams stay in the order they were produced *)
+    L "rt_errout";
     push rbx;
+    push r12;
     movr rbx rdi;
+    movr r12 rsi;
     Cl "rt_flush";
-    load rdx (at rbx);
+    movr rdx r12;
     movr rsi rbx;
-    add rsi (imm 8);
     movi rdi 2;
     movi rax 1;
     syscall;
+    pop r12;
     pop rbx;
     Ret;
+    (* errs(rdi = string block) *)
+    L "rt_errs";
+    load rsi (at rdi);
+    add rdi (imm 8);
+    Jump "rt_errout";
   ]
 
 (* ---- the heap ------------------------------------------------------------ *)
@@ -314,6 +327,23 @@ let failures =
   @ [ movr rdi rbx; Cl "rt_errs" ]
   @ [ lea rdi (glob (lit "\n")); Cl "rt_errs" ]
   @ [ movi rax 60; movi rdi 1; syscall ]
+  (* An out-of-range index, with the numbers in it, because "index 5 out of
+     0..1" is the difference between a message and a shrug. *)
+  @ [ L "skunk_fail_index"; push rbx; push r12; push r13 ]
+  @ [ movr rbx rdi; movr r12 rsi; movr r13 rdx ]
+  @ [ lea rdi (glob (lit "?: runtime error: ")); Cl "rt_errs" ]
+  @ [ movr rdi rbx; Cl "rt_errs" ]
+  @ [ lea rdi (glob (lit ": index ")); Cl "rt_errs" ]
+  @ [ movr rdi r12; Cl "rt_errnum" ]
+  @ [ lea rdi (glob (lit " out of 0..")); Cl "rt_errs" ]
+  @ [ movr rdi r13; sub rdi (imm 1); Cl "rt_errnum" ]
+  @ [ lea rdi (glob (lit "\n")); Cl "rt_errs" ]
+  @ [ movi rax 60; movi rdi 1; syscall ]
+  @ [ L "rt_errnum"; push rbx; movr rbx rdi ]
+  @ [ cmp rbx (imm 0); Br ("ge", "rt_errnum.pos") ]
+  @ [ lea rdi (glob (lit "~")); Cl "rt_errs"; neg rbx ]
+  @ [ L "rt_errnum.pos"; movr rdi rbx; Cl "rt_digits" ]
+  @ [ movr rdi rax; movr rsi rdx; Cl "rt_errout"; pop rbx; Ret ]
   @ [ L "skunk_match_fail"; push rbx; movr rbx rdi ]
   @ [ movr rdi rbx; Cl "rt_errs" ]
   @ [ lea rdi (glob (lit ": match failure: no pattern matched\n")); Cl "rt_errs" ]
@@ -645,7 +675,10 @@ let order =
       lea rax (glob bool_false);
       Ret;
     ]
-  @ [ L "skunk_string_compare"; Cl "rt_order" ]
+  (* `Int.compare` and `String.compare` are the same routine: which comparison
+     it is was decided by the type checker and then erased, so the value
+     decides. *)
+  @ [ L "skunk_compare"; Cl "rt_order" ]
   @ tag rax
   @ [ Ret ]
 
@@ -729,8 +762,10 @@ let arrays =
       load rax (idx ~disp:8 rdi rcx);
       Ret;
       L "skunk_array_sub.bad";
+      movr rsi rcx;
+      lea rdi (glob (lit "Array.sub"));
+      Cl "skunk_fail_index";
     ]
-  @ complain "Array.sub: index out of range"
   @ [
       L "skunk_array_update";
       movr rcx rsi;
@@ -744,8 +779,11 @@ let arrays =
       load rax (glob "skunk_the_unit");
       Ret;
       L "skunk_array_update.bad";
+      movr rsi rcx;
+      movr rdx r8;
+      lea rdi (glob (lit "Array.update"));
+      Cl "skunk_fail_index";
     ]
-  @ complain "Array.update: index out of range"
   @ [
       L "skunk_ref";
       push rbx;
@@ -762,6 +800,154 @@ let arrays =
       L "skunk_setref";
       store (at rdi) rsi;
       load rax (glob "skunk_the_unit");
+      Ret;
+    ]
+
+(* ---- lists ---------------------------------------------------------------- *)
+
+(* `nil`, `::`, `true`, `false` and `ref` are built-in constructors, so their
+   descriptors are fixed and live here.  The code generator has to use these
+   labels rather than emitting its own, because two constructors are equal only
+   if their descriptors are the same pointer.
+
+   A cons cell carries one field, a pair, so building a list means three
+   descriptors.  That is why these three routines are here and not in the basis
+   written in SkunkML: `@` is a primitive, and a primitive cannot be given the
+   descriptors as arguments without making the interface worse than the loop. *)
+let lists =
+  [
+    (* append(rdi, rsi) -> rax *)
+    L "skunk_append";
+    load rax (at ~disp:(-8) rdi);
+    load rax (at ~disp:d_list rax);
+    cmp rax (imm 2);
+    Br ("ne", "skunk_append.b");
+    push rbx;
+    push r12;
+    load rbx (at rdi) (* the pair *);
+    movr r12 rsi;
+    load rdi (at ~disp:8 rbx);
+    movr rsi r12;
+    Cl "skunk_append";
+    push rax;
+    lea rdi (glob "skunk_pair_desc");
+    movi rsi 2;
+    Cl "skunk_alloc";
+    pop rcx;
+    load rdx (at rbx);
+    store (at rax) rdx;
+    store (at ~disp:8 rax) rcx;
+    push rax;
+    lea rdi (glob "skunk_cons_desc");
+    movi rsi 1;
+    Cl "skunk_alloc";
+    pop rcx;
+    store (at rax) rcx;
+    pop r12;
+    pop rbx;
+    Ret;
+    L "skunk_append.b";
+    movr rax rsi;
+    Ret;
+    (* fromList(rdi) -> rax: one pass to count, one to fill *)
+    L "skunk_array_from_list";
+    push rbx;
+    push r12;
+    push r13;
+    movr rbx rdi;
+    movi r12 0;
+    movr rcx rbx;
+    L "skunk_array_from_list.count";
+    load rax (at ~disp:(-8) rcx);
+    load rax (at ~disp:d_list rax);
+    cmp rax (imm 2);
+    Br ("ne", "skunk_array_from_list.counted");
+    add r12 (imm 1);
+    load rcx (at rcx);
+    load rcx (at ~disp:8 rcx);
+    Jump "skunk_array_from_list.count";
+    L "skunk_array_from_list.counted";
+    lea rdi (glob "skunk_array_desc");
+    movr rsi r12;
+    add rsi (imm 1);
+    Cl "skunk_alloc";
+    store (at rax) r12;
+    movr r13 rax;
+    movi rcx 0;
+    L "skunk_array_from_list.fill";
+    load rax (at ~disp:(-8) rbx);
+    load rax (at ~disp:d_list rax);
+    cmp rax (imm 2);
+    Br ("ne", "skunk_array_from_list.done");
+    load rdx (at rbx);
+    load r8 (at rdx);
+    store (idx ~disp:8 r13 rcx) r8;
+    load rbx (at ~disp:8 rdx);
+    add rcx (imm 1);
+    Jump "skunk_array_from_list.fill";
+    L "skunk_array_from_list.done";
+    movr rax r13;
+    pop r13;
+    pop r12;
+    pop rbx;
+    Ret;
+    (* toList(rdi) -> rax, built back to front *)
+    L "skunk_array_to_list";
+    push rbx;
+    push r12;
+    push r13;
+    movr rbx rdi;
+    load r12 (at rbx);
+    lea r13 (glob "skunk_nil");
+    L "skunk_array_to_list.loop";
+    cmp r12 (imm 0);
+    Br ("le", "skunk_array_to_list.done");
+    sub r12 (imm 1);
+    lea rdi (glob "skunk_pair_desc");
+    movi rsi 2;
+    Cl "skunk_alloc";
+    load rdx (idx ~disp:8 rbx r12);
+    store (at rax) rdx;
+    store (at ~disp:8 rax) r13;
+    push rax;
+    lea rdi (glob "skunk_cons_desc");
+    movi rsi 1;
+    Cl "skunk_alloc";
+    pop rcx;
+    store (at rax) rcx;
+    movr r13 rax;
+    Jump "skunk_array_to_list.loop";
+    L "skunk_array_to_list.done";
+    movr rax r13;
+    pop r13;
+    pop r12;
+    pop rbx;
+    Ret;
+    (* The small integer routines the basis exposes. *)
+    L "skunk_abs";
+    movr rax rdi;
+    sar rax 1;
+    cmp rax (imm 0);
+    Br ("ge", "skunk_abs.done");
+    neg rax;
+    L "skunk_abs.done";
+  ]
+  @ tag rax
+  @ [
+      Ret;
+      L "skunk_min";
+      movr rax rdi;
+      cmp rdi (o rsi);
+      Br ("le", "skunk_min.done");
+      movr rax rsi;
+      L "skunk_min.done";
+      Ret;
+      L "skunk_max";
+      movr rax rdi;
+      cmp rdi (o rsi);
+      Br ("ge", "skunk_max.done");
+      movr rax rsi;
+      L "skunk_max.done";
       Ret;
     ]
 
@@ -1007,8 +1193,9 @@ let start =
   ]
 
 let text st =
-  emit st (start @ output @ heap @ failures @ strings @ equality @ order @ arithmetic @ arrays
-         @ printing)
+  emit st
+    (start @ output @ heap @ failures @ strings @ equality @ order @ arithmetic @ arrays @ lists
+    @ printing)
 
 (* ---- static data --------------------------------------------------------- *)
 
@@ -1023,24 +1210,30 @@ let string_block st name s =
   A.zeros st 1;
   A.align st 8
 
-let descriptor st name ~kind ~nfields ~con ~labels ~list =
+let descriptor st name ~kind ~nfields ~con ~labels ~list ~tag =
   A.align st 8;
   A.label st name;
   A.dq st kind;
   A.dq st nfields;
   (match con with None -> A.dq st 0 | Some s -> A.dq_sym st s);
   (match labels with None -> A.dq st 0 | Some s -> A.dq_sym st s);
-  A.dq st list
+  A.dq st list;
+  A.dq st tag
 
 let data st =
-  descriptor st "skunk_string_desc" ~kind:k_string ~nfields:0 ~con:None ~labels:None ~list:0;
-  descriptor st "skunk_unit_desc" ~kind:k_record ~nfields:0 ~con:None ~labels:None ~list:0;
-  descriptor st "skunk_array_desc" ~kind:k_array ~nfields:0 ~con:None ~labels:None ~list:0;
-  descriptor st "skunk_ref_desc" ~kind:k_ref ~nfields:1 ~con:None ~labels:None ~list:0;
+  descriptor st "skunk_string_desc" ~kind:k_string ~nfields:0 ~con:None ~labels:None ~list:0 ~tag:0;
+  descriptor st "skunk_unit_desc" ~kind:k_record ~nfields:0 ~con:None ~labels:None ~list:0 ~tag:0;
+  descriptor st "skunk_array_desc" ~kind:k_array ~nfields:0 ~con:None ~labels:None ~list:0 ~tag:0;
+  descriptor st "skunk_ref_desc" ~kind:k_ref ~nfields:1 ~con:None ~labels:None ~list:0 ~tag:0;
   descriptor st "skunk_true_desc" ~kind:k_con ~nfields:0 ~con:(Some (lit "true")) ~labels:None
-    ~list:0;
+    ~list:0 ~tag:1;
   descriptor st "skunk_false_desc" ~kind:k_con ~nfields:0 ~con:(Some (lit "false")) ~labels:None
-    ~list:0;
+    ~list:0 ~tag:0;
+  descriptor st "skunk_nil_desc" ~kind:k_con ~nfields:0 ~con:(Some (lit "nil")) ~labels:None
+    ~list:1 ~tag:0;
+  descriptor st "skunk_cons_desc" ~kind:k_con ~nfields:1 ~con:(Some (lit "::")) ~labels:None
+    ~list:2 ~tag:1;
+  descriptor st "skunk_pair_desc" ~kind:k_record ~nfields:2 ~con:None ~labels:None ~list:0 ~tag:0;
   (* The two blocks themselves.  A nullary constructor carries nothing, so the
      descriptor word is the whole of it. *)
   A.align st 8;
@@ -1049,6 +1242,9 @@ let data st =
   A.align st 8;
   A.dq_sym st "skunk_false_desc";
   A.label st bool_false;
+  A.align st 8;
+  A.dq_sym st "skunk_nil_desc";
+  A.label st "skunk_nil";
   A.align st 8;
   A.label st "skunk_heap_next";
   A.dq st 0;
