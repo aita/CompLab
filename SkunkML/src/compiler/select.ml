@@ -408,6 +408,11 @@ let arith ctx op (args : S.value list) dst =
           let ra = in_reg ctx a in
           let rb = in_reg ctx b in
           put ctx (M.Lea (dst, mem ~base:ra ~index:rb ~scale:1 ~disp:(-1) ())))
+  (* Only the right operand is asked about, unlike `+` and `*`, because
+     subtraction is not commutative and the other side is not worth a tile:
+     `c - x` is `mov $(2c + 2); sub x`, two instructions against three, and
+     across examples/, tests/ and bench/ there is exactly one of them (see
+     doc/12-select.md, していないこと). *)
   | "-", [ a; b ] -> (
       match displacement b (-2) with
       | Some d -> put ctx (M.Lea (dst, mem ~base:(in_reg ctx a) ~disp:d ()))
