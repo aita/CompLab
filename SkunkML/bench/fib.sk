@@ -1,0 +1,4 @@
+(* 呼び出しの費用。非末尾再帰なので、A2 のインライン展開と A4 の組引数平坦化が
+   そのまま出る。 *)
+fun fib n = if n < 2 then n else fib (n - 1) + fib (n - 2)
+val () = print (Int.toString (fib 30) ^ "\n")

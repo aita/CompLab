@@ -1,0 +1,18 @@
+(* リストと確保。cons セルと組を大量に作るので、A4 とガベージコレクタが出る。 *)
+fun ok (q, ds, n) =
+  case ds of
+      [] => true
+    | d :: rest => if q = d orelse q = d + n orelse q = d - n then false
+                   else ok (q, rest, n + 1)
+
+fun place (n, row, ds) =
+  if row = 0 then 1
+  else
+    let fun tryAll (q, acc) =
+          if q > n then acc
+          else if ok (q, ds, 1) then tryAll (q + 1, acc + place (n, row - 1, q :: ds))
+          else tryAll (q + 1, acc)
+    in tryAll (1, 0)
+    end
+
+val () = print (Int.toString (place (9, 9, [])) ^ "\n")

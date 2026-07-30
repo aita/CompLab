@@ -1,0 +1,73 @@
+(* aobench、固定小数点で。この言語に `real` がないので Q16.16 の整数で書いてある —
+   算術・配列・確保の混ざり方は元と同じで、そこを測るためのもの。 *)
+
+val one = 65536
+fun mul (a, b) = (a * b) div one
+fun dvd (a, b) = (a * one) div b
+
+(* 整数の平方根。Newton 法で、初期値は桁数から。 *)
+fun isqrt n =
+  if n <= 0 then 0
+  else
+    let fun step x =
+          let val y = (x + n div x) div 2
+          in if y >= x then x else step y
+          end
+    in step (if n < one then one else n)
+    end
+
+fun len2 (x, y, z) = mul (x, x) + mul (y, y) + mul (z, z)
+fun norm (x, y, z) =
+  let val l = isqrt (len2 (x, y, z) * one)
+  in if l = 0 then (0, 0, 0) else (dvd (x, l), dvd (y, l), dvd (z, l))
+  end
+
+(* 球3つと平面。交差したら距離を返し、しなければ 0。 *)
+fun sphere (ox, oy, oz, dx, dy, dz, cx, cy, cz, r) =
+  let val px = ox - cx and py = oy - cy and pz = oz - cz
+      val b = mul (px, dx) + mul (py, dy) + mul (pz, dz)
+      val c = len2 (px, py, pz) - mul (r, r)
+      val d = mul (b, b) - c
+  in if d <= 0 then 0
+     else let val t = ~b - isqrt (d * one)
+          in if t > 0 then t else 0
+          end
+  end
+
+fun plane (oy, dy) = if dy >= 0 then 0 else dvd (~(oy + one), dy)
+
+fun hit (ox, oy, oz, dx, dy, dz) =
+  let val a = sphere (ox, oy, oz, dx, dy, dz, ~13107, ~6553, ~131072, 32768)
+      val b = sphere (ox, oy, oz, dx, dy, dz, 6553, ~9830, ~104857, 32768)
+      val c = sphere (ox, oy, oz, dx, dy, dz, 39321, ~6553, ~157286, 32768)
+      val p = plane (oy, dy)
+      fun near (x, y) = if x = 0 then y else if y = 0 then x else if x < y then x else y
+  in near (near (a, b), near (c, p))
+  end
+
+(* 画素ごとに、当たったかどうかで濃さを決める。標本は決め打ちの格子。 *)
+val w = 48 and h = 48 and samples = 2
+
+fun shade (px, py) =
+  let fun over (sx, sy, acc) =
+        if sy >= samples then acc
+        else if sx >= samples then over (0, sy + 1, acc)
+        else
+          let val fx = dvd (px * samples + sx - (w * samples) div 2, w * samples div 2 * one div one)
+              val fy = dvd ((h * samples) div 2 - (py * samples + sy), w * samples div 2)
+              val (dx, dy, dz) = norm (fx, fy, ~one)
+              val t = hit (0, 0, 0, dx, dy, dz)
+          in over (sx + 1, sy, if t > 0 then acc + 1 else acc)
+          end
+  in over (0, 0, 0)
+  end
+
+fun row (py, acc) =
+  if py >= h then acc
+  else
+    let fun col (px, a) = if px >= w then a else col (px + 1, a + shade (px, py))
+    in row (py + 1, col (0, acc))
+    end
+
+val total = row (0, 0)
+val () = print ("aobench " ^ Int.toString total ^ "\n")

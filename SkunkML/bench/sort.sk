@@ -1,0 +1,30 @@
+(* 配列と参照。A1（`!`・`:=`・`Array.sub`・`Array.update` を命令に展開）が
+   いちばん出るはず。 *)
+fun build (a, i, n, seed) =
+  if i >= n then ()
+  else
+    let val s = (seed * 1103515245 + 12345) mod 100000
+    in Array.update (a, i, s); build (a, i + 1, n, s)
+    end
+
+fun insert (a, i, n) =
+  if i >= n then ()
+  else
+    let val x = Array.sub (a, i)
+        fun down j =
+          if j < 0 then 0
+          else if Array.sub (a, j) > x then (Array.update (a, j + 1, Array.sub (a, j)); down (j - 1))
+          else j + 1
+        val at = down (i - 1)
+    in Array.update (a, at, x); insert (a, i + 1, n)
+    end
+
+val n = 4000
+val a = Array.array (n, 0)
+val () = build (a, 0, n, 7)
+val () = insert (a, 1, n)
+val total = let val s = ref 0
+                fun add i = if i >= n then !s else (s := !s + Array.sub (a, i); add (i + 1))
+            in add 0
+            end
+val () = print (Int.toString (Array.sub (a, 0)) ^ " " ^ Int.toString total ^ "\n")

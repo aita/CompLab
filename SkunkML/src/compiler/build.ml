@@ -107,10 +107,13 @@ let atom st blk : F.atom -> S.value = function
       | Some v -> v
       | None ->
           if unstubbed x then
-            failwith
-              ("build: " ^ x
-             ^ " is not compiled yet -- the back end has no representation for real \
-                (see doc/18-abi.md)")
+            (* Not a mistake in the program: a hole in this back end.  It goes
+               out as the one kind of error everything else goes out as, so that
+               it reads like the rest and exits like the rest. *)
+            Loc.fail ~where:"unsupported" Loc.unknown
+              "%s needs a representation for real, which the back end does not \
+               have yet (see doc/18-abi.md)"
+              x
           else if Hashtbl.mem st.globals x then global st blk x
           else failwith ("build: unbound " ^ x))
   | F.AInt n -> constant st blk (S.CInt n)
@@ -119,8 +122,8 @@ let atom st blk : F.atom -> S.value = function
      should be is the back end's next piece of work (doc/18-abi.md), so until
      then say so instead of guessing. *)
   | F.AReal _ ->
-      failwith
-        "build: real is not compiled yet -- the value representation has no real \
+      Loc.fail ~where:"unsupported" Loc.unknown
+        "a real literal needs a representation the back end does not have yet \
          (see doc/18-abi.md)"
   | F.AStr s -> constant st blk (S.CStr s)
   | F.AUnit -> constant st blk S.CUnit

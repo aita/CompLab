@@ -235,7 +235,8 @@ let arith ctx op (args : S.value list) dst =
      Real and Math structures -- so this is the message for a program that got
      past both, not a hole to be filled by accident. *)
   | "/", _ ->
-      failwith "select: real is not compiled yet -- / has no tile (see doc/18-abi.md)"
+      Loc.fail ~where:"unsupported" Loc.unknown
+        "/ needs a tile the back end does not have yet (see doc/18-abi.md)"
   | _ -> failwith ("select: no tile for " ^ op)
 
 let value ctx (v : S.value) =
