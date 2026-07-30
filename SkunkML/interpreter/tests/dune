@@ -60,6 +60,16 @@
 
 (rule
  (with-stdout-to
+  join.out
+  (run %{exe:../src/skunk.exe} --dump-core %{dep:join.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff join.expected join.out)))
+
+(rule
+ (with-stdout-to
   flat.out
   (run %{exe:../src/skunk.exe} --dump-flat %{dep:flat.sk})))
 

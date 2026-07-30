@@ -1,0 +1,20 @@
+(* The programs chapter 6 is about.
+
+   `answer` puts its `if` in tail position, so the branches never meet again
+   and no join point is made.  `describe` has no branch at all.  `inline` is
+   the two of them in one expression: the `if` is not in tail position, so
+   there is a continuation, and two branches reach it.
+
+   `both` is the other source: two paths through the decision tree reach one
+   arm. *)
+
+fun answer b = if b then "yes" else "no"
+
+fun describe b = "it is " ^ answer b
+
+fun inline b = "it is " ^ (if b then "yes" else "no")
+
+fun both (true, 1) = "yes"
+  | both _ = "no"
+
+val shown = (answer true, describe false, inline true, both (true, 1))

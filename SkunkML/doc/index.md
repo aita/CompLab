@@ -55,7 +55,7 @@ CESK マシン
 |---|---|---|
 | 4 | [型付き Core と A正規形](4-core.md) | `core.ml`・`elab.ml`。destination 渡しの正規化、なぜ型を捨てないか、そしてなぜ CPS でも SSA でもないのか |
 | 5 | [パターンマッチを決定木にする](5-matching.md) | `patmat.ml`。Maranget の行列アルゴリズム、網羅性と冗長性は決定木から読み取れる |
-| 6 | [join point — ラベルはクロージャではない](6-join.md) | `elab.ml`・`patmat.ml`。2つの出どころ、そして「1回しか使わない腕は join にしない」判断 |
+| 6 | [join point — 分かれた道が同じところへ戻るとき](6-join.md) | `elab.ml`・`patmat.ml`。同じ `if` が置かれた場所で別のコードになる理由、2つの出どころ、そしてラベルがクロージャでない理由 |
 | 7 | [クロージャ変換](7-closure.md) | `closure.ml`。自由変数、コードブロック、捕獲。join を触らない理由 |
 | 8 | [CESK マシン](8-cesk.md) | `machine.ml`。4つ組、ストアがある理由、末尾呼び出しと jump がフレームを触らないこと |
 
@@ -75,9 +75,9 @@ CESK マシン
 [4章](4-core.md)の中、`Ast` が `Core` になるところ — **書かれたプログラムと走る
 プログラムが別物になる**ところです。
 
-**1つだけ読むなら** [6章の join point](6-join.md) です。他の章は「よく知られた
-やり方をそのとおりに作る」話ですが、6章だけは**2つの別々の理由で必要になったものが
-同じ形をしていた**という話で、5章と7章がその両側にあります。
+**1つだけ読むなら** [6章の join point](6-join.md) です。同じ `if` が、末尾に置いたか
+式の途中に置いたかで別のコードになる — そこから始めて、**2つの別々の理由で必要に
+なったものが同じ形をしていた**というところまで行きます。5章と7章がその両側です。
 
 **モジュールが目的なら** [3章](3-modules.md)だけ独立して読めます。2章の
 レベルと単一化を知っていると読みやすくなりますが、必須ではありません。
@@ -89,8 +89,9 @@ cd interpreter
 dune build
 
 ./_build/default/src/skunk.exe examples/tour.sk               # 走らせる（0章）
-./_build/default/src/skunk.exe --dump-core tests/core.sk      # 型付き Core（4〜6章）
-./_build/default/src/skunk.exe --dump-flat tests/flat.sk      # 平らな IR（6〜7章）
+./_build/default/src/skunk.exe --dump-core tests/core.sk      # 型付き Core（4・5章）
+./_build/default/src/skunk.exe --dump-core tests/join.sk      # join point（6章）
+./_build/default/src/skunk.exe --dump-flat tests/flat.sk      # 平らな IR（7章）
 ./_build/default/src/skunk.exe --trace --steps examples/tour.sk   # 機械の1手ずつ（8章）
 
 dune test                                                     # golden テスト
