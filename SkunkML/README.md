@@ -171,6 +171,7 @@ the two command lines and a map of the source, and
 Japanese: [プログラムが通る道](doc/00-pipeline.md) と
 [パターンマッチを決定木にする](doc/05-matching.md)。バックエンドなら
 [命令選択](doc/12-select.md) から [ループと命令スケジューリング](doc/17-loops.md) まで。
+取り決めだけ見たいなら [ABI リファレンス](doc/18-abi.md)。
 
 ## What is deliberately missing
 

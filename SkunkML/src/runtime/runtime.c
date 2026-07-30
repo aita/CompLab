@@ -15,8 +15,10 @@
    object file with no undefined symbols at all, which is what lets our own
    linker take it.
 
-   The value representation, which this file and the code generator have to agree
-   on ([14章](../../doc/14-elf.md) の4節):
+   Everything this file and the generated code have to agree on is written down in
+   one place, [18章](../../doc/18-abi.md) -- the value representation, the
+   descriptor, the calling convention, the symbols each side owes the other, and
+   what the collector requires.  The two facts you cannot read this file without:
 
      an integer   2n + 1              tagged, so the low bit says "not a pointer"
      a block      a pointer, 8-aligned, whose word -1 is a descriptor pointer

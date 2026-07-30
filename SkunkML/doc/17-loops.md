@@ -266,4 +266,4 @@ fun go (n, acc) = if n = 0 then acc else go (n - 1, acc + (1 + 2) * String.size 
 
 ---
 
-[← 16. 値 SSA の上での最適化](16-opt.md) ・ [目次](index.md)
+[← 16. 値 SSA の上での最適化](16-opt.md) ・ [18. ABI リファレンス →](18-abi.md)

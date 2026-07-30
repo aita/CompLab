@@ -68,6 +68,12 @@ skunkc [options] file.sk
 `--dump-opt` next to `--no-opt --dump-ssa` on the same file is how to see what
 each optimisation pass did.
 
+What the generated code and the runtime agree on -- the value representation, the
+descriptor, the calling convention, the register roles, the frame, the symbol
+names, and what the collector requires of anyone calling in -- is written down in
+[the ABI reference](../doc/18-abi.md).  That is the file to read before touching
+`src/runtime/runtime.c`.
+
 `skunkc` writes a static ELF64 with no libc and nothing dynamically linked --
 or, with `--dynamic`, one that links against libc.so.6, with the dynamic tables
 written by hand and no PLT:
