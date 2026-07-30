@@ -39,8 +39,8 @@ func both$4:
     v0 = param                             ; a1.22
     v1 = const "yes"
     v2 = const "no"
-    v3 = field v0, 1                       ; p.57
-    v4 = field v0, 2                       ; p.58
+    v3 = field v0, 1(0)                    ; p.57
+    v4 = field v0, 2(1)                    ; p.58
     switch v3 [true -> b2, _ -> b1]
   b1:                             ; preds b0
     jump b4

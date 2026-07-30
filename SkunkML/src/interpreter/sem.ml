@@ -33,9 +33,7 @@ open Types
 (* Where a value lives at run time.  A structure is a record, so a component of
    a structure is a field of a record -- possibly of a record inside a record.
    [root] is a Core variable and [path] is the fields to walk. *)
-type access = { root : string; path : string list }
-
-let sub_access a f = { a with path = a.path @ [ f ] }
+type access = { root : string; path : (string * ty) list }
 
 (* A type component: either a type constructor with an identity, or an
    abbreviation, which has none. *)
@@ -59,6 +57,20 @@ type sg = {
 }
 
 let empty_sg = { sg_tys = []; sg_cons = []; sg_vals = []; sg_strs = [] }
+
+(* The record type a structure has at run time.  A structure is a record of its
+   value and substructure components, sorted by label like any other record, so
+   this is also its layout -- which is why walking a path needs it. *)
+let rec struct_ty (sg : sg) =
+  Trecord
+    (sort_fields
+       (List.map (fun (n, sch) -> (n, sch.sbody)) sg.sg_vals
+       @ List.map (fun (n, s) -> (n, struct_ty s)) sg.sg_strs))
+
+(* One step along a path: the field, and the type of the record it is a field
+   of.  Carrying the type is what lets closure conversion turn the label into
+   an offset. *)
+let sub_access a (sg : sg) f = { a with path = a.path @ [ (f, struct_ty sg) ] }
 
 type fct = {
   f_holes : tycon list; (* the parameter signature's type components *)
@@ -95,7 +107,7 @@ let find_str env loc quals =
     | [] -> (sg, acc)
     | q :: rest -> (
         match List.assoc_opt q sg.sg_strs with
-        | Some sg' -> go sg' (sub_access acc q) rest
+        | Some sg' -> go sg' (sub_access acc sg q) rest
         | None -> Loc.type_error loc "structure %s has no substructure %s" acc.root q)
   in
   match quals with
@@ -113,7 +125,7 @@ let lookup_val env loc (p : Ast.path) =
       | None -> None)
   | Some (sg, acc) -> (
       match List.assoc_opt p.base sg.sg_vals with
-      | Some sch -> Some (sch, sub_access acc p.base)
+      | Some sch -> Some (sch, sub_access acc sg p.base)
       | None -> None)
 
 let lookup_con env loc (p : Ast.path) =
@@ -320,9 +332,9 @@ and open_sg env sg acc =
   let env = List.fold_left (fun e (n, tf) -> add_ty e n tf) env sg.sg_tys in
   let env = List.fold_left (fun e (_, c) -> add_con e c) env sg.sg_cons in
   let env =
-    List.fold_left (fun e (n, sch) -> add_val e n sch (sub_access acc n)) env sg.sg_vals
+    List.fold_left (fun e (n, sch) -> add_val e n sch (sub_access acc sg n)) env sg.sg_vals
   in
-  List.fold_left (fun e (n, s) -> add_str e n s (sub_access acc n)) env sg.sg_strs
+  List.fold_left (fun e (n, s) -> add_str e n s (sub_access acc sg n)) env sg.sg_strs
 
 (* Rewriting every type in a signature. *)
 and map_sg f sg =

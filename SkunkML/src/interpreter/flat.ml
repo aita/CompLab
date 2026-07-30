@@ -26,7 +26,10 @@ type rhs =
   | Prim of string * atom list
   | Record of (string * atom) list (* a tuple has the labels 1..n *)
   | Con of Types.constr * atom option
-  | Field of atom * string
+  (* The label is what the machine looks up and what a dump prints; the index
+     is the offset a compiler needs.  It is computed in closure.ml, which is
+     the last pass that still has the types. *)
+  | Field of atom * string * int
   | Payload of atom
 
 and block =
@@ -103,7 +106,7 @@ and rhs_str = function
            (List.map (fun (l, a) -> Printf.sprintf "%s = %s" l (atom_str a)) fs))
   | Con (c, None) -> c.Types.cname
   | Con (c, Some a) -> Printf.sprintf "%s %s" c.Types.cname (atom_str a)
-  | Field (a, l) -> Printf.sprintf "#%s %s" l (atom_str a)
+  | Field (a, l, _) -> Printf.sprintf "#%s %s" l (atom_str a)
   | Payload a -> Printf.sprintf "payload %s" (atom_str a)
 
 and print_tail t ind out =

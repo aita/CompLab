@@ -104,7 +104,7 @@ let op_of (r : F.rhs) : S.op =
   | F.Prim (p, _) -> S.Prim p
   | F.Record fs -> S.Record (List.map fst fs)
   | F.Con (c, _) -> S.Con c
-  | F.Field (_, l) -> S.Field l
+  | F.Field (_, l, i) -> S.Field (l, i)
   | F.Payload _ -> S.Payload
 
 let args_of st entry (r : F.rhs) =
@@ -114,7 +114,7 @@ let args_of st entry (r : F.rhs) =
   | F.Call (f, x) -> [ a f; a x ]
   | F.Prim (_, ats) -> List.map a ats
   | F.Record fs -> List.map (fun (_, x) -> a x) fs
-  | F.Con (_, Some x) | F.Field (x, _) | F.Payload x -> [ a x ]
+  | F.Con (_, Some x) | F.Field (x, _, _) | F.Payload x -> [ a x ]
 
 let goto (from : S.block) (target : S.block) args =
   target.S.preds <- target.S.preds @ [ from ];

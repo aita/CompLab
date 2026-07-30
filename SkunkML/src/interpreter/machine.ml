@@ -461,12 +461,14 @@ and eval w env (rhs : F.rhs) : value =
       set w cell (atom w env a);
       VRef cell
   | F.Con (c, a) -> VCon (c, Option.map (atom w env) a)
-  | F.Field (a, l) -> (
+  (* The index came from closure.ml, where the type was still around; the
+     label is kept for the error and for the dump. *)
+  | F.Field (a, l, i) -> (
       match atom w env a with
       | VRecord fs -> (
-          match List.assoc_opt l fs with
-          | Some v -> v
-          | None -> fault "this record has no field %s" l)
+          match List.nth_opt fs i with
+          | Some (l', v) when l' = l -> v
+          | _ -> fault "this record has no field %s" l)
       | _ -> fault "expected a record")
   | F.Payload a -> (
       match atom w env a with

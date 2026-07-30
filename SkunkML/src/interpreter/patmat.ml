@@ -170,7 +170,7 @@ let rec build (occs : (C.atom * ty) list) (rows : row list) : tree =
           in
           let inner = build (subs @ rest_occs) rows' in
           List.fold_right2
-            (fun x (l, t) acc -> TBind (x, t, C.Field (occ, l), acc))
+            (fun x (l, t) acc -> TBind (x, t, C.Field (occ, l, oty), acc))
             names
             (List.map2 (fun l t -> (l, t)) labels tys)
             inner

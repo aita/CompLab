@@ -53,7 +53,7 @@ type op =
   | Prim of string
   | Record of string list (* the labels; args are the field values *)
   | Con of Types.constr (* args: the payload, if it has one *)
-  | Field of string (* args: the record *)
+  | Field of string * int (* the label, and its offset.  args: the record *)
   | Payload (* args: the constructed value *)
   | Phi (* args: one per predecessor, positionally *)
 
@@ -200,7 +200,7 @@ let op_str v =
   | Con c ->
       Printf.sprintf "con %s/%d%s" c.Types.cname c.Types.cidx
         (match v.args with [] -> "" | _ -> ", " ^ args_str v)
-  | Field l -> Printf.sprintf "field %s, %s" (args_str v) l
+  | Field (l, i) -> Printf.sprintf "field %s, %s(%d)" (args_str v) l i
   | Payload -> Printf.sprintf "payload %s" (args_str v)
   | Phi -> "phi"
 

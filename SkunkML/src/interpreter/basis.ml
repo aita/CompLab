@@ -95,11 +95,12 @@ let install w =
   List.iter (fun (n, _) -> Machine.define w n (Machine.VPrim n)) toplevel_vals;
   List.iter
     (fun (n, sg) ->
+      (* Sorted, because that is what a record is: `Sem.struct_ty` says the
+         layout and a field is now reached by offset, not by name. *)
       Machine.define w n
         (Machine.VRecord
-           (List.map
-              (fun (f, _) -> (f, Machine.VPrim (n ^ "." ^ f)))
-              sg.Sem.sg_vals)))
+           (sort_fields
+              (List.map (fun (f, _) -> (f, Machine.VPrim (n ^ "." ^ f))) sg.Sem.sg_vals))))
     structures
 
 (* The half of the basis that is written in the language it belongs to. *)

@@ -50,7 +50,11 @@ type rhs =
   | Prim of string * atom list
   | Record of (label * atom) list (* sorted; a tuple has the labels 1..n *)
   | Con of Types.constr * atom option
-  | Field of atom * label
+  (* The label, and the type of the record it is a field of.  The offset is
+     what a compiler needs and it cannot be computed here: `#lab` is elaborated
+     before its record type is known.  So the type is carried and closure.ml,
+     the last pass that still has types, turns it into an index. *)
+  | Field of atom * label * Types.ty
   | Payload of atom (* what a constructor was applied to *)
 
 and block =
@@ -143,7 +147,7 @@ and free_rhs = function
   | Prim (_, ats) -> atoms_var ats
   | Record fs -> atoms_var (List.map snd fs)
   | Con (_, None) -> Vars.empty
-  | Con (_, Some a) | Field (a, _) | Payload a -> atom_var a
+  | Con (_, Some a) | Field (a, _, _) | Payload a -> atom_var a
 
 and free_tail = function
   | Ret a -> atom_var a
@@ -254,7 +258,7 @@ and print_flat r out =
               (List.map (fun (l, a) -> Printf.sprintf "%s = %s" l (atom_str a)) fs)))
   | Con (c, None) -> add out c.Types.cname
   | Con (c, Some a) -> add out (Printf.sprintf "%s %s" c.Types.cname (atom_str a))
-  | Field (a, l) -> add out (Printf.sprintf "#%s %s" l (atom_str a))
+  | Field (a, l, _) -> add out (Printf.sprintf "#%s %s" l (atom_str a))
   | Payload a -> add out (Printf.sprintf "payload %s" (atom_str a))
 
 and print_tail t ind out =

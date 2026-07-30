@@ -48,15 +48,18 @@ let nil_con = List.find (fun c -> c.cname = "nil") list_tc.tcons
 let cons_con = List.find (fun c -> c.cname = "::") list_tc.tcons
 
 (* Reaching a value that lives inside a structure: walk the record. *)
+(* Reaching a value inside a structure: walk the record.  Each step needs the
+   type of the record it is stepping through, which is why the access carries
+   one per component. *)
 let atom_of_access (acc : S.access) ty (k : C.atom -> C.block) =
   let rec go a = function
     | [] -> k a
-    | [ f ] ->
+    | [ (f, rty) ] ->
         let x = C.fresh_name f in
-        C.Let (x, ty, C.Field (a, f), k (C.AVar x))
-    | f :: rest ->
+        C.Let (x, ty, C.Field (a, f, rty), k (C.AVar x))
+    | (f, rty) :: rest ->
         let x = C.fresh_name f in
-        C.Let (x, newvar (), C.Field (a, f), go (C.AVar x) rest)
+        C.Let (x, newvar (), C.Field (a, f, rty), go (C.AVar x) rest)
   in
   go (C.AVar acc.S.root) acc.S.path
 
@@ -334,7 +337,8 @@ let rec infer env (e : Ast.exp) (d : dest) : ty * C.block =
       let x = C.fresh_name "t" in
       ( ty,
         emit ty
-          (C.Lam (v, dom, C.Let (x, fty, C.Field (C.AVar v, l), C.Tail (C.Ret (C.AVar x)))))
+          (C.Lam
+             (v, dom, C.Let (x, fty, C.Field (C.AVar v, l, dom), C.Tail (C.Ret (C.AVar x)))))
           d )
   | Ast.EApp ({ Ast.e = Ast.ESelect l; _ }, arg) ->
       let fty = newvar () in
@@ -343,7 +347,7 @@ let rec infer env (e : Ast.exp) (d : dest) : ty * C.block =
           (Cont
              (fun a at ->
                unify loc at (newvar_with [ (l, fty) ]);
-               emit fty (C.Field (a, l)) d))
+               emit fty (C.Field (a, l, at)) d))
       in
       (fty, blk)
   | Ast.EApp (f, a) -> infer_app env loc f a d
@@ -741,7 +745,7 @@ and elab_str env (s : Ast.strexp) (k : S.sg -> C.atom -> C.block) : C.block =
   match s.Ast.st with
   | Ast.StrId p ->
       let sg, acc = S.lookup_str env loc p in
-      atom_of_access acc (struct_ty sg) (fun a -> k sg a)
+      atom_of_access acc (S.struct_ty sg) (fun a -> k sg a)
   | Ast.StrBody decs ->
       elab_topdecs env decs (fun _ bounds ->
           let sg = sg_of_bounds bounds in
@@ -754,7 +758,7 @@ and elab_str env (s : Ast.strexp) (k : S.sg -> C.atom -> C.block) : C.block =
               bounds
           in
           let r = C.fresh_name "struct" in
-          C.Let (r, struct_ty sg, C.Record (sort_fields fields), k sg (C.AVar r)))
+          C.Let (r, S.struct_ty sg, C.Record (sort_fields fields), k sg (C.AVar r)))
   | Ast.StrApp (fname, arg) -> (
       match List.assoc_opt fname env.S.fcts with
       | None -> Loc.module_error loc "unbound functor %s" fname
@@ -763,7 +767,7 @@ and elab_str env (s : Ast.strexp) (k : S.sg -> C.atom -> C.block) : C.block =
               let result = S.instantiate_functor loc f asg in
               let r = C.fresh_name "app" in
               atom_of_access f.S.f_access (newvar ()) (fun fa ->
-                  C.Let (r, struct_ty result, C.Call (fa, aa), k result (C.AVar r)))))
+                  C.Let (r, S.struct_ty result, C.Call (fa, aa), k result (C.AVar r)))))
   | Ast.StrAsc (inner, se, opaque) ->
       elab_str env inner (fun asg aa ->
           let target, holes = S.elab_sig env se in
@@ -773,13 +777,6 @@ and elab_str env (s : Ast.strexp) (k : S.sg -> C.atom -> C.block) : C.block =
              the holes are what is left. *)
           let sg = if opaque then target else S.map_sg (realise rw) target in
           k sg aa)
-
-(* The record type a structure has at run time.  It is only ever printed. *)
-and struct_ty (sg : S.sg) =
-  Trecord
-    (sort_fields
-       (List.map (fun (n, sch) -> (n, sch.sbody)) sg.S.sg_vals
-       @ List.map (fun (n, s) -> (n, struct_ty s)) sg.S.sg_strs))
 
 and sg_of_bounds bounds =
   List.fold_left
@@ -816,7 +813,7 @@ and elab_topdec env (td : Ast.topdec) (k : S.env -> bound list -> C.block) : C.b
           let v = C.fresh_name name in
           C.Let
             ( v,
-              struct_ty sg,
+              S.struct_ty sg,
               C.Atom a,
               k (S.add_str env name sg { S.root = v; path = [] }) [ BStr (name, sg, v) ] ))
   | Ast.TFun (fname, aname, psig, rsig, body) ->
@@ -857,8 +854,8 @@ and elab_topdec env (td : Ast.topdec) (k : S.env -> bound list -> C.block) : C.b
       in
       C.Let
         ( v,
-          Tarrow (struct_ty param_sg, struct_ty !body_sg),
-          C.Lam (pv, struct_ty param_sg, block),
+          Tarrow (S.struct_ty param_sg, S.struct_ty !body_sg),
+          C.Lam (pv, S.struct_ty param_sg, block),
           k { env with S.fcts = (fname, f) :: env.S.fcts } [ BFct (fname, f, v) ] )
 
 (* Printing a datatype back the way it was written, for the report line.  The
@@ -910,7 +907,7 @@ let program (env : S.env) (decs : Ast.topdec list) : S.env * C.item list =
               List.filter_map
                 (function
                   | BVal (_, sch, v) -> Some (sch.sbody, v)
-                  | BStr (_, sg, v) -> Some (struct_ty sg, v)
+                  | BStr (_, sg, v) -> Some (S.struct_ty sg, v)
                   | BFct (_, _, v) -> Some (newvar (), v)
                   | _ -> None)
                 bounds
@@ -971,15 +968,18 @@ let program (env : S.env) (decs : Ast.topdec list) : S.env * C.item list =
       | many ->
           let g = C.fresh_name "group" in
           emit_item { C.iname = g; ibody = Some block; ilabel = None; ishow = false };
+          let slot b =
+            match b with
+            | BVal (_, sch, v) -> (v, sch.sbody)
+            | BStr (_, sg, v) -> (v, S.struct_ty sg)
+            | BFct (_, _, v) -> (v, newvar ())
+            | _ -> ("", tunit)
+          in
+          (* The group is one tuple, so the projections need its type. *)
+          let group_ty = ttuple (List.map (fun b -> snd (slot b)) many) in
           List.iteri
             (fun i b ->
-              let name, ty =
-                match b with
-                | BVal (_, sch, v) -> (v, sch.sbody)
-                | BStr (_, sg, v) -> (v, struct_ty sg)
-                | BFct (_, _, v) -> (v, newvar ())
-                | _ -> ("", tunit)
-              in
+              let name, ty = slot b in
               let x = C.fresh_name "t" in
               emit_item
                 {
@@ -989,7 +989,7 @@ let program (env : S.env) (decs : Ast.topdec list) : S.env * C.item list =
                       (C.Let
                          ( x,
                            ty,
-                           C.Field (C.AVar g, string_of_int (i + 1)),
+                           C.Field (C.AVar g, string_of_int (i + 1), group_ty),
                            C.Tail (C.Ret (C.AVar x)) ));
                   ilabel = label b;
                   ishow = (match b with BVal _ -> true | _ -> false);
