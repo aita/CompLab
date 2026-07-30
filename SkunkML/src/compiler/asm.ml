@@ -229,6 +229,16 @@ let rec instr st (i : M.instr) =
       word32_exact st "immediate" n
   | M.Mov (_, _) -> failwith "asm: mov needs a register on one side"
   | M.Lea (d, src) -> op_rm st [ 0x8d ] ~reg:(num d) ~rm:src
+  | M.Alu ("imul", M.Reg d, M.Imm n) ->
+      (* x86 has no two-operand multiply by an immediate; the one it has writes
+         a third register.  `imul d, d, imm` is that instruction with the
+         destination named twice, which is the two-operand form the rest of this
+         file is written in.  0x6b takes one byte of immediate, 0x69 four -- and
+         a constant multiplier that needed more than four would not have been
+         chosen as a tile. *)
+      let short = n >= -128 && n <= 127 in
+      op_rm st [ (if short then 0x6b else 0x69) ] ~reg:(num d) ~rm:(M.Reg d);
+      if short then byte st n else word32_exact st "immediate" n
   | M.Alu ("imul", M.Reg d, src) -> op_rm st [ 0x0f; 0xaf ] ~reg:(num d) ~rm:src
   | M.Alu (op, dst, M.Imm n) ->
       let _, ext = alu_opcode op in

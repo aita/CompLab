@@ -63,6 +63,22 @@ val byNeg1 = three (fn x => x * ~1)
 val byNeg2 = three (fn x => x * ~2)
 val byNeg6 = three (fn x => x * ~6)
 
+(* The multiplier is read out of `imul`'s four-byte field, and that field holds
+   the number as written rather than the tagged one -- so it reaches to 2^31,
+   twice as far as an immediate that has to survive the tag.  2^30 is a shift
+   and 2^31 is one past the edge, where the multiplier goes into a register and
+   the untagging multiply takes over. *)
+val by30 = three (fn x => x * 1073741824)
+val byRandom = three (fn x => x * 1103515245)
+val byMax = three (fn x => x * 2147483647)
+val by31 = three (fn x => x * 2147483648)
+val byNeg31 = three (fn x => x * ~2147483648)
+
+(* A constant with two uses is in a register for the other one, so reading the
+   number out of the instruction here costs nothing and leaves nothing behind. *)
+fun twice x = x * 12345 + (x + 12345)
+val shared = three twice
+
 (* The constant on the left, which is where `3 * r * r` leaves it. *)
 val leftBy3 = three (fn x => 3 * x)
 val leftBy0 = three (fn x => 0 * x)

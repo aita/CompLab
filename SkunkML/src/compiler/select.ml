@@ -94,9 +94,13 @@ let fits_tagged n = Asm.fits32 ((2 * n) + 1)
 let absorbable (v : S.value) =
   match v.S.op with
   | S.Field _ | S.Global _ -> true
-  (* A constant no operand field can hold is a tile root like anything else: it
-     gets a register of its own, and consumers read it from there. *)
-  | S.Const (S.CInt n) -> fits_tagged n
+  (* A constant is absorbed however wide it is.  Wide is not the same as
+     *immediate*: a constant no operand field can hold is still cheaper produced
+     where it is read -- one movabs, in the consumer's block -- than produced at
+     its definition and carried there in a register.  It is the same instruction
+     either way, and the tiles that read the number out of the instruction
+     (`imul`'s imm32, a shift count) then leave nothing behind. *)
+  | S.Const (S.CInt _) -> true
   | _ -> false
 
 let foldable ctx (v : S.value) =
@@ -135,7 +139,15 @@ and compute ctx v nt =
       (* Already in a register if it is a tile root; otherwise the cheapest way
          of getting it into one. *)
       if not (foldable ctx v) then 0
-      else min (cost ctx v Nimm + 1) (cost ctx v Nmem + 1)
+      else (
+        match v.S.op with
+        (* A constant is one instruction from a register whatever its width,
+           because [M.Mov (Reg, Imm)] widens to the ten-byte movabs by itself.
+           Reading `inf + 1` off the immediate rule instead would make [any]
+           believe the register was the expensive choice and reach for an
+           immediate that does not fit. *)
+        | S.Const (S.CInt _) -> 1
+        | _ -> min (cost ctx v Nimm + 1) (cost ctx v Nmem + 1))
 
 (* ---- emitting an operand ------------------------------------------------- *)
 
@@ -263,6 +275,68 @@ let commuted (a : S.value) (b : S.value) k =
   | Some d -> Some (a, d)
   | None -> ( match displacement a k with Some d -> Some (b, d) | None -> None)
 
+(* A constant a tile can read out of the instruction itself rather than out of a
+   register: the multiplier of an `imul`, the shift count of a `div`.  Unlike
+   [displacement] this is not about the width of a field -- `imul`'s immediate
+   is four bytes like everything else, but it holds the number that was
+   *written* rather than the tagged one, so it reaches twice as far.
+
+   The tiler has to have been going to fold the constant anyway.  One it decided
+   to give a register of its own would be left holding it with nobody reading
+   it, because the instruction that was going to read it is this one -- and
+   nothing runs after selection to clear that up.  A constant with more than one
+   use is in a register for somebody else, so taking the number out of it here
+   costs nothing. *)
+let literal ctx (v : S.value) =
+  match v.S.op with
+  | S.Const (S.CInt n) when foldable ctx v || v.S.uses <> 1 -> Some n
+  | _ -> None
+
+(* Which side the constant is on, for a commutative operation. *)
+let either ctx (a : S.value) (b : S.value) =
+  match literal ctx b with
+  | Some n -> Some (a, n)
+  | None -> ( match literal ctx a with Some n -> Some (b, n) | None -> None)
+
+let rec log2 k n = if n = 1 then k else log2 (k + 1) (n asr 1)
+let is_pow2 n = n > 0 && n land (n - 1) = 0
+
+(* Multiplying a tagged number by a constant.  The identity is one line:
+
+     (2x + 1) * c - (c - 1)  =  2cx + 1
+
+   so every tile below is the same product with the same constant taken back
+   off it, and the only question is which instruction does the product.  `lea`
+   does 2, 4 and 8 as a scale and 3, 5 and 9 as "the number plus a scaled copy
+   of itself", and in both of those the `- (c - 1)` is the displacement, so the
+   whole multiply is one instruction that does not even touch the flags.  A
+   wider power of two is a shift, and everything else is `imul` with an
+   immediate.
+
+   The shift and the general case both go through 2x rather than 2x + 1, which
+   is `lea -1(%r)`: the product is then even, so the tag goes back with `or $1`
+   instead of a second subtract.  [Asm.fits32] is asked about c and about
+   c - 1 because both of them are a four-byte field. *)
+let multiply ctx r c dst =
+  match c with
+  | 0 -> put ctx (M.Mov (reg dst, imm 1))
+  | 1 -> put ctx (M.Mov (reg dst, reg r))
+  (* Negating is 2 - a, which is a subtract the general form would spend an
+     `imul` on. *)
+  | -1 ->
+      put ctx (M.Mov (reg dst, imm 2));
+      put ctx (M.Alu ("sub", reg dst, reg r))
+  | 2 | 4 | 8 -> put ctx (M.Lea (dst, mem ~index:r ~scale:c ~disp:(1 - c) ()))
+  | 3 | 5 | 9 -> put ctx (M.Lea (dst, mem ~base:r ~index:r ~scale:(c - 1) ~disp:(1 - c) ()))
+  | _ when is_pow2 c ->
+      put ctx (M.Lea (dst, mem ~base:r ~disp:(-1) ()));
+      put ctx (M.Shl (reg dst, log2 0 c));
+      put ctx (M.Alu ("or", reg dst, imm 1))
+  | _ ->
+      put ctx (M.Mov (reg dst, reg r));
+      put ctx (M.Alu ("imul", reg dst, imm c));
+      put ctx (M.Alu ("sub", reg dst, imm (c - 1)))
+
 let arith ctx op (args : S.value list) dst =
   match (op, args) with
   | "+", [ a; b ] -> (
@@ -280,15 +354,19 @@ let arith ctx op (args : S.value list) dst =
           let ob = any ctx b in
           put ctx (M.Lea (dst, mem ~base:ra ~disp:1 ()));
           put ctx (M.Alu ("sub", reg dst, ob)))
-  | "*", [ a; b ] ->
-      let ra = in_reg ctx a in
-      let t = fresh ctx in
-      put ctx (M.Mov (reg t, any ctx b));
-      put ctx (M.Alu ("sub", reg t, imm 1));
-      put ctx (M.Mov (reg dst, reg ra));
-      put ctx (M.Sar (reg dst, 1));
-      put ctx (M.Alu ("imul", reg dst, reg t));
-      put ctx (M.Alu ("or", reg dst, imm 1))
+  | "*", [ a; b ] -> (
+      match either ctx a b with
+      | Some (x, c) when Asm.fits32 c && Asm.fits32 (c - 1) -> multiply ctx (in_reg ctx x) c dst
+      | _ ->
+          (* Neither side is a constant this can read.  (2x + 1) - 1 is 2x, so
+             one `lea` unwraps the left operand and the product is even, which
+             lets the tag go back with an `or` rather than an add. *)
+          let t = fresh ctx in
+          put ctx (M.Lea (t, mem ~base:(in_reg ctx a) ~disp:(-1) ()));
+          put ctx (M.Mov (reg dst, any ctx b));
+          put ctx (M.Sar (reg dst, 1));
+          put ctx (M.Alu ("imul", reg dst, reg t));
+          put ctx (M.Alu ("or", reg dst, imm 1)))
   | "~", [ a ] ->
       let ra = in_reg ctx a in
       put ctx (M.Mov (reg dst, imm 2));
