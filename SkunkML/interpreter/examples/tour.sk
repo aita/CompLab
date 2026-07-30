@@ -1,0 +1,76 @@
+(* Everything the language has, once each. *)
+
+val greeting = "hello"
+val answer = 6 * 7
+val negative = ~3
+
+(* Tuples, records, lists.  A record's fields are sorted, so { y, x } and
+   { x, y } are one type and one value. *)
+val pair = (1, true)
+val origin = { x = 0, y = 0 }
+val moved = { x = #x origin + 3, y = #y origin }
+val small = [1, 2, 3]
+val longer = 0 :: small @ [4]
+
+(* Functions curry, and `fun` recurs where `val` does not. *)
+fun twice f x = f (f x)
+val four = twice (fn n => n + 1) 2
+
+fun fact n = if n = 0 then 1 else n * fact (n - 1)
+val f6 = fact 6
+
+(* Datatypes and pattern matching, with several clauses per function. *)
+datatype 'a tree = Leaf | Node of 'a tree * 'a * 'a tree
+
+fun insert (x, Leaf) = Node (Leaf, x, Leaf)
+  | insert (x, Node (l, y, r)) =
+      if x < y then Node (insert (x, l), y, r)
+      else if x > y then Node (l, y, insert (x, r))
+      else Node (l, y, r)
+
+fun toList Leaf = []
+  | toList (Node (l, x, r)) = toList l @ [x] @ toList r
+
+val sorted = toList (List.foldl insert Leaf [5, 3, 8, 1, 3])
+
+(* Mutual recursion. *)
+fun even 0 = true
+  | even n = odd (n - 1)
+and odd 0 = false
+  | odd n = even (n - 1)
+
+val e10 = even 10
+
+(* The list part of the basis is written in SkunkML itself. *)
+val doubled = List.map (fn n => n * 2) small
+val total = List.foldl (fn (a, b) => a + b) 0 doubled
+val evens = List.filter even [1, 2, 3, 4, 5, 6]
+
+(* Arrays live in the machine's store, and are the reason there is one. *)
+val cells = Array.array (3, 0)
+val () = Array.update (cells, 1, 42)
+val readBack = Array.sub (cells, 1)
+val asList = Array.toList cells
+
+(* Modules: a signature, a structure sealed by it, and a functor. *)
+signature ORD = sig
+  type t
+  val compare : t * t -> int
+end
+
+structure IntOrd : ORD = struct
+  type t = int
+  val compare = Int.compare
+end
+
+functor Sorter (O : ORD) = struct
+  fun insert (x, []) = [x]
+    | insert (x, y :: ys) =
+        if O.compare (x, y) <= 0 then x :: y :: ys else y :: insert (x, ys)
+  fun sort xs = List.foldl insert [] xs
+end
+
+structure IntSort = Sorter (IntOrd)
+val ordered = IntSort.sort [4, 1, 9, 2]
+
+val () = print ("the answer is " ^ Int.toString answer ^ "\n")

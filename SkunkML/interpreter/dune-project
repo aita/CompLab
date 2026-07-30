@@ -1,0 +1,5 @@
+(lang dune 3.21)
+
+(name skunkml)
+
+(using menhir 2.1)

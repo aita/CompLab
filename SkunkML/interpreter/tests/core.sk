@@ -1,0 +1,18 @@
+(* Small enough to read the whole A-normal form of.
+
+   `swap` shows a tuple pattern becoming projections and no test at all;
+   `pick` shows a decision tree with a shared arm, so a join point; `sum`
+   shows a tail call, and `depth` a join point made by a `case` that is not in
+   tail position. *)
+
+fun swap (a, b) = (b, a)
+
+fun pick (true, 1) = "both"
+  | pick (_, 2) = "two"
+  | pick _ = "no"
+
+fun sum (n, acc) = if n = 0 then acc else sum (n - 1, acc + n)
+
+fun depth xs = 1 + (case xs of [] => 0 | _ :: rest => depth rest)
+
+val answers = (swap (1, 2), pick (true, 1), sum (3, 0), depth [1, 2])

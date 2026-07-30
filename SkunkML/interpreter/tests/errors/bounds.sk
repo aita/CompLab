@@ -1,0 +1,2 @@
+val a = Array.array (2, 0)
+val oops = Array.sub (a, 5)

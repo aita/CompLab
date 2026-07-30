@@ -1,0 +1,2 @@
+fun only (1, y) = y
+val oops = only (2, 3)

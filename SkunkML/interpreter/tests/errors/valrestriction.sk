@@ -1,0 +1,3 @@
+val cell = Array.array (1, [])
+val () = Array.update (cell, 0, [1])
+val () = Array.update (cell, 0, [true])

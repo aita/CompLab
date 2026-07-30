@@ -18,3 +18,9 @@
   backtracking on the host stack, the cut as an exception that names the frame
   it cuts back to, and definite clause grammars. The book is in
   [`Badger/doc/`](Badger/doc/index.md), a chapter per concern, in Japanese.
+- [`SkunkML/`](SkunkML) — a Standard ML with modules and functors, in OCaml:
+  Hindley-Milner with levels, semantic signatures and generative functors, and
+  four intermediate languages — typed A-normal form, pattern matching compiled
+  to decision trees, explicit join points, explicit closures — over a CESK
+  machine. The book is in [`SkunkML/doc/`](SkunkML/doc/index.md), a chapter per
+  pass, in Japanese.

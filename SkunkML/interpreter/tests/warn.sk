@@ -1,0 +1,19 @@
+(* Warnings, not errors: these programs run.  The decision tree is what
+   notices -- a reachable failure means the match is not exhaustive, and an arm
+   with no leaf in the tree is an arm nothing can reach. *)
+
+fun partial (SOME x) = x
+val fine = partial (SOME 1)
+
+fun shadowed 0 = "first"
+  | shadowed 0 = "never"
+  | shadowed _ = "other"
+
+val s = shadowed 0
+
+datatype colour = Red | Green | Blue
+
+fun warm Red = true
+  | warm Green = false
+
+val w = warm Red

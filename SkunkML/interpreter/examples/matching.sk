@@ -1,0 +1,68 @@
+(* Pattern matching, and what the compiler makes of it.
+
+   Run this with --dump-core to see the decision trees.  `merge` tests the two
+   columns in the order it likes rather than the order they were written;
+   `overlap` reaches its last arm down four different paths and so turns it
+   into a join point; and `depth` puts a `case` where a value is wanted, which
+   makes a join point for a different reason. *)
+
+fun merge ([], ys) = ys
+  | merge (xs, []) = xs
+  | merge (x :: xs, y :: ys) =
+      if x <= y then x :: merge (xs, y :: ys)
+      else y :: merge (x :: xs, ys)
+
+val merged = merge ([1, 4, 7], [2, 3, 9])
+
+(* The first two arms test different columns, so no single order of tests
+   decides them both: whichever column goes first, the last arm is reached from
+   four leaves.  It becomes a label, and the leaves jump to it. *)
+fun overlap (true, _, 1) = "first"
+  | overlap (_, true, 2) = "second"
+  | overlap _ = "neither"
+
+val o1 = overlap (true, false, 1)
+val o2 = overlap (false, true, 2)
+val o3 = overlap (false, false, 9)
+
+(* A `case` whose value is wanted by something else cannot be written in plain
+   A-normal form, so the rest of the expression becomes a join point too --
+   this time not because arms are shared, but because the continuation is. *)
+fun depth xs = 1 + (case xs of [] => 0 | _ :: rest => depth rest)
+val deep = depth [1, 2, 3]
+
+(* Nested constructors, wildcards, literals and `as`, all in one match. *)
+datatype shape =
+    Circle of int
+  | Rect of int * int
+  | Group of shape list
+
+fun area (Circle r) = 3 * r * r
+  | area (Rect (w, h)) = w * h
+  | area (Group shapes) = List.foldl (fn (s, acc) => area s + acc) 0 shapes
+
+val total = area (Group [Circle 1, Rect (2, 3), Group [Rect (1, 1)]])
+
+fun describe [] = "nothing"
+  | describe [_] = "one"
+  | describe (both as [_, _]) = "two: " ^ Int.toString (List.length both)
+  | describe _ = "several"
+
+val d0 = describe ([] : int list)
+val d2 = describe [1, 2]
+val d5 = describe [1, 2, 3, 4, 5]
+
+(* Records match by field, and `...` means "and whatever else is there" -- but
+   only where the type is already known, as in SML. *)
+type person = { name : string, age : int }
+
+fun greet ({ name = n, ... } : person) = "hello, " ^ n
+val hi = greet { name = "kit", age = 2 }
+
+(* A match that binds nothing still chooses. *)
+fun sign n =
+  case n of
+    0 => "zero"
+  | _ => if n < 0 then "negative" else "positive"
+
+val s = List.map sign [~2, 0, 5]

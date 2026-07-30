@@ -1,0 +1,466 @@
+(* The CESK machine.
+
+   Four components, and the program is a rewriting of the four:
+
+     C  control       the block being run
+     E  environment   a name to an address
+     S  store         an address to a value
+     K  kontinuation  a list of frames
+
+   The middle two are usually collapsed into one in a CEK machine, where the
+   environment maps names straight to values.  Splitting them is what the extra
+   S is: a variable denotes a *place*, and the store says what is in it.  This
+   language needs that, because it has arrays.  An array is a run of addresses,
+   `Array.update` writes one, and nothing else in the machine has to change --
+   which is the argument for the fourth component in one sentence.
+
+   There is exactly one kind of frame.  In A-normal form the only thing that
+   can be waiting for a value is the `let` that binds it, so [KLet] is all
+   there is.  A tail call passes the frame list along untouched, so a loop
+   written as a tail-recursive function runs in constant space, and a `jump` to
+   a join point does not touch it either -- which is what makes a join point
+   cost nothing. *)
+
+module F = Flat
+module Map = Map.Make (String)
+
+type value =
+  | VInt of int
+  | VStr of string
+  | VUnit
+  | VTuple of value array
+  | VRecord of (string * value) list
+  | VCon of Types.constr * value option
+  (* A closure is a code label and a run of addresses holding its captures. *)
+  | VClos of string * int * int
+  (* A primitive of the basis.  Every one of them takes a single argument, a
+     tuple where it needs more, which is how SML's basis is shaped too. *)
+  | VPrim of string
+  | VArray of int * int (* base address, length *)
+
+type env = { vars : int Map.t; joins : jp Map.t; caps : int }
+and jp = { jparams : string list; jbody : F.block; jenv : env }
+
+type frame = KLet of string * F.block * env
+
+type world = {
+  mutable cells : value array;
+  mutable next : int;
+  globals : (string, value) Hashtbl.t;
+  codes : (string, F.code) Hashtbl.t;
+  mutable trace : bool;
+  mutable steps : int;
+}
+
+let empty_env = { vars = Map.empty; joins = Map.empty; caps = 0 }
+
+let create ?(trace = false) () =
+  {
+    cells = Array.make 1024 VUnit;
+    next = 0;
+    globals = Hashtbl.create 64;
+    codes = Hashtbl.create 64;
+    trace;
+    steps = 0;
+  }
+
+let fault fmt = Loc.fail ~where:"runtime error" Loc.unknown fmt
+
+(* The store grows by doubling; addresses are never reused, because nothing
+   here collects garbage. *)
+let alloc w n =
+  if w.next + n > Array.length w.cells then begin
+    let bigger = Array.make (max (2 * Array.length w.cells) (w.next + n)) VUnit in
+    Array.blit w.cells 0 bigger 0 w.next;
+    w.cells <- bigger
+  end;
+  let base = w.next in
+  w.next <- w.next + n;
+  base
+
+let get w a = w.cells.(a)
+let set w a v = w.cells.(a) <- v
+
+let rec show w v =
+  match v with
+  | VInt n -> if n < 0 then Printf.sprintf "~%d" (-n) else string_of_int n
+  | VStr s -> Printf.sprintf "%S" s
+  | VUnit -> "()"
+  | VTuple vs ->
+      Printf.sprintf "(%s)" (String.concat ", " (Array.to_list (Array.map (show w) vs)))
+  | VRecord fs ->
+      Printf.sprintf "{ %s }"
+        (String.concat ", " (List.map (fun (l, v) -> Printf.sprintf "%s = %s" l (show w v)) fs))
+  | VCon (c, _) when c.Types.cres.Types.tid = Types.list_tc.Types.tid -> show_list w v
+  | VCon (c, None) -> c.Types.cname
+  | VCon (c, Some v) -> Printf.sprintf "%s %s" c.Types.cname (show w v)
+  | VClos _ | VPrim _ -> "fn"
+  | VArray (base, len) ->
+      Printf.sprintf "[|%s|]"
+        (String.concat ", "
+           (List.init len (fun i -> show w (get w (base + i)))))
+
+and show_list w v =
+  let rec items v =
+    match v with
+    | VCon (c, None) when c.Types.cname = "nil" -> []
+    | VCon (_, Some (VTuple [| hd; tl |])) -> show w hd :: items tl
+    | _ -> [ "?" ]
+  in
+  Printf.sprintf "[%s]" (String.concat ", " (items v))
+
+let rec equal w a b =
+  match (a, b) with
+  | VInt a, VInt b -> a = b
+  | VStr a, VStr b -> a = b
+  | VUnit, VUnit -> true
+  | VTuple a, VTuple b ->
+      Array.length a = Array.length b
+      && (let ok = ref true in
+          Array.iteri (fun i x -> if not (equal w x b.(i)) then ok := false) a;
+          !ok)
+  | VRecord a, VRecord b ->
+      List.length a = List.length b
+      && List.for_all2 (fun (l1, v1) (l2, v2) -> l1 = l2 && equal w v1 v2) a b
+  | VCon (c1, p1), VCon (c2, p2) ->
+      c1.Types.cidx = c2.Types.cidx
+      && (match (p1, p2) with
+         | None, None -> true
+         | Some x, Some y -> equal w x y
+         | _ -> false)
+  | VArray (a, _), VArray (b, _) -> a = b (* arrays are equal when identical *)
+  | (VClos _ | VPrim _), _ | _, (VClos _ | VPrim _) ->
+      fault "functions cannot be compared"
+  | _ -> false
+
+let as_int = function VInt n -> n | _ -> fault "expected an integer"
+let as_str = function VStr s -> s | _ -> fault "expected a string"
+
+let nil_con = List.find (fun c -> c.Types.cname = "nil") Types.list_tc.Types.tcons
+let cons_con = List.find (fun c -> c.Types.cname = "::") Types.list_tc.Types.tcons
+
+let rec append w a b =
+  match a with
+  | VCon (c, None) when c.Types.cidx = nil_con.Types.cidx -> b
+  | VCon (_, Some (VTuple [| hd; tl |])) ->
+      VCon (cons_con, Some (VTuple [| hd; append w tl b |]))
+  | _ -> fault "expected a list"
+
+let vbool b =
+  VCon
+    ( List.find
+        (fun c -> c.Types.cname = (if b then "true" else "false"))
+        Types.bool_tc.Types.tcons,
+      None )
+
+(* The primitives.  Everything the machine can do that is not a call, a switch
+   or an allocation is here. *)
+let prim w name (args : value list) =
+  let two f = match args with [ a; b ] -> f a b | _ -> fault "%s wants two" name in
+  let one f = match args with [ a ] -> f a | _ -> fault "%s wants one" name in
+  match name with
+  | "+" -> two (fun a b -> VInt (as_int a + as_int b))
+  | "-" -> two (fun a b -> VInt (as_int a - as_int b))
+  | "*" -> two (fun a b -> VInt (as_int a * as_int b))
+  | "div" ->
+      two (fun a b ->
+          let d = as_int b in
+          if d = 0 then fault "division by zero" else VInt (as_int a / d))
+  | "mod" ->
+      two (fun a b ->
+          let d = as_int b in
+          if d = 0 then fault "division by zero" else VInt (as_int a mod d))
+  | "~" -> one (fun a -> VInt (-as_int a))
+  | "^" -> two (fun a b -> VStr (as_str a ^ as_str b))
+  | "@" -> two (fun a b -> append w a b)
+  | "<" -> two (fun a b -> vbool (as_int a < as_int b))
+  | "<=" -> two (fun a b -> vbool (as_int a <= as_int b))
+  | ">" -> two (fun a b -> vbool (as_int a > as_int b))
+  | ">=" -> two (fun a b -> vbool (as_int a >= as_int b))
+  | "=" -> two (fun a b -> vbool (equal w a b))
+  | "<>" -> two (fun a b -> vbool (not (equal w a b)))
+  | _ -> fault "no primitive %s" name
+
+(* A basis function, applied to its one argument. *)
+let call_prim w name (v : value) =
+  let pair () = match v with VTuple [| a; b |] -> (a, b) | _ -> fault "%s wants a pair" name in
+  let triple () =
+    match v with VTuple [| a; b; c |] -> (a, b, c) | _ -> fault "%s wants a triple" name
+  in
+  match name with
+  | "print" ->
+      print_string (as_str v);
+      VUnit
+  | "not" -> vbool (match v with VCon (c, None) -> c.Types.cname = "false" | _ -> fault "not")
+  | "Int.toString" -> VStr (show w v)
+  | "Int.abs" -> VInt (abs (as_int v))
+  | "Int.min" ->
+      let a, b = pair () in
+      VInt (min (as_int a) (as_int b))
+  | "Int.max" ->
+      let a, b = pair () in
+      VInt (max (as_int a) (as_int b))
+  | "Int.compare" ->
+      let a, b = pair () in
+      VInt (compare (as_int a) (as_int b))
+  | "String.size" -> VInt (String.length (as_str v))
+  | "String.compare" ->
+      let a, b = pair () in
+      VInt (compare (as_str a) (as_str b))
+  | "String.substring" ->
+      let s, i, n = triple () in
+      let s = as_str s and i = as_int i and n = as_int n in
+      if i < 0 || n < 0 || i + n > String.length s then fault "String.substring: out of range"
+      else VStr (String.sub s i n)
+  | "Array.array" ->
+      let n, init = pair () in
+      let n = as_int n in
+      if n < 0 then fault "Array.array: negative size";
+      let base = alloc w (max n 1) in
+      for i = 0 to n - 1 do
+        set w (base + i) init
+      done;
+      VArray (base, n)
+  | "Array.fromList" ->
+      let rec items = function
+        | VCon (c, None) when c.Types.cidx = nil_con.Types.cidx -> []
+        | VCon (_, Some (VTuple [| hd; tl |])) -> hd :: items tl
+        | _ -> fault "expected a list"
+      in
+      let vs = items v in
+      let n = List.length vs in
+      let base = alloc w (max n 1) in
+      List.iteri (fun i x -> set w (base + i) x) vs;
+      VArray (base, n)
+  | "Array.toList" -> (
+      match v with
+      | VArray (base, len) ->
+          let rec go i = if i >= len then VCon (nil_con, None)
+            else VCon (cons_con, Some (VTuple [| get w (base + i); go (i + 1) |]))
+          in
+          go 0
+      | _ -> fault "expected an array")
+  | "Array.length" -> ( match v with VArray (_, n) -> VInt n | _ -> fault "expected an array")
+  | "Array.sub" -> (
+      let a, i = pair () in
+      match a with
+      | VArray (base, len) ->
+          let i = as_int i in
+          if i < 0 || i >= len then fault "Array.sub: index %d out of 0..%d" i (len - 1)
+          else get w (base + i)
+      | _ -> fault "expected an array")
+  | "Array.update" -> (
+      let a, i, x = triple () in
+      match a with
+      | VArray (base, len) ->
+          let i = as_int i in
+          if i < 0 || i >= len then fault "Array.update: index %d out of 0..%d" i (len - 1)
+          else (
+            set w (base + i) x;
+            VUnit)
+      | _ -> fault "expected an array")
+  | _ -> fault "no primitive %s" name
+
+(* One state. *)
+type state = { mutable ctrl : F.block; mutable env : env; mutable ks : frame list }
+
+let lookup w env x =
+  match Map.find_opt x env.vars with
+  | Some a -> get w a
+  | None -> (
+      match Hashtbl.find_opt w.globals x with
+      | Some v -> v
+      | None -> fault "unbound variable %s" x)
+
+let atom w env : F.atom -> value = function
+  | F.AVar x -> lookup w env x
+  | F.AInt n -> VInt n
+  | F.AStr s -> VStr s
+  | F.AUnit -> VUnit
+
+(* Binding a name allocates a cell.  That is the price of having a store, and
+   the reason an array needs nothing new. *)
+let bind w env x v =
+  let a = alloc w 1 in
+  set w a v;
+  { env with vars = Map.add x a env.vars }
+
+let code w label =
+  match Hashtbl.find_opt w.codes label with
+  | Some c -> c
+  | None -> fault "no code block %s" label
+
+(* Entering a function: a fresh environment holding just the parameter, and the
+   captures of the closure that was called. *)
+let enter w (v : value) (arg : value) =
+  match v with
+  | VClos (label, base, _) ->
+      let c = code w label in
+      let env = bind w { vars = Map.empty; joins = Map.empty; caps = base } c.F.c_param arg in
+      Some (c.F.c_body, env)
+  | VPrim _ -> None
+  | _ -> fault "expected a function"
+
+let rec run w (st : state) : value =
+  w.steps <- w.steps + 1;
+  if w.trace then prerr_endline ("  " ^ head_of st.ctrl);
+  match st.ctrl with
+  | F.Let (x, rhs, rest) -> (
+      match rhs with
+      | F.Call (f, a) -> (
+          let fv = atom w st.env f and av = atom w st.env a in
+          match enter w fv av with
+          | Some (body, env) ->
+              st.ks <- KLet (x, rest, st.env) :: st.ks;
+              st.env <- env;
+              st.ctrl <- body;
+              run w st
+          | None ->
+              let v = call_prim w (match fv with VPrim n -> n | _ -> assert false) av in
+              step_on w st x v rest)
+      | _ ->
+          let v = eval w st.env rhs in
+          step_on w st x v rest)
+  | F.LetRec (defs, rest) ->
+      (* Every closure of the group exists before any of their captures are
+         computed, so they can see each other. *)
+      let made =
+        List.map
+          (fun (name, label, caps) ->
+            let base = alloc w (max (List.length caps) 1) in
+            (name, VClos (label, base, List.length caps), base, caps))
+          defs
+      in
+      let env =
+        List.fold_left (fun env (name, v, _, _) -> bind w env name v) st.env made
+      in
+      List.iter
+        (fun (_, _, base, caps) ->
+          List.iteri (fun i a -> set w (base + i) (atom w env a)) caps)
+        made;
+      st.env <- env;
+      st.ctrl <- rest;
+      run w st
+  | F.Join (j, ps, body, rest) ->
+      st.env <-
+        {
+          st.env with
+          joins = Map.add j { jparams = ps; jbody = body; jenv = st.env } st.env.joins;
+        };
+      st.ctrl <- rest;
+      run w st
+  | F.Tail t -> (
+      match t with
+      | F.Ret a -> (
+          let v = atom w st.env a in
+          match st.ks with
+          | [] -> v
+          | KLet (x, rest, env) :: ks ->
+              st.ks <- ks;
+              st.env <- env;
+              step_on w st x v rest)
+      | F.TCall (f, a) -> (
+          let fv = atom w st.env f and av = atom w st.env a in
+          match enter w fv av with
+          | Some (body, env) ->
+              st.env <- env;
+              st.ctrl <- body;
+              run w st
+          | None ->
+              let v = call_prim w (match fv with VPrim n -> n | _ -> assert false) av in
+              return w st v)
+      | F.Jump (j, args) -> (
+          match Map.find_opt j st.env.joins with
+          | None -> fault "no join point %s" j
+          | Some jp ->
+              let vs = List.map (atom w st.env) args in
+              (* A join point does not capture: it lands in the environment it
+                 was written in, with its parameters bound. *)
+              let env = List.fold_left2 (bind w) jp.jenv jp.jparams vs in
+              st.env <- env;
+              st.ctrl <- jp.jbody;
+              run w st)
+      | F.Fail (loc, msg) -> Loc.fail ~where:"match failure" loc "%s" msg
+      | F.Switch (a, branches, dflt) -> (
+          let v = atom w st.env a in
+          let matches (k : Core.key) =
+            match (k, v) with
+            | Core.Ktag c, VCon (c', _) -> c.Types.cidx = c'.Types.cidx
+            | Core.Kint n, VInt m -> n = m
+            | Core.Kstr s, VStr t -> s = t
+            | _ -> false
+          in
+          match List.find_opt (fun (k, _) -> matches k) branches with
+          | Some (_, body) ->
+              st.ctrl <- body;
+              run w st
+          | None -> (
+              match dflt with
+              | Some body ->
+                  st.ctrl <- body;
+                  run w st
+              | None -> fault "no branch of this switch matched")))
+
+and step_on w st x v rest =
+  st.env <- bind w st.env x v;
+  st.ctrl <- rest;
+  run w st
+
+and return w st v =
+  match st.ks with
+  | [] -> v
+  | KLet (x, rest, env) :: ks ->
+      st.ks <- ks;
+      st.env <- env;
+      step_on w st x v rest
+
+and eval w env (rhs : F.rhs) : value =
+  match rhs with
+  | F.Atom a -> atom w env a
+  | F.Capture i -> get w (env.caps + i)
+  | F.Closure (label, caps) ->
+      let base = alloc w (max (List.length caps) 1) in
+      List.iteri (fun i a -> set w (base + i) (atom w env a)) caps;
+      VClos (label, base, List.length caps)
+  | F.Prim (op, ats) -> prim w op (List.map (atom w env) ats)
+  | F.Tuple ats -> VTuple (Array.of_list (List.map (atom w env) ats))
+  | F.Record fs -> VRecord (List.map (fun (l, a) -> (l, atom w env a)) fs)
+  | F.Con (c, a) -> VCon (c, Option.map (atom w env) a)
+  | F.Proj (a, i) -> (
+      match atom w env a with
+      | VTuple vs -> vs.(i)
+      | _ -> fault "expected a tuple")
+  | F.Field (a, l) -> (
+      match atom w env a with
+      | VRecord fs -> (
+          match List.assoc_opt l fs with
+          | Some v -> v
+          | None -> fault "this record has no field %s" l)
+      | _ -> fault "expected a record")
+  | F.Payload a -> (
+      match atom w env a with
+      | VCon (_, Some v) -> v
+      | VCon (c, None) -> fault "%s has no argument" c.Types.cname
+      | _ -> fault "expected a constructed value")
+  | F.Call _ -> assert false (* a call is a step, not an evaluation *)
+
+and head_of (b : F.block) =
+  match b with
+  | F.Let (x, r, _) -> Printf.sprintf "let %s = %s" x (F.rhs_str r)
+  | F.LetRec (defs, _) ->
+      Printf.sprintf "let rec %s" (String.concat ", " (List.map (fun (x, _, _) -> x) defs))
+  | F.Join (j, _, _, _) -> Printf.sprintf "join %s" j
+  | F.Tail (F.Ret a) -> Printf.sprintf "ret %s" (F.atom_str a)
+  | F.Tail (F.TCall (f, a)) ->
+      Printf.sprintf "tailcall %s %s" (F.atom_str f) (F.atom_str a)
+  | F.Tail (F.Jump (j, _)) -> Printf.sprintf "jump %s" j
+  | F.Tail (F.Switch (a, _, _)) -> Printf.sprintf "switch %s" (F.atom_str a)
+  | F.Tail (F.Fail _) -> "fail"
+
+let load w (p : F.program) =
+  List.iter (fun (c : F.code) -> Hashtbl.replace w.codes c.F.c_label c) p.F.codes
+
+let define w name v = Hashtbl.replace w.globals name v
+
+let run_block w block =
+  run w { ctrl = block; env = empty_env; ks = [] }

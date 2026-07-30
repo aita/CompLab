@@ -1,0 +1,2 @@
+(* SML cannot infer which record this is, and neither can we *)
+fun getX r = #x r

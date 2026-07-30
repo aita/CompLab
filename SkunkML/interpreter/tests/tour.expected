@@ -1,0 +1,31 @@
+val greeting : string = "hello"
+val answer : int = 42
+val negative : int = ~3
+val pair : int * bool = (1, true)
+val origin : { x : int, y : int } = { x = 0, y = 0 }
+val moved : { x : int, y : int } = { x = 3, y = 0 }
+val small : int list = [1, 2, 3]
+val longer : int list = [0, 1, 2, 3, 4]
+val twice : ('a -> 'a) -> 'a -> 'a = fn
+val four : int = 4
+val fact : int -> int = fn
+val f6 : int = 720
+datatype 'a tree = Leaf | Node of 'a tree * 'a * 'a tree
+val insert : int * int tree -> int tree = fn
+val toList : 'a tree -> 'a list = fn
+val sorted : int list = [1, 3, 5, 8]
+val even : int -> bool = fn
+val odd : int -> bool = fn
+val e10 : bool = true
+val doubled : int list = [2, 4, 6]
+val total : int = 12
+val evens : int list = [2, 4, 6]
+val cells : int array = [|0, 0, 0|]
+val readBack : int = 42
+val asList : int list = [0, 42, 0]
+signature ORD
+structure IntOrd
+functor Sorter
+structure IntSort
+val ordered : int list = [1, 2, 4, 9]
+the answer is 42

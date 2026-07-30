@@ -1,0 +1,5 @@
+functor Wrap (X : sig type t end) = struct datatype box = Box of X.t end
+structure A = Wrap (struct type t = int end)
+structure B = Wrap (struct type t = int end)
+fun unwrap (A.Box x) = x
+val oops = unwrap (B.Box 1)

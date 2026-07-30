@@ -1,0 +1,92 @@
+code t.61$2 (x.12) =
+  let n.2 = capture 0
+  let m = x.12
+  let t.60 = +(n.2, m)
+  ret t.60
+
+code adder$1 (a1.19) =
+  let n.2 = a1.19
+  let t.61 = closure t.61$2 [n.2]
+  ret t.61
+
+code f.23$4 (a2.10) =
+  let a1.20 = capture 0
+  let args.10 = (a1.20, a2.10)
+  let p.57 = #1 args.10
+  let p.58 = #2 args.10
+  let f.22 = p.57
+  let x.13 = p.58
+  let t.64 = f.22 x.13
+  tailcall f.22 t.64
+
+code twice$3 (a1.20) =
+  let f.23 = closure f.23$4 [a1.20]
+  ret f.23
+
+code t.66$5 (x.14) =
+  let n.3 = x.14
+  let t.65 = +(n.3, 1)
+  ret t.65
+
+code size$6 (a1.21) =
+  let xs.13 = a1.21
+  join k (v) =
+    let t.70 = +(1, v)
+    ret t.70
+  switch xs.13 of
+  | nil =>
+      jump k (0)
+  | :: =>
+      let arg.15 = payload xs.13
+      let p.59 = #1 arg.15
+      let p.60 = #2 arg.15
+      let rest.2 = p.60
+      let t.69 = size rest.2
+      jump k (t.69)
+
+-- val adder : int -> int -> int
+let rec adder = closure adder$1 []
+ret adder
+
+-- val add3 : int -> int
+let t.62 = adder 3
+let add3 = t.62
+ret add3
+
+-- val ten : int
+let t.63 = add3 7
+let ten = t.63
+ret ten
+
+-- val twice : ('a -> 'a) -> 'a -> 'a
+let rec twice = closure twice$3 []
+ret twice
+
+-- val four : int
+let t.66 = closure t.66$5 []
+let t.67 = twice t.66
+let t.68 = t.67 2
+let four = t.68
+ret four
+
+-- val size : 'a list -> int
+let rec size = closure size$6 []
+ret size
+
+-- val three : int
+let t.71 = nil
+let t.72 = (2, t.71)
+let t.73 = :: t.72
+let t.74 = (1, t.73)
+let t.75 = :: t.74
+let t.76 = size t.75
+let three = t.76
+ret three
+
+val adder : int -> int -> int = fn
+val add3 : int -> int = fn
+val ten : int = 10
+val twice : ('a -> 'a) -> 'a -> 'a = fn
+val four : int = 4
+val size : 'a list -> int = fn
+val three : int = 3
