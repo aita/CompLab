@@ -200,3 +200,36 @@
  (deps verify.out)
  (action
   (progn)))
+
+; The assembler, on its own: the addressing modes that have a special case in
+; the encoder, as bytes.  Every line was checked against the system assembler
+; once, and the golden file is what keeps it checked.
+
+(rule
+ (with-stdout-to
+  encoding.out
+  (run %{exe:../src/compiler/skunkc.exe} --dump-encoding)))
+
+(rule
+ (alias runtest)
+ (action
+  (diff encoding.expected encoding.out)))
+
+; The assembler, the linker and the ELF writer together: skunkc writes a
+; hand-built executable and we run it.  Nothing of the compiler proper is
+; involved, so a failure here is in one of those three and nowhere else.
+
+(rule
+ (targets hello.exe)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} --selftest hello.exe)))
+
+(rule
+ (with-stdout-to
+  hello.out
+  (run %{dep:hello.exe})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff hello.expected hello.out)))

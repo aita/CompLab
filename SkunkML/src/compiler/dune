@@ -6,7 +6,7 @@
 (library
  (name skunkc_lib)
  (wrapped false)
- (libraries skunkml)
+ (libraries skunkml unix)
  (modules
   (:standard \ skunkc))
  (flags

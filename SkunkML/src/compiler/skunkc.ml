@@ -16,12 +16,17 @@ let usage () =
     \      --dump-flat   print the A-normal form it was built from\n\
     \      --no-verify   skip the check that every use is dominated by its \
      definition\n\
+    \      --selftest F  write a hand-built ELF to F: checks the assembler,\n\
+    \                    the linker and the ELF writer on their own\n\
+    \      --dump-encoding\n\
+    \                    print the bytes for the tricky addressing modes\n\
     \  -h, --help        this\n"
 
 let dump_ssa = ref false
 let dump_dom = ref false
 let dump_flat = ref false
 let verify = ref true
+let selftest_to = ref None
 
 let parse ~file source =
   let lexbuf = Lexing.from_string source in
@@ -55,6 +60,90 @@ let to_flat env globals ~file ~source =
   let globals = globals @ names in
   (env, globals, Closure.program globals items)
 
+(* Checking the assembler, the linker and the ELF writer without the rest of
+   the compiler.  The program is written out by hand: say hello, exit 0.  It is
+   how a code generator gets off the ground -- if this runs, the three lowest
+   layers are right, and anything that goes wrong afterwards is selection or
+   register allocation. *)
+let selftest path =
+  let module M = Mach in
+  let text = Asm.create () and data = Asm.create () in
+  Asm.label data "msg";
+  Asm.ascii data "hello from skunkc\n";
+  Asm.label text "_start";
+  let r n = M.Reg (M.R n) in
+  (* write(1, msg, 18) *)
+  List.iter (Asm.instr text)
+    [
+      M.Mov (r M.rax, M.Imm 1);
+      M.Mov (r M.rdi, M.Imm 1);
+      M.Lea (M.R M.rsi, M.Mem { base = None; index = None; scale = 1; disp = 0; sym = Some "msg" });
+      M.Mov (r M.rdx, M.Imm 18);
+      M.Syscall;
+      (* exit(0) *)
+      M.Mov (r M.rax, M.Imm 60);
+      M.Alu ("xor", r M.rdi, r M.rdi);
+      M.Syscall;
+    ];
+  Link.link ~path ~text ~data ~entry:"_start"
+
+(* The corner cases of the encoding, as bytes.  Every line here was checked
+   against the system assembler once; the golden file is what keeps it checked.
+   The list is not a program -- it is the addressing modes that have a special
+   case in `asm.ml`, so that a wrong REX bit or a missing SIB byte shows up as a
+   diff and not as a crash in a compiled program. *)
+let encodings () =
+  let module M = Mach in
+  let r i = M.Reg (M.R i) in
+  let mem ?base ?index ?(scale = 1) ?(disp = 0) ?sym () =
+    M.Mem { base; index; scale; disp; sym }
+  in
+  (* Indices into [Mach.reg_name], not x86 numbers. *)
+  let rax = 0 and rcx = 1 and rdx = 2 and rsi = 3 and rdi = 4 in
+  let r8 = 5 and r11 = 7 and rbx = 8 and r12 = 9 and r13 = 10 and r15 = 12 in
+  [
+    M.Mov (r rax, M.Imm 1);
+    M.Mov (r r15, M.Imm (-1));
+    M.Mov (r rax, M.Imm 0x1_0000_0000);
+    M.Mov (r rbx, r r8);
+    M.Mov (r r8, r rbx);
+    (* rbx has no REX; r12 as a base forces a SIB; r13 as a base forces a
+       displacement byte even though it is zero. *)
+    M.Mov (r rax, mem ~base:(M.R rbx) ());
+    M.Mov (r rax, mem ~base:(M.R r12) ());
+    M.Mov (r rax, mem ~base:(M.R r13) ());
+    M.Mov (r rax, mem ~base:(M.R rbx) ~disp:8 ());
+    M.Mov (r rax, mem ~base:(M.R rbx) ~disp:1000 ());
+    M.Mov (r rax, mem ~base:(M.R rbx) ~index:(M.R r15) ~scale:8 ~disp:16 ());
+    M.Mov (mem ~base:(M.R r12) ~disp:24 (), r rdi);
+    M.Lea (M.R rsi, mem ~sym:"msg" ());
+    M.Alu ("add", r rax, r rcx);
+    M.Alu ("sub", r r11, M.Imm 7);
+    M.Alu ("and", r rax, M.Imm 4096);
+    M.Alu ("imul", r rdx, r rsi);
+    M.Sar (r rax, 1);
+    M.Shl (r r13, 3);
+    M.Neg (r rbx);
+    M.Cmp (r rax, r r12);
+    M.Setcc ("l", M.R rsi);
+    M.Cqo;
+    M.Idiv (M.R rcx);
+    M.Push (r rbx);
+    M.Pop (r r13);
+    M.CallReg (M.R r11, None);
+    M.Syscall;
+  ]
+
+let dump_encoding () =
+  List.iter
+    (fun i ->
+      let st = Asm.create () in
+      Asm.instr st i;
+      let b = Asm.contents st in
+      let hex = String.concat "" (List.init (String.length b) (fun k -> Printf.sprintf "%02x" (Char.code b.[k]))) in
+      Printf.printf "%-24s %s\n" hex (Mach.instr_str i))
+    (encodings ())
+
 let () =
   let file = ref None in
   let rec args = function
@@ -71,6 +160,12 @@ let () =
     | "--no-verify" :: rest ->
         verify := false;
         args rest
+    | "--selftest" :: out :: rest ->
+        selftest_to := Some out;
+        args rest
+    | "--dump-encoding" :: _ ->
+        dump_encoding ();
+        exit 0
     | ("-h" | "--help") :: _ ->
         usage ();
         exit 0
@@ -83,6 +178,11 @@ let () =
         args rest
   in
   args (List.tl (Array.to_list Sys.argv));
+  (match !selftest_to with
+  | Some out ->
+      selftest out;
+      exit 0
+  | None -> ());
   match !file with
   | None ->
       usage ();

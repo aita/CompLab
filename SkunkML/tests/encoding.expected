@@ -1,0 +1,28 @@
+48c7c001000000           mov $1, %rax
+49c7c7ffffffff           mov $-1, %r15
+48b80000000001000000     mov $4294967296, %rax
+498bd8                   mov %r8, %rbx
+4c8bc3                   mov %rbx, %r8
+488b03                   mov (%rbx), %rax
+498b0424                 mov (%r12), %rax
+498b4500                 mov (%r13), %rax
+488b4308                 mov 8(%rbx), %rax
+488b83e8030000           mov 1000(%rbx), %rax
+4a8b44fb10               mov 16(%rbx,%r15,8), %rax
+49897c2418               mov %rdi, 24(%r12)
+488d3500000000           lea msg(%rip), %rsi
+4801c8                   add %rcx, %rax
+4983eb07                 sub $7, %r11
+4881e000100000           and $4096, %rax
+480fafd6                 imul %rsi, %rdx
+48c1f801                 sar $1, %rax
+49c1e503                 shl $3, %r13
+48f7db                   neg %rbx
+4c39e0                   cmp %r12, %rax
+400f9cc6                 setl %rsi
+4899                     cqo
+48f7f9                   idiv %rcx
+53                       push %rbx
+415d                     pop %r13
+41ffd3                   call *%r11
+0f05                     syscall

@@ -26,6 +26,10 @@ type reg =
 let reg_name =
   [| "rax"; "rcx"; "rdx"; "rsi"; "rdi"; "r8"; "r9"; "r11"; "rbx"; "r12"; "r13"; "r14"; "r15" |]
 
+(* The number the instruction encoding uses for each of them, which is not the
+   order they are listed in. *)
+let x86 = [| 0; 1; 2; 6; 7; 8; 9; 11; 3; 12; 13; 14; 15 |]
+
 let rax = 0
 let rcx = 1
 let rdx = 2
@@ -63,6 +67,7 @@ type instr =
   | CallReg of reg * reg option (* through a register *)
   | Push of operand
   | Pop of operand
+  | Syscall
   | Comment of string
 
 type term =
@@ -144,6 +149,7 @@ let instr_str = function
   | CallReg (r, _) -> Printf.sprintf "call *%s" (reg_str r)
   | Push o -> Printf.sprintf "push %s" (operand_str o)
   | Pop o -> Printf.sprintf "pop %s" (operand_str o)
+  | Syscall -> "syscall"
   | Comment c -> Printf.sprintf "; %s" c
 
 let term_str = function
