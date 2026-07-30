@@ -1,0 +1,34 @@
+(* Interprocedural constant propagation.
+
+   What is left over when inlining has finished.  A function small enough to
+   copy has no call sites afterwards, so both of these are deliberately too big
+   for the threshold: the calls stay calls, and the only thing left to notice is
+   that every one of them passes the same number.
+
+   `band` is what says the propagation iterates.  One of its two call sites
+   passes `edge`'s parameter, so the two sites only agree after `edge`'s
+   parameter became a constant -- which is a round later. *)
+
+fun band n =
+  let val a = if n = 0 then "." else if n = 1 then ":" else if n = 2 then "+" else "#"
+      val b = if n = 0 then "-" else if n = 1 then "=" else if n = 2 then "~" else "*"
+      val c = if n < 2 then a ^ b else b ^ a
+      val d = if n < 3 then c ^ c else c
+      val e = if n < 4 then d ^ a else d ^ b
+  in e ^ c ^ d
+  end
+
+fun edge n =
+  let val inner = band n
+      val a = if n = 0 then "zero" else if n = 1 then "one" else "many"
+      val b = if n = 2 then "[" else if n = 3 then "{" else "("
+      val c = if n = 2 then "]" else if n = 3 then "}" else ")"
+      val d = b ^ a ^ c
+      val e = if n < 2 then d ^ inner else inner ^ d
+  in e ^ b ^ c
+  end
+
+val plain = band 3
+val first = edge 3
+val second = edge 3 ^ "!"
+val third = "?" ^ edge 3

@@ -47,7 +47,14 @@
        call is a loop and 17章 makes it one.
      * A function called from exactly one place is always inlined -- the copy
        replaces the original rather than joining it.  Anything else has to fit
-       under [threshold] nodes. *)
+       under [threshold] nodes.
+
+   The second half of the file spends the same analysis a second way.  Knowing
+   which code block a call reaches is also what it takes to say that every call
+   to a function passes the same constant, and then the parameter is not a
+   parameter.  That is at the bottom, under "interprocedural constant
+   propagation", and it runs after inlining because inlining is what decides
+   which call sites are still there to agree with each other. *)
 
 module F = Flat
 module SM = Map.Make (String)
@@ -470,3 +477,211 @@ let rewrite e (p : F.program) : F.program =
         (fun (i : F.item) -> { i with F.ibody = Option.map (walk e [] SS.empty) i.F.ibody })
         p.F.items;
   }
+
+(* ---- interprocedural constant propagation -------------------------------- *)
+
+(* Callahan, Cooper, Kennedy and Torczon.  Knowing which code block a call
+   reaches is what the pass above needed, and it is the whole of what this one
+   needs too: if every call to a known function passes the same constant, and
+   nothing holds the function any other way, then the parameter *is* that
+   constant inside the body, wherever the body runs from.  Put it there and sccp
+   does the rest.
+
+   It is what is left over when inlining has finished.  A function called from
+   one place was copied and its call site is gone; what stays behind is the ones
+   called from several places and the ones too big to copy, and those are
+   exactly the ones worth asking this about. *)
+
+type arg = Nowhere | Same of F.atom | Various
+
+let join a b =
+  match (a, b) with
+  | Nowhere, x | x, Nowhere -> x
+  | Various, _ | _, Various -> Various
+  | Same x, Same y -> if x = y then a else Various
+
+let constant = function F.AInt _ | F.AStr _ | F.AUnit -> true | F.AVar _ | F.AReal _ -> false
+
+(* A call argument is an atom, and after inlining it is very often a name bound
+   to one -- `let x = 3` then `f x`, because the copy bound the callee's
+   parameter to whatever the caller passed.  Following those `Let`s is what lets
+   a constant reach a second function through the first.  Only atom bindings are
+   followed, and Flat's binders are unique and defined before use, so this
+   terminates. *)
+let rec resolve defs (a : F.atom) =
+  match a with
+  | F.AVar x -> ( match SM.find_opt x defs with Some b when b <> a -> resolve defs b | _ -> a)
+  | _ -> a
+
+type facts = {
+  arg : (string, arg) Hashtbl.t; (* global -> what its call sites pass *)
+  held : (string, int) Hashtbl.t; (* global -> mentions that are not calls *)
+  clos : (string, int) Hashtbl.t; (* code label -> closures made over it *)
+}
+
+let note f x a =
+  Hashtbl.replace f.arg x (join (Option.value (Hashtbl.find_opt f.arg x) ~default:Nowhere) a)
+
+let rec facts_block f bound defs (b : F.block) =
+  match b with
+  | F.Let (x, r, rest) ->
+      facts_rhs f bound defs r;
+      let defs = match r with F.Atom a -> SM.add x (resolve defs a) defs | _ -> SM.remove x defs in
+      facts_block f (SS.add x bound) defs rest
+  | F.Fix (defs_, rest) ->
+      let bound = List.fold_left (fun s (x, _) -> SS.add x s) bound defs_ in
+      List.iter (fun (_, r) -> facts_rhs f bound defs r) defs_;
+      facts_block f bound defs rest
+  | F.Join (_, ps, body, rest) ->
+      facts_block f (List.fold_left (fun s p -> SS.add p s) bound ps) defs body;
+      facts_block f bound defs rest
+  | F.Tail t -> facts_tail f bound defs t
+
+and facts_use f bound = function
+  | F.AVar x when not (SS.mem x bound) -> bump f.held x
+  | _ -> ()
+
+and facts_callee f bound defs g a =
+  match g with
+  | F.AVar x when not (SS.mem x bound) -> note f x (Same (resolve defs a))
+  | _ -> facts_use f bound g
+
+and facts_rhs f bound defs (r : F.rhs) =
+  let u = facts_use f bound in
+  match r with
+  | F.Atom x | F.Con (_, Some x) | F.Field (x, _, _) | F.Payload x -> u x
+  | F.Closure (l, caps) ->
+      bump f.clos l;
+      List.iter u caps
+  | F.Capture _ | F.Con (_, None) -> ()
+  | F.Call (g, x) ->
+      facts_callee f bound defs g x;
+      u x
+  | F.Prim (_, ats) -> List.iter u ats
+  | F.Record fs -> List.iter (fun (_, x) -> u x) fs
+
+and facts_tail f bound defs (t : F.tail) =
+  let u = facts_use f bound in
+  match t with
+  | F.Ret x -> u x
+  | F.TCall (g, x) ->
+      facts_callee f bound defs g x;
+      u x
+  | F.Jump (_, ats) -> List.iter u ats
+  | F.Fail _ -> ()
+  | F.Switch (x, arms, d) ->
+      u x;
+      List.iter (fun (_, b) -> facts_block f bound defs b) arms;
+      Option.iter (facts_block f bound defs) d
+
+(* The parameter is one name and the body's binders are unique, so this is a
+   substitution over the atoms and not a renaming: nothing else moves.  The
+   [bound] check is there because "unique" is a fact about the front end rather
+   than about this type.
+
+   [hit] is set when something really was replaced.  Asking afterwards whether
+   the block changed is not an option: a `Con` carries a `Types.constr` whose
+   result type lists its own constructors, so structural comparison goes round
+   and does not come back -- the same trap `opt.ml` fell into with blocks. *)
+let rec sub_block hit p (c : F.atom) bound (b : F.block) =
+  match b with
+  | F.Let (x, r, rest) ->
+      F.Let
+        ( x,
+          sub_rhs hit p c bound r,
+          sub_block hit p c (if x = p then SS.add x bound else bound) rest )
+  | F.Fix (defs, rest) ->
+      let bound = List.fold_left (fun s (x, _) -> if x = p then SS.add x s else s) bound defs in
+      F.Fix
+        ( List.map (fun (x, r) -> (x, sub_rhs hit p c bound r)) defs,
+          sub_block hit p c bound rest )
+  | F.Join (j, ps, body, rest) ->
+      let inner = List.fold_left (fun s x -> if x = p then SS.add x s else s) bound ps in
+      F.Join (j, ps, sub_block hit p c inner body, sub_block hit p c bound rest)
+  | F.Tail t -> F.Tail (sub_tail hit p c bound t)
+
+and sub_atom hit p c bound = function
+  | F.AVar x when x = p && not (SS.mem x bound) ->
+      hit := true;
+      c
+  | a -> a
+
+and sub_rhs hit p c bound (r : F.rhs) : F.rhs =
+  let a = sub_atom hit p c bound in
+  match r with
+  | F.Atom x -> F.Atom (a x)
+  | F.Closure (l, caps) -> F.Closure (l, List.map a caps)
+  | F.Capture i -> F.Capture i
+  | F.Call (g, x) -> F.Call (a g, a x)
+  | F.Prim (o, ats) -> F.Prim (o, List.map a ats)
+  | F.Record fs -> F.Record (List.map (fun (l, x) -> (l, a x)) fs)
+  | F.Con (k, x) -> F.Con (k, Option.map a x)
+  | F.Field (x, l, i) -> F.Field (a x, l, i)
+  | F.Payload x -> F.Payload (a x)
+
+and sub_tail hit p c bound (t : F.tail) : F.tail =
+  let a = sub_atom hit p c bound in
+  match t with
+  | F.Ret x -> F.Ret (a x)
+  | F.TCall (g, x) -> F.TCall (a g, a x)
+  | F.Jump (j, ats) -> F.Jump (j, List.map a ats)
+  | F.Fail _ -> t
+  | F.Switch (x, arms, d) ->
+      F.Switch
+        ( a x,
+          List.map (fun (key, b) -> (key, sub_block hit p c bound b)) arms,
+          Option.map (sub_block hit p c bound) d )
+
+(* One round.  Constants reach further one function at a time -- a constant put
+   into `f` can make the argument `f` passes to `g` constant too -- so the caller
+   repeats this until a round changes nothing. *)
+let round e (units : F.program list) =
+  let f = { arg = Hashtbl.create 32; held = Hashtbl.create 32; clos = Hashtbl.create 32 } in
+  List.iter
+    (fun (p : F.program) ->
+      List.iter
+        (fun (c : F.code) -> facts_block f (SS.singleton c.F.c_param) SM.empty c.F.c_body)
+        p.F.codes;
+      List.iter
+        (fun (i : F.item) -> Option.iter (facts_block f SS.empty SM.empty) i.F.ibody)
+        p.F.items)
+    units;
+  (* What the parameter of each label may be replaced by.  Three things have to
+     hold at once, and each one closes a different way in.  Nothing may hold the
+     function except its call sites, or it could be called from somewhere this
+     did not look.  Only one closure may exist over the label, or two different
+     functions share the body.  And every call site has to agree. *)
+  let fixed = Hashtbl.create 16 in
+  Hashtbl.iter
+    (fun g l ->
+      if count f.held g = 0 && count f.clos l = 1 then
+        match Hashtbl.find_opt f.arg g with
+        | Some (Same a) when constant a -> Hashtbl.replace fixed l a
+        | _ -> ())
+    e.known;
+  if Hashtbl.length fixed = 0 then None
+  else
+    let hit = ref false in
+    let one (c : F.code) =
+      match Hashtbl.find_opt fixed c.F.c_label with
+      | Some a -> { c with F.c_body = sub_block hit c.F.c_param a SS.empty c.F.c_body }
+      | None -> c
+    in
+    let units = List.map (fun (p : F.program) -> { p with F.codes = List.map one p.F.codes }) units in
+    if !hit then Some units else None
+
+let rec settle e units n =
+  if n = 0 then units else match round e units with None -> units | Some u -> settle e u (n - 1)
+
+(* ---- the pass ------------------------------------------------------------ *)
+
+(* The two compilation units a program is made of: the basis, and the file.
+   They are looked at together and rewritten together, because the file calls
+   the basis and may rebind its names, which is what decides whether a global
+   still holds the function it was defined with. *)
+let program (basis : F.program) (file : F.program) =
+  let e = analyse [ basis; file ] in
+  let basis = rewrite e basis and file = rewrite e file in
+  match settle e [ basis; file ] 4 with
+  | [ basis; file ] -> (basis, file)
+  | _ -> assert false

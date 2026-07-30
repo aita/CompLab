@@ -215,10 +215,7 @@ let () =
             can rebind the basis's names, which is the question that decides
             whether a global still holds the function it was defined with. *)
          let basis_flat, flat =
-           if not !optimise then (basis_flat, flat)
-           else
-             let e = Inline.analyse [ basis_flat; flat ] in
-             (Inline.rewrite e basis_flat, Inline.rewrite e flat)
+           if !optimise then Inline.program basis_flat flat else (basis_flat, flat)
          in
          let basis = Build.program globals basis_flat in
          let prog = Build.program globals flat in

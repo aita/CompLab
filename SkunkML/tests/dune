@@ -641,6 +641,48 @@
  (action
   (diff inline.run.expected inline.bin.out)))
 
+; Interprocedural constant propagation, which is what is left over once inlining
+; has finished: both functions in icp.sk are too big to copy, so their call sites
+; stay calls, and the only thing left to see is that every one of them passes the
+; same number.  `band` only agrees with itself a round after `edge` did, so the
+; golden file is also the test that the propagation iterates.
+
+(rule
+ (with-stdout-to
+  icp.out
+  (run %{exe:../src/compiler/skunkc.exe} --dump-opt %{dep:icp.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff icp.expected icp.out)))
+
+(rule
+ (with-stdout-to
+  icp.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:icp.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff icp.run.expected icp.interp.out)))
+
+(rule
+ (targets icp.bin)
+ (deps icp.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o icp.bin icp.sk)))
+
+(rule
+ (with-stdout-to
+  icp.bin.out
+  (run %{dep:icp.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff icp.run.expected icp.bin.out)))
+
 ; The loop pass.  loop.sk is tail-recursive, so its tail call becomes a jump and
 ; its parameter becomes a phi -- the one place the control-flow graph stops being
 ; acyclic.  The golden file is the SSA with the loop in it.

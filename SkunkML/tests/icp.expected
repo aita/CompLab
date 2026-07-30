@@ -1,0 +1,66 @@
+func band$1:
+  b0:
+    v0 = const "*##*#*#"
+    ret v0
+
+func edge$2:
+  b0:
+    v0 = const "{many}"
+    v1 = const "}"
+    v2 = const "{"
+    v3 = const 3
+    v4 = global band
+    v5 = call v4, v3                       ; t.76
+    v6 = prim ^ v5, v0                     ; t.87
+    v7 = prim ^ v6, v2                     ; t.88
+    v8 = prim ^ v7, v1                     ; t.89
+    ret v8
+
+-- val band : int -> string
+func $band:
+  b0:
+    v0 = mkclos band$1, 0                  ; band
+    ret v0
+
+-- val edge : int -> string
+func $edge:
+  b0:
+    v0 = mkclos edge$2, 0                  ; edge
+    ret v0
+
+-- val plain : string
+func $plain:
+  b0:
+    v0 = const 3
+    v1 = global band
+    v2 = call v1, v0                       ; t.90
+    ret v2
+
+-- val first : string
+func $first:
+  b0:
+    v0 = const 3
+    v1 = global edge
+    v2 = call v1, v0                       ; t.91
+    ret v2
+
+-- val second : string
+func $second:
+  b0:
+    v0 = const 3
+    v1 = global edge
+    v2 = call v1, v0                       ; t.92
+    v3 = const "!"
+    v4 = prim ^ v2, v3                     ; t.93
+    ret v4
+
+-- val third : string
+func $third:
+  b0:
+    v0 = const 3
+    v1 = global edge
+    v2 = call v1, v0                       ; t.94
+    v3 = const "?"
+    v4 = prim ^ v3, v2                     ; t.95
+    ret v4
+
