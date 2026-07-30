@@ -1,0 +1,31 @@
+(* Constructors that carry nothing, and the optimiser.
+
+   Every datatype numbers its constructors from zero, so an index on its own
+   does not say which constructor a value is: `nil`, `false`, `NONE` and the
+   first constructor of any datatype written here are all number zero, and
+   `::`, `true` and `SOME` are all number one.  A pass that materialises `true`
+   or `false` has to ask for the type as well, or it hands back whichever
+   nullary constructor was already lying about.
+
+   So each line below asks the optimiser to fold a comparison down to a boolean
+   in a function that already has some other nullary constructor in it.  The
+   interpreter never had the choice to get wrong, which is what makes the two
+   halves worth diffing here. *)
+
+datatype colour = Red | Green | Blue
+
+val fromList = (let val v = ([] : int list) in false end) orelse (let val w = ([] : int list) in false end)
+val fromCons = (let val v = [1] in true end) andalso (let val w = [2] in true end)
+val fromColour = (let val v = Red in false end) orelse (let val w = Green in false end)
+val fromColour2 = (let val v = Green in true end) andalso (let val w = Blue in true end)
+val fromOption = (let val v = (NONE : int option) in false end) orelse (let val w = (SOME 1) in false end)
+
+fun both (x : int) =
+  let
+    val here = ([] : int list)
+    val there = Red
+  in
+    (x = x, x <> x, here, there)
+  end
+
+val pair = both 3

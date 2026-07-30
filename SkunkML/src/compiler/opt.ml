@@ -136,8 +136,19 @@ let bool_con b =
 let entry_bool ctx (f : S.func) b =
   let c = bool_con b in
   let entry = f.S.entry in
+  (* Which constructor a value is takes *both* numbers: an index on its own says
+     "the first one" or "the second one" of some datatype, and every datatype
+     has those.  `nil` and `false` are both the first, `::` and `true` are both
+     the second, so matching on the index alone hands back whichever nullary
+     constructor happened to be in the entry block already -- and `false` comes
+     out printing as `[]`. *)
   let same (v : S.value) =
-    match v.S.op with S.Con c' -> c'.Types.cidx = c.Types.cidx && v.S.args = [] | _ -> false
+    match v.S.op with
+    | S.Con c' ->
+        c'.Types.cres.Types.tid = c.Types.cres.Types.tid
+        && c'.Types.cidx = c.Types.cidx
+        && v.S.args = []
+    | _ -> false
   in
   match List.find_opt same entry.S.values with
   | Some v -> v

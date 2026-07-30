@@ -365,6 +365,37 @@
  (action
   (diff spelling.expected spelling.bin.out)))
 
+; Nullary constructors: two datatypes number theirs the same way, so a pass
+; that materialises one has to say which type it means.  Both halves are
+; diffed against the same golden file, and only the optimised half could
+; ever have got it wrong.
+
+(rule
+ (with-stdout-to
+  nullary.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:nullary.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff nullary.expected nullary.interp.out)))
+
+(rule
+ (targets nullary.bin)
+ (deps nullary.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o nullary.bin nullary.sk)))
+
+(rule
+ (with-stdout-to
+  nullary.bin.out
+  (run %{dep:nullary.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff nullary.expected nullary.bin.out)))
+
 ; The optimiser.  opt.sk has one redundancy per line, each of a kind only one
 ; pass can see; the golden file is the SSA that comes out the far side.  Read it
 ; next to `--no-opt --dump-ssa` on the same file to see what each pass did.
