@@ -83,7 +83,10 @@ let rbx = M.R 8
 let r12 = M.R 9
 let r13 = M.R 10
 let r14 = M.R 11
+let r11 = M.R 7
+let r15 = M.R 12
 let r10 = M.R 13
+let rsp = M.R 14
 let o r = M.Reg r
 let imm n = M.Imm n
 let mem ?base ?index ?(scale = 1) ?(disp = 0) ?sym () = M.Mem { base; index; scale; disp; sym }
@@ -130,6 +133,7 @@ let k_string = 2
 let k_closure = 3
 let k_array = 4
 let k_ref = 5
+let k_free = 6
 let out_size = 4096
 
 (* String literals the runtime itself needs.  They are interned so that the
@@ -249,73 +253,439 @@ let output =
 
 (* ---- the heap ------------------------------------------------------------ *)
 
-(* A bump allocator that never gives anything back, which is what the
-   interpreter's store does too.  With no garbage collector the honest thing is
-   to let it grow and say so. *)
+(* One anonymous mapping holds everything the collector needs.  The sizes are
+   fixed at start-up: the heap does not grow, because growing it would mean
+   growing the two maps beside it and there is nothing in the design that wants
+   that badly.  Virtual address space is free -- only the pages actually touched
+   become resident -- so the maps and the mark stack are generously sized rather
+   than cleverly sized.
+
+     0                     the heap
+     heap_bytes            starts: one byte per heap word
+     + map_bytes           marks:  one byte per heap word
+     + map_bytes           the mark stack
+
+   A byte per word rather than a bit per word is a deliberate trade.  A bit map
+   is eight times smaller and needs a variable shift to address; a byte map is a
+   single load or store with no arithmetic beyond the index, and the eight times
+   is virtual. *)
+
+let heap_bytes = 1 lsl 26
+let heap_words = heap_bytes / 8
+let map_bytes = heap_words
+let mstack_bytes = heap_words / 2 * 8
+
 let heap =
   [
-    (* grow(rdi = bytes needed) *)
-    L "rt_grow";
-    push rbx;
-    movr rbx rdi;
-    movi r9 0x4000000;
-    L "rt_grow.size";
-    movr rax rbx;
-    add rax (imm 64);
-    cmp r9 (o rax);
-    Br ("ge", "rt_grow.go");
-    shl r9 1;
-    Jump "rt_grow.size";
-    L "rt_grow.go";
-    movr rsi r9 (* length *);
+    L "rt_heap_init";
     movi rax 9 (* mmap *);
     movi rdi 0 (* let the kernel choose *);
+    movi rsi (heap_bytes + (2 * map_bytes) + mstack_bytes);
     movi rdx 3 (* PROT_READ | PROT_WRITE *);
     movi r10 0x22 (* MAP_PRIVATE | MAP_ANONYMOUS *);
     movi r8 (-1);
     movi r9 0;
     syscall;
     cmp rax (imm 0);
-    Br ("l", "rt_grow.fail");
-    store (glob "skunk_heap_next") rax;
+    Br ("l", "rt_heap_init.fail");
+    store (glob "skunk_heap_start") rax;
+    store (glob "skunk_cursor") rax;
     movr rdx rax;
-    add rdx (o rsi);
+    add rdx (imm heap_bytes);
     store (glob "skunk_heap_end") rdx;
-    pop rbx;
+    store (glob "skunk_starts") rdx;
+    add rdx (imm map_bytes);
+    store (glob "skunk_marks") rdx;
+    add rdx (imm map_bytes);
+    store (glob "skunk_mstack") rdx;
+    (* One free block covering the whole heap. *)
+    lea rdx (glob "skunk_free_desc");
+    store (at rax) rdx;
+    movi rdx heap_words;
+    store (at ~disp:8 rax) rdx;
     Ret;
-    L "rt_grow.fail";
+    L "rt_heap_init.fail";
   ]
-  @ complain "out of memory"
+  @ complain "cannot map the heap"
   @ [
+      (* block_words(rdi = a block's header) -> rax, always even.
+         Every walk over the heap needs this, and the descriptor is not quite
+         enough on its own: a string and an array carry their own length, so
+         their size is in the block rather than in the shared descriptor. *)
+      L "rt_block_words";
+      load rdx (at rdi);
+      lea rax (glob "skunk_free_desc");
+      cmp rdx (o rax);
+      Br ("ne", "rt_block_words.live");
+      load rax (at ~disp:8 rdi);
+      Ret;
+      L "rt_block_words.live";
+      load rcx (at ~disp:d_kind rdx);
+      cmp rcx (imm k_string);
+      Br ("e", "rt_block_words.string");
+      cmp rcx (imm k_array);
+      Br ("e", "rt_block_words.array");
+      load rax (at ~disp:d_nfields rdx);
+      add rax (imm 1);
+      Jump "rt_block_words.round";
+      L "rt_block_words.string";
+      load rax (at ~disp:8 rdi);
+      add rax (imm 8);
+      sar rax 3;
+      add rax (imm 2);
+      Jump "rt_block_words.round";
+      L "rt_block_words.array";
+      load rax (at ~disp:8 rdi);
+      add rax (imm 2);
+      L "rt_block_words.round";
+      (* Every block is an even number of words, so that a gap is never one word
+         long -- a free block has to hold a marker and a size. *)
+      add rax (imm 1);
+      alu "and" rax (imm (-2));
+      Ret;
+      (* find(rdi = words wanted) -> rax = a header, or 0.
+         Next-fit: walk on from where the last allocation stopped, merging
+         adjacent free blocks as it goes.  Sweeping does not build a free list or
+         coalesce anything; both happen here, lazily, only where allocation
+         actually looks. *)
+      L "rt_find";
+      push rbx;
+      push r12;
+      push r13;
+      push r14;
+      movr rbx rdi;
+      load r12 (glob "skunk_cursor");
+      load r13 (glob "skunk_heap_end");
+      lea r14 (glob "skunk_free_desc");
+      L "rt_find.loop";
+      cmp r12 (o r13);
+      Br ("ge", "rt_find.none");
+      load rax (at r12);
+      cmp rax (o r14);
+      Br ("e", "rt_find.free");
+      movr rdi r12;
+      Cl "rt_block_words";
+      shl rax 3;
+      add r12 (o rax);
+      Jump "rt_find.loop";
+      L "rt_find.free";
+      load rcx (at ~disp:8 r12);
+      L "rt_find.merge";
+      movr rax rcx;
+      shl rax 3;
+      movr rdx r12;
+      add rdx (o rax);
+      cmp rdx (o r13);
+      Br ("ge", "rt_find.merged");
+      load rax (at rdx);
+      cmp rax (o r14);
+      Br ("ne", "rt_find.merged");
+      load rax (at ~disp:8 rdx);
+      add rcx (o rax);
+      store (at ~disp:8 r12) rcx;
+      Jump "rt_find.merge";
+      L "rt_find.merged";
+      cmp rcx (o rbx);
+      Br ("l", "rt_find.skip");
+      (* Carve.  The remainder is even, because everything here is, so it is
+         either nothing or big enough to be a free block of its own. *)
+      movr rax rbx;
+      shl rax 3;
+      movr rdx r12;
+      add rdx (o rax);
+      movr r8 rcx;
+      sub r8 (o rbx);
+      cmp r8 (imm 0);
+      Br ("e", "rt_find.exact");
+      store (at rdx) r14;
+      store (at ~disp:8 rdx) r8;
+      L "rt_find.exact";
+      store (glob "skunk_cursor") rdx;
+      movr rax r12;
+      pop r14;
+      pop r13;
+      pop r12;
+      pop rbx;
+      Ret;
+      L "rt_find.skip";
+      movr rax rcx;
+      shl rax 3;
+      add r12 (o rax);
+      Jump "rt_find.loop";
+      L "rt_find.none";
+      movi rax 0;
+      pop r14;
+      pop r13;
+      pop r12;
+      pop rbx;
+      Ret;
       (* alloc(rdi = descriptor, rsi = words after the header) -> rax *)
       L "skunk_alloc";
-      movr rax rsi;
-      add rax (imm 1);
-      shl rax 3;
-      load rcx (glob "skunk_heap_next");
-      movr rdx rcx;
-      add rdx (o rax);
-      load r8 (glob "skunk_heap_end");
-      cmp rdx (o r8);
-      Br ("le", "skunk_alloc.ok");
-      push rdi;
-      push rsi;
-      movr rdi rax;
-      Cl "rt_grow";
-      pop rsi;
-      pop rdi;
-      movr rax rsi;
-      add rax (imm 1);
-      shl rax 3;
-      load rcx (glob "skunk_heap_next");
-      movr rdx rcx;
-      add rdx (o rax);
-      L "skunk_alloc.ok";
-      store (glob "skunk_heap_next") rdx;
-      store (at rcx) rdi;
-      lea rax (at ~disp:8 rcx);
+      push rbx;
+      push r12;
+      movr rbx rdi;
+      movr r12 rsi;
+      add r12 (imm 2);
+      alu "and" r12 (imm (-2));
+      movr rdi r12;
+      Cl "rt_find";
+      cmp rax (imm 0);
+      Br ("ne", "skunk_alloc.got");
+      Cl "rt_collect";
+      movr rdi r12;
+      Cl "rt_find";
+      cmp rax (imm 0);
+      Br ("e", "skunk_alloc.full");
+      L "skunk_alloc.got";
+      store (at rax) rbx;
+      add rax (imm 8);
+      (* Record that a block starts here.  This one byte is what makes a
+         conservative scan safe: an address that is not a block's start is not a
+         pointer, whatever it looks like. *)
+      movr rcx rax;
+      load rdx (glob "skunk_heap_start");
+      sub rcx (o rdx);
+      sar rcx 3;
+      load rdx (glob "skunk_starts");
+      movi r8 1;
+      storeb (byte_at rdx rcx) r8;
+      pop r12;
+      pop rbx;
       Ret;
+      L "skunk_alloc.full";
     ]
+  @ complain "out of memory"
+
+(* ---- the collector ------------------------------------------------------- *)
+
+(* Mark and sweep, with conservative roots.
+
+   The problem a collector has to solve first is *what is a root*.  Precise
+   answers are expensive: either the compiler emits a map of the live registers
+   and frame slots at every allocation site, or the generated code maintains a
+   shadow stack.  The cheap answer is to look at every word of the stack and the
+   data section and ask "could this be a pointer?" -- and the reason it is safe
+   here is that nothing moves.  A word that looks like a pointer but is not one
+   keeps an object alive that could have been freed; it never breaks anything.
+
+   Two things make the guess good.  An integer is 2n + 1, so an integer can
+   never be mistaken for a pointer.  And the starts map says where blocks
+   actually begin, so a word that lands in the heap but not on a block's start
+   is rejected outright rather than followed into nonsense.
+
+   The registers are roots too.  The allocator's caller may be holding a pointer
+   in a callee-saved register -- register allocation puts anything live across a
+   call there or in a frame slot ([13章](../doc/13-regalloc.md)) -- so the
+   collector pushes all of them and lets the stack scan find them.
+
+   Partly built objects are safe for the same reason nothing else has to be
+   careful: a recursive group of closures is allocated before its captures are
+   filled in, so tracing one can read whatever the free block used to hold.  It
+   is checked against the starts map like anything else. *)
+let collector =
+  [
+    (* mark(rdi = a candidate) *)
+    L "rt_mark";
+    movr rax rdi;
+    alu "and" rax (imm 7);
+    cmp rax (imm 0);
+    Br ("ne", "rt_mark.no");
+    load rcx (glob "skunk_heap_start");
+    cmp rdi (o rcx);
+    Br ("le", "rt_mark.no");
+    load rdx (glob "skunk_heap_end");
+    cmp rdi (o rdx);
+    Br ("ge", "rt_mark.no");
+    movr rax rdi;
+    sub rax (o rcx);
+    sar rax 3;
+    load rcx (glob "skunk_starts");
+    loadb rdx (byte_at rcx rax);
+    cmp rdx (imm 0);
+    Br ("e", "rt_mark.no");
+    load rcx (glob "skunk_marks");
+    loadb rdx (byte_at rcx rax);
+    cmp rdx (imm 0);
+    Br ("ne", "rt_mark.no");
+    movi rdx 1;
+    storeb (byte_at rcx rax) rdx;
+    load rcx (glob "skunk_mstack");
+    load rdx (glob "skunk_mtop");
+    store (idx rcx rdx) rdi;
+    add rdx (imm 1);
+    store (glob "skunk_mtop") rdx;
+    L "rt_mark.no";
+    Ret;
+    (* scan(rdi = from, rsi = to): every word, conservatively *)
+    L "rt_scan";
+    push rbx;
+    push r12;
+    movr rbx rdi;
+    movr r12 rsi;
+    L "rt_scan.loop";
+    cmp rbx (o r12);
+    Br ("ge", "rt_scan.done");
+    load rdi (at rbx);
+    Cl "rt_mark";
+    add rbx (imm 8);
+    Jump "rt_scan.loop";
+    L "rt_scan.done";
+    pop r12;
+    pop rbx;
+    Ret;
+    (* trace(rdi = a marked value): mark what it points at.
+       Which words are pointers is exactly what the descriptor says.  Three
+       kinds have a word that is not a value: a string's length, an array's
+       length, and a closure's code address -- and that last one matters,
+       because a code address is 8-aligned and would otherwise be followed. *)
+    L "rt_trace";
+    push rbx;
+    push r12;
+    push r13;
+    push r14;
+    movr rbx rdi;
+    load r12 (at ~disp:(-8) rbx);
+    load rax (at ~disp:d_kind r12);
+    cmp rax (imm k_string);
+    Br ("e", "rt_trace.done");
+    cmp rax (imm k_array);
+    Br ("e", "rt_trace.array");
+    cmp rax (imm k_closure);
+    Br ("e", "rt_trace.closure");
+    load r13 (at ~disp:d_nfields r12);
+    movi r14 0;
+    Jump "rt_trace.field";
+    L "rt_trace.closure";
+    load r13 (at ~disp:d_nfields r12);
+    movi r14 1;
+    Jump "rt_trace.field";
+    L "rt_trace.array";
+    load r13 (at rbx);
+    add r13 (imm 1);
+    movi r14 1;
+    L "rt_trace.field";
+    cmp r14 (o r13);
+    Br ("ge", "rt_trace.done");
+    load rdi (idx rbx r14);
+    Cl "rt_mark";
+    add r14 (imm 1);
+    Jump "rt_trace.field";
+    L "rt_trace.done";
+    pop r14;
+    pop r13;
+    pop r12;
+    pop rbx;
+    Ret;
+    (* The mark stack has room for one entry per smallest possible block, so it
+       cannot overflow and there is no overflow path to get wrong. *)
+    L "rt_drain";
+    load rdx (glob "skunk_mtop");
+    cmp rdx (imm 0);
+    Br ("le", "rt_drain.done");
+    sub rdx (imm 1);
+    store (glob "skunk_mtop") rdx;
+    load rcx (glob "skunk_mstack");
+    load rdi (idx rcx rdx);
+    Cl "rt_trace";
+    Jump "rt_drain";
+    L "rt_drain.done";
+    Ret;
+    (* One linear pass.  A live block loses its mark and stays; a dead one loses
+       its start byte and becomes a free block.  Adjacent free blocks are left
+       adjacent -- merging them is the allocator's job, and it only does it where
+       it looks. *)
+    L "rt_sweep";
+    push rbx;
+    push r12;
+    push r13;
+    load rbx (glob "skunk_heap_start");
+    load r12 (glob "skunk_heap_end");
+    lea r13 (glob "skunk_free_desc");
+    L "rt_sweep.loop";
+    cmp rbx (o r12);
+    Br ("ge", "rt_sweep.done");
+    load rax (at rbx);
+    cmp rax (o r13);
+    Br ("e", "rt_sweep.free");
+    movr rdi rbx;
+    Cl "rt_block_words";
+    push rax;
+    movr rax rbx;
+    add rax (imm 8);
+    load rcx (glob "skunk_heap_start");
+    sub rax (o rcx);
+    sar rax 3;
+    load rcx (glob "skunk_marks");
+    loadb rdx (byte_at rcx rax);
+    cmp rdx (imm 0);
+    Br ("e", "rt_sweep.dead");
+    movi rdx 0;
+    storeb (byte_at rcx rax) rdx;
+    pop rax;
+    Jump "rt_sweep.next";
+    L "rt_sweep.dead";
+    load rcx (glob "skunk_starts");
+    movi rdx 0;
+    storeb (byte_at rcx rax) rdx;
+    pop rax;
+    store (at rbx) r13;
+    store (at ~disp:8 rbx) rax;
+    L "rt_sweep.next";
+    shl rax 3;
+    add rbx (o rax);
+    Jump "rt_sweep.loop";
+    L "rt_sweep.free";
+    load rax (at ~disp:8 rbx);
+    shl rax 3;
+    add rbx (o rax);
+    Jump "rt_sweep.loop";
+    L "rt_sweep.done";
+    load rax (glob "skunk_heap_start");
+    store (glob "skunk_cursor") rax;
+    pop r13;
+    pop r12;
+    pop rbx;
+    Ret;
+    L "rt_collect";
+    (* Every register, so that the stack scan sees them. *)
+    push rax;
+    push rcx;
+    push rdx;
+    push rsi;
+    push rdi;
+    push r8;
+    push r9;
+    push r10;
+    push r11;
+    push rbx;
+    push r12;
+    push r13;
+    push r14;
+    push r15;
+    lea rdi (glob "skunk_data_start");
+    lea rsi (glob "skunk_data_end");
+    Cl "rt_scan";
+    movr rdi rsp;
+    load rsi (glob "skunk_stack_top");
+    Cl "rt_scan";
+    Cl "rt_drain";
+    Cl "rt_sweep";
+    pop r15;
+    pop r14;
+    pop r13;
+    pop r12;
+    pop rbx;
+    pop r11;
+    pop r10;
+    pop r9;
+    pop r8;
+    pop rdi;
+    pop rsi;
+    pop rdx;
+    pop rcx;
+    pop rax;
+    Ret;
+  ]
 
 (* ---- failing ------------------------------------------------------------- *)
 
@@ -1179,8 +1549,10 @@ let printing =
 let start =
   [
     L "_start";
-    movi rdi 0;
-    Cl "rt_grow";
+    (* The stack goes down from here, and the collector needs to know where "up"
+       is: everything between the current rsp and this is a root. *)
+    store (glob "skunk_stack_top") rsp;
+    Cl "rt_heap_init";
     lea rdi (glob "skunk_unit_desc");
     movi rsi 0;
     Cl "skunk_alloc";
@@ -1194,8 +1566,8 @@ let start =
 
 let text st =
   emit st
-    (start @ output @ heap @ failures @ strings @ equality @ order @ arithmetic @ arrays @ lists
-    @ printing)
+    (start @ output @ heap @ collector @ failures @ strings @ equality @ order @ arithmetic
+    @ arrays @ lists @ printing)
 
 (* ---- static data --------------------------------------------------------- *)
 
@@ -1219,6 +1591,18 @@ let descriptor st name ~kind ~nfields ~con ~labels ~list ~tag =
   (match labels with None -> A.dq st 0 | Some s -> A.dq_sym st s);
   A.dq st list;
   A.dq st tag
+
+(* The whole data section is scanned conservatively for roots, so the collector
+   needs to know where it starts and ends.  Everything in it is fair game: a
+   global's word really does point into the heap, and the rest -- descriptors,
+   static blocks, the output buffer -- is checked and rejected. *)
+let data_start st =
+  A.align st 8;
+  A.label st "skunk_data_start"
+
+let data_end st =
+  A.align st 8;
+  A.label st "skunk_data_end"
 
 let data st =
   descriptor st "skunk_string_desc" ~kind:k_string ~nfields:0 ~con:None ~labels:None ~list:0 ~tag:0;
@@ -1245,10 +1629,23 @@ let data st =
   A.align st 8;
   A.dq_sym st "skunk_nil_desc";
   A.label st "skunk_nil";
+  descriptor st "skunk_free_desc" ~kind:k_free ~nfields:0 ~con:None ~labels:None ~list:0 ~tag:0;
   A.align st 8;
-  A.label st "skunk_heap_next";
+  A.label st "skunk_heap_start";
   A.dq st 0;
   A.label st "skunk_heap_end";
+  A.dq st 0;
+  A.label st "skunk_cursor";
+  A.dq st 0;
+  A.label st "skunk_starts";
+  A.dq st 0;
+  A.label st "skunk_marks";
+  A.dq st 0;
+  A.label st "skunk_mstack";
+  A.dq st 0;
+  A.label st "skunk_mtop";
+  A.dq st 0;
+  A.label st "skunk_stack_top";
   A.dq st 0;
   A.label st "skunk_the_unit";
   A.dq st 0;

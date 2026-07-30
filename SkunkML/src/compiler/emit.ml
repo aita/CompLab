@@ -119,6 +119,8 @@ let program (p : M.prog) ~path =
   program_entry text p;
   Stubs.text text;
   Rt.text text;
+  Rt.data_start data;
   Statics.write data;
   Rt.data data;
+  Rt.data_end data;
   Link.link ~path ~text ~data ~entry:"_start"

@@ -320,3 +320,34 @@
  (alias runtest)
  (action
   (diff selftest.expected selftest.bin.out)))
+
+; The collector.  This one allocates about three heaps' worth of garbage, so it
+; only finishes if collection happens; and the value it prints only comes out
+; right if tracing followed the right words.  Both the interpreter and the
+; compiled program are diffed against the same golden file.
+
+(rule
+ (with-stdout-to
+  gc.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:gc.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gc.expected gc.interp.out)))
+
+(rule
+ (targets gc.bin)
+ (deps gc.sk)
+ (action
+  (run %{exe:../src/compiler/skunkc.exe} -o gc.bin gc.sk)))
+
+(rule
+ (with-stdout-to
+  gc.bin.out
+  (run %{dep:gc.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gc.expected gc.bin.out)))

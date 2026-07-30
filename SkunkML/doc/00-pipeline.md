@@ -31,7 +31,7 @@
           Mach.prog       本物のレジスタとフレーム
             │  emit.ml + asm.ml + link.ml + elf.ml（[14章](14-elf.md)）
             ▼
-          静的 ELF64      libc なし。実行時ライブラリも amd64 で書いてある
+          静的 ELF64      libc なし。実行時ライブラリと GC も amd64 で書いてある
 ```
 
 ## 1. 字句解析

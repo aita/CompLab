@@ -77,6 +77,7 @@ let to_flat env globals ~file ~source =
 let selftest path =
   let open Rt in
   let text = Asm.create () and data = Asm.create () in
+  Rt.data_start data;
   Asm.label text "skunk_program";
   let tagged n = imm ((2 * n) + 1) in
   (* The value first: computing it takes rdi, so the label goes in last. *)
@@ -161,6 +162,7 @@ let selftest path =
   block "t_con" "t_con_desc" [ `Int 7 ];
   block "t_clos" "t_clos_desc" [ `Int 0 ];
   Rt.data data;
+  Rt.data_end data;
   Link.link ~path ~text ~data ~entry:"_start"
 
 (* The corner cases of the encoding, as bytes.  Every line here was checked

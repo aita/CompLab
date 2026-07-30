@@ -315,7 +315,7 @@ And the compiler, in `src/compiler/`:
 | `asm.ml` | 311 | the assembler: REX, ModRM, SIB, and the relocations |
 | `link.ml` | 62 | addresses, symbols, and patching the holes |
 | `elf.ml` | 103 | a static ELF64 with two segments |
-| `rt.ml` | 1263 | the runtime, in amd64: the heap, equality, strings, `show` |
+| `rt.ml` | 1660 | the runtime, in amd64: the heap and the collector, equality, strings, `show` |
 | `skunkc.ml` | 330 | the command line, and the hand-built self-test |
 
 ## Layout

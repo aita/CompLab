@@ -124,8 +124,18 @@ re-running until it fits.
 Then it writes the executable itself. There is no `as` and no `ld` after
 selection: the compiler encodes the instructions, assigns the addresses, patches
 the relocations and writes a static ELF64 -- and since there is no linker to
-hand a C object to, the runtime is written in amd64 too. `mmap` for the heap,
-`write` for output, `exit` at the end, and no libc.
+hand a C object to, the runtime is written in amd64 too -- including the garbage
+collector. `mmap` for the heap, `write` for output, `exit` at the end, and no
+libc.
+
+The collector is mark-sweep with conservative roots, and the one decision that
+shapes it is that roots are *guessed* rather than known: every word of the stack
+and the data section is asked "could this be a pointer?". That is safe here only
+because nothing moves -- a word that looks like a pointer but is not one keeps an
+object alive, and never breaks anything. Two things make the guess good: an
+integer is 2n + 1, so an integer can never be mistaken for a pointer, and a map
+with a byte per heap word says where blocks actually start, so a raw length that
+lands in the heap is rejected rather than followed into nonsense.
 
 ```sh
 $ ./_build/default/src/compiler/skunkc.exe -o /tmp/tour examples/tour.sk
