@@ -284,9 +284,9 @@ let rec reaches_fail = function
 let rec compile_block (b : C.block) : C.block =
   match b with
   | C.Let (x, t, rhs, rest) -> C.Let (x, t, compile_rhs rhs, compile_block rest)
-  | C.LetRec (fns, rest) ->
-      C.LetRec
-        ( List.map (fun f -> { f with C.fn_body = compile_block f.C.fn_body }) fns,
+  | C.Fix (defs, rest) ->
+      C.Fix
+        ( List.map (fun (x, t, r) -> (x, t, compile_rhs r)) defs,
           compile_block rest )
   | C.Join (j, ps, body, rest) -> C.Join (j, ps, compile_block body, compile_block rest)
   | C.Tail t -> compile_tail t

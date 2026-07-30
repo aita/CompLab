@@ -19,7 +19,7 @@
 
 ```ocaml
 and make_closure st name param body =
-  let free = Set.diff (Set.remove param (fv_block body)) st.globals in
+  let free = Set.diff (Set.remove param (C.free_vars body)) st.globals in
   let caps = Set.elements free in
   let label = fresh_label name in
   let inner = conv st body in
@@ -72,7 +72,7 @@ code adder$1 (a1.19) =
 
 ```
 -- val adder : int -> int -> int
-let rec adder = closure adder$1 []
+let adder = closure adder$1 []
 ret adder
 ```
 
@@ -91,16 +91,16 @@ ret adder
 定義したブロックの内側からだけ（[6章](6-join.md)の4節）。跳んだ時点でその値はまだ
 そこにあります。
 
-自由変数の計算のほうも、join point を素通しします。
+自由変数の計算（`core.ml` にあります）のほうも、join point を素通しします。
 
 ```ocaml
-| C.Join (_, ps, body, rest) ->
+| Join (_, ps, body, rest) ->
     let bound = List.map fst ps in
-    Set.union
-      (List.fold_left (fun s x -> Set.remove x s) (fv_block body) bound)
-      (fv_block rest)
+    Vars.union
+      (List.fold_left (fun s x -> Vars.remove x s) (free_vars body) bound)
+      (free_vars rest)
 | ...
-| C.Jump (_, ats) -> atoms_var ats
+| Jump (_, ats) -> atoms_var ats
 ```
 
 `Jump` が寄与するのは**引数だけ**です。ラベル名は変数ではありません。
@@ -133,17 +133,17 @@ and odd 0 = false | odd n = even (n - 1)
 
 `even` は `odd` を捕獲し、`odd` は `even` を捕獲します。どちらも相手より先には作れません。
 
-Flat には専用の形があります。
+Flat には専用の形があります。Core の `Fix` がそのまま来たものです。
 
 ```ocaml
-| LetRec of (string * string * atom list) list * block
+| Fix of (string * rhs) list * block      (* rhs はどれも Closure *)
 ```
 
 機械が、まず全部のクロージャを（捕獲は空のまま）作って名前に束縛し、そのあとで捕獲を
 埋めます。
 
 ```ocaml
-let made = List.map (fun (name, label, caps) ->
+let made = List.map (fun (name, F.Closure (label, caps)) ->
     let base = alloc w (max (List.length caps) 1) in
     (name, VClos (label, base, List.length caps), base, caps)) defs in
 let env = List.fold_left (fun env (name, v, _, _) -> bind w env name v) st.env made in
@@ -154,8 +154,16 @@ List.iter (fun (_, _, base, caps) ->
 番地を先に確保してから中身を書く、という順序です。ストアがあるので、これが「後から
 埋める」の自然な書き方になっています（[8章](8-cesk.md)）。
 
-トップレベルの相互再帰はグローバル表を経由するので、この形にはなりません
-（[4章](4-core.md)の6節）。上の例で `even` と `odd` の捕獲が空なのはそのためです。
+トップレベルの相互再帰はグローバル表を経由するので、捕獲は空になります。
+
+```
+fix even = closure even$1 []
+and odd = closure odd$2 []
+```
+
+そして**再帰していない関数はここに来ません**。`fun` は SML の綴りでは常に再帰的ですが、
+自分の名前が本体に出てこなければ `Fix` にはならず、ふつうの `Let` になります
+（[4章](4-core.md)の6節）。`adder` の行が `let` なのはそのためです。
 
 ## 4. 型はここで消える
 
@@ -177,7 +185,7 @@ code twice$3 (a1.20) =
 
 ## していないこと
 
-- **既知関数の直接呼び出しがありません。** `letrec` で束縛した関数を飽和して呼ぶときも、
+- **既知関数の直接呼び出しがありません。** `Fix` で束縛した関数を飽和して呼ぶときも、
   クロージャを取り出してから呼びます。ラベルへ直接跳べる場合を見分ければ1段減らせます。
 - **捕獲の共有がありません。** 同じ環境を捕獲する複数のクロージャが、それぞれ自分の
   ブロックを確保します。共有すればヒープが減ります（Shao–Appel のクロージャ変換の
@@ -206,9 +214,10 @@ code twice$3 (a1.20) =
 
 | ファイル | 何が |
 |---|---|
-| `src/closure.ml` | `fv_block`/`fv_rhs`/`fv_tail`（2節）、`make_closure`（1節）、`conv` の `C.Join`（2節）、`conv` の `C.LetRec`（3節）、`program`（グローバルの受け取り） |
-| `src/flat.ml` | `Closure`/`Capture`/`LetRec`/`code`（1・3節）、`program_to_string`（ダンプ） |
-| `src/machine.ml` | `enter`（クロージャに入る）、`F.LetRec`（3節）、`eval` の `F.Closure`/`F.Capture` |
+| `src/closure.ml` | `make_closure`（1節）、`conv_closure`（ラムダを閉じる唯一の場所）、`conv` の `C.Join`（2節）、`conv` の `C.Fix`（3節）、`program`（グローバルの受け取り） |
+| `src/flat.ml` | `Closure`/`Capture`/`Fix`/`code`（1・3節）、`program_to_string`（ダンプ） |
+| `src/machine.ml` | `enter`（クロージャに入る）、`F.Fix`（3節）、`eval` の `F.Closure`/`F.Capture` |
+| `src/core.ml` | `free_vars`/`free_rhs`/`free_tail`（2節）。自由変数は IR のものなので IR の側に置いてあります |
 
 ---
 

@@ -1,5 +1,5 @@
 -- val swap : 'a * 'b -> 'b * 'a
-let rec swap : '_7 * '_6 -> '_6 * '_7 = fn a1.19 =>
+let swap : '_7 * '_6 -> '_6 * '_7 = fn a1.19 : '_7 * '_6 =>
   let p.57 : '_7 = #1 a1.19
   let p.58 : '_6 = #2 a1.19
   let a : '_7 = p.57
@@ -8,7 +8,7 @@ let rec swap : '_7 * '_6 -> '_6 * '_7 = fn a1.19 =>
   ret t.60
 ret swap
 -- val pick : bool * int -> string
-let rec pick : bool * int -> string = fn a1.20 =>
+let pick : bool * int -> string = fn a1.20 : bool * int =>
   join arm () =
     ret "two"
   join arm.2 () =
@@ -32,7 +32,7 @@ let rec pick : bool * int -> string = fn a1.20 =>
           jump arm.2 ()
 ret pick
 -- val sum : int * int -> int
-let rec sum : int * int -> int = fn a1.21 =>
+fix sum : int * int -> int = fn a1.21 : int * int =>
   let p.61 : int = #1 a1.21
   let p.62 : int = #2 a1.21
   let n.2 : int = p.61
@@ -48,7 +48,7 @@ let rec sum : int * int -> int = fn a1.21 =>
       tailcall sum t.64
 ret sum
 -- val depth : 'a list -> int
-let rec depth : '_31 list -> int = fn a1.22 =>
+fix depth : '_31 list -> int = fn a1.22 : '_31 list =>
   let xs.13 : '_31 list = a1.22
   join k (v : int) =
     let t.66 : int = +(1, v)

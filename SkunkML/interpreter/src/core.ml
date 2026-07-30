@@ -56,11 +56,15 @@ type rhs =
 
 and block =
   | Let of string * Types.ty * rhs * block
-  | LetRec of fn list * block
+  (* A group of bindings that can see each other.  SML/NJ calls this FIX and
+     so does this: there is no `let rec` in the language, only `fun`, and a
+     `fun` group that turns out not to recur is emitted as plain [Let]s -- so
+     a `fix` in a dump means something really does refer to itself.  Every
+     right-hand side here is a [Lam]; a function has one representation, not
+     two. *)
+  | Fix of (string * Types.ty * rhs) list * block
   | Join of label * (string * Types.ty) list * block * block
   | Tail of tail
-
-and fn = { fn_name : string; fn_ty : Types.ty; fn_param : string; fn_body : block }
 
 and tail =
   | Ret of atom
@@ -106,6 +110,64 @@ type item = {
   ishow : bool;
 }
 
+(* Free variables.  Closure conversion needs them to decide what to capture,
+   and the elaborator needs them one question at a time: does this `fun` group
+   actually refer to itself?  A join label is not a variable, so a [Jump]
+   contributes only its arguments. *)
+module Vars = Set.Make (String)
+
+let atom_var = function AVar x -> Vars.singleton x | _ -> Vars.empty
+
+let atoms_var ats =
+  List.fold_left (fun s a -> Vars.union s (atom_var a)) Vars.empty ats
+
+let rec free_vars (b : block) =
+  match b with
+  | Let (x, _, rhs, rest) -> Vars.union (free_rhs rhs) (Vars.remove x (free_vars rest))
+  | Fix (defs, rest) ->
+      let names = List.map (fun (x, _, _) -> x) defs in
+      let inside =
+        List.fold_left (fun s (_, _, r) -> Vars.union s (free_rhs r)) (free_vars rest) defs
+      in
+      List.fold_left (fun s n -> Vars.remove n s) inside names
+  | Join (_, ps, body, rest) ->
+      let bound = List.map fst ps in
+      Vars.union
+        (List.fold_left (fun s x -> Vars.remove x s) (free_vars body) bound)
+        (free_vars rest)
+  | Tail t -> free_tail t
+
+and free_rhs = function
+  | Atom a -> atom_var a
+  | Lam (x, _, body) -> Vars.remove x (free_vars body)
+  | Call (f, a) -> Vars.union (atom_var f) (atom_var a)
+  | Prim (_, ats) | Tuple ats -> atoms_var ats
+  | Record fs -> atoms_var (List.map snd fs)
+  | Con (_, None) -> Vars.empty
+  | Con (_, Some a) | Proj (a, _) | Field (a, _) | Payload a -> atom_var a
+
+and free_tail = function
+  | Ret a -> atom_var a
+  | TCall (f, a) -> Vars.union (atom_var f) (atom_var a)
+  | Jump (_, ats) -> atoms_var ats
+  | Fail _ -> Vars.empty
+  | Switch (a, bs, d) ->
+      let s = List.fold_left (fun s (_, b) -> Vars.union s (free_vars b)) (atom_var a) bs in
+      (match d with None -> s | Some b -> Vars.union s (free_vars b))
+  | Case (a, _, arms, _) ->
+      List.fold_left (fun s arm -> Vars.union s (free_vars arm.abody)) (atom_var a) arms
+
+(* A `fun` group is only a [Fix] if one of its names really occurs in one of
+   its bodies.  `fun swap (a, b) = (b, a)` does not recur, and saying `fix`
+   about it would be a lie the dump repeats on every line. *)
+let recursive (defs : (string * Types.ty * rhs) list) =
+  let names = List.map (fun (x, _, _) -> x) defs in
+  List.exists
+    (fun (_, _, r) ->
+      let free = free_rhs r in
+      List.exists (fun n -> Vars.mem n free) names)
+    defs
+
 (* Printing, for `--dump-core`. *)
 
 let atom_str = function
@@ -141,17 +203,16 @@ let rec print_block b ind out =
   | Let (x, t, r, rest) ->
       add out (Printf.sprintf "%slet %s : %s = " pad x (Types.show t));
       print_rhs r ind out;
-      add out "\n";
       print_block rest ind out
-  | LetRec (fns, rest) ->
+  | Fix (defs, rest) ->
       List.iteri
-        (fun i f ->
+        (fun i (x, t, r) ->
           add out
-            (Printf.sprintf "%s%s %s : %s = fn %s =>\n" pad
-               (if i = 0 then "let rec" else "and")
-               f.fn_name (Types.show f.fn_ty) f.fn_param);
-          print_block f.fn_body (ind + 2) out)
-        fns;
+            (Printf.sprintf "%s%s %s : %s = " pad
+               (if i = 0 then "fix" else "and")
+               x (Types.show t));
+          print_rhs r ind out)
+        defs;
       print_block rest ind out
   | Join (j, ps, body, rest) ->
       add out
@@ -162,12 +223,21 @@ let rec print_block b ind out =
       print_block rest ind out
   | Tail t -> print_tail t ind out
 
+(* A right-hand side prints its own newline, because a lambda's is at the end
+   of its body and everything else's is at the end of its line. *)
 and print_rhs r ind out =
   match r with
-  | Atom a -> add out (atom_str a)
   | Lam (x, t, body) ->
       add out (Printf.sprintf "fn %s : %s =>\n" x (Types.show t));
       print_block body (ind + 2) out
+  | r ->
+      print_flat r out;
+      add out "\n"
+
+and print_flat r out =
+  match r with
+  | Atom a -> add out (atom_str a)
+  | Lam _ -> assert false
   | Call (f, a) -> add out (Printf.sprintf "%s %s" (atom_str f) (atom_str a))
   | Prim (op, ats) ->
       add out

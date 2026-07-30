@@ -149,7 +149,7 @@ let enter w (v : value) (arg : value) =
 
 ```
 $ skunk --trace sum.sk
-  let rec sum
+  fix sum
   ret sum
   let t.64 = (2, 0)
   let t.65 = sum t.64

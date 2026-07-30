@@ -53,7 +53,7 @@ CESK マシン
 
 | | | |
 |---|---|---|
-| 4 | [型付き Core と A正規形](4-core.md) | `core.ml`・`elab.ml`。destination 渡しの正規化、なぜ型を捨てないか |
+| 4 | [型付き Core と A正規形](4-core.md) | `core.ml`・`elab.ml`。destination 渡しの正規化、なぜ型を捨てないか、そしてなぜ CPS でも SSA でもないのか |
 | 5 | [パターンマッチを決定木にする](5-matching.md) | `patmat.ml`。Maranget の行列アルゴリズム、網羅性と冗長性は決定木から読み取れる |
 | 6 | [join point — ラベルはクロージャではない](6-join.md) | `elab.ml`・`patmat.ml`。2つの出どころ、そして「1回しか使わない腕は join にしない」判断 |
 | 7 | [クロージャ変換](7-closure.md) | `closure.ml`。自由変数、コードブロック、捕獲。join を触らない理由 |

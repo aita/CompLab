@@ -130,7 +130,7 @@ fun pick (true, 1) = "both"
 ```
 $ skunk --dump-core tests/core.sk
 -- val pick : bool * int -> string
-let rec pick : bool * int -> string = fn a1.20 =>
+let pick : bool * int -> string = fn a1.20 : bool * int =>
   join arm () =
     ret "two"
   join arm.2 () =

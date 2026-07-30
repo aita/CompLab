@@ -77,7 +77,7 @@ fun sum (n, acc) = if n = 0 then acc else sum (n - 1, acc + n)
 ```
 $ skunk --dump-core sum.sk
 -- val sum : int * int -> int
-let rec sum : int * int -> int = fn a1.19 =>
+fix sum : int * int -> int = fn a1.19 : int * int =>
   let p.57 : int = #1 a1.19
   let p.58 : int = #2 a1.19
   let n.2 : int = p.57
@@ -180,7 +180,7 @@ code adder$1 (a1.19) =
 
 ```
 $ skunk --trace sum.sk
-  let rec sum
+  fix sum
   ret sum
   let t.64 = (2, 0)
   let t.65 = sum t.64

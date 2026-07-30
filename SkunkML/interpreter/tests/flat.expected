@@ -45,7 +45,7 @@ code size$6 (a1.21) =
       jump k (t.69)
 
 -- val adder : int -> int -> int
-let rec adder = closure adder$1 []
+let adder = closure adder$1 []
 ret adder
 
 -- val add3 : int -> int
@@ -59,7 +59,7 @@ let ten = t.63
 ret ten
 
 -- val twice : ('a -> 'a) -> 'a -> 'a
-let rec twice = closure twice$3 []
+let twice = closure twice$3 []
 ret twice
 
 -- val four : int
@@ -70,7 +70,7 @@ let four = t.68
 ret four
 
 -- val size : 'a list -> int
-let rec size = closure size$6 []
+fix size = closure size$6 []
 ret size
 
 -- val three : int

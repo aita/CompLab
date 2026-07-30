@@ -23,7 +23,7 @@ type rhs = Atom of atom | Lam of ... | Call of atom * atom | Prim of string * at
          | Tuple of atom list | Record of ... | Con of ... | Proj of ... | Field of ... | Payload of ...
 
 and block = Let of string * Types.ty * rhs * block
-          | LetRec of fn list * block
+          | Fix of (string * Types.ty * rhs) list * block
           | Join of label * (string * Types.ty) list * block * block
           | Tail of tail
 
@@ -40,6 +40,15 @@ and tail = Ret of atom | TCall of atom * atom
    要りません。
 
 `if` はありません。`bool` は構成子が2つの直和型で、`if` は `case` の書き方のひとつです。
+
+関数の表現も1つです。`Fix` の右辺は `Lam` で、`Let` の右辺も `Lam`。min-caml から
+MartenML へ続く系譜では、再帰束縛は `LetRec of fundef * t` という**専用の節点**を持ち、
+`fundef` が名前と引数と本体を別に持ちます。そうすると関数の書き方が2つになり、
+クロージャ変換に同じ処理の枝が2つできます。ここでは持ちません。
+
+名前が `LetRec` でないのも理由があります。**この言語に `let rec` という構文はありません。**
+あるのは `val`（再帰しない）と `fun`（する）だけで、`fun` は SML の綴りでは常に再帰的です。
+SML/NJ は再帰関数の組を `FIX` と呼んでいて、こちらもそれに倣いました。
 
 ## 2. destination 渡しで、推論と正規化を同時にやる
 
@@ -136,7 +145,7 @@ switch p.59 of
 ```
 $ skunk --dump-core tests/core.sk
 -- val swap : 'a * 'b -> 'b * 'a
-let rec swap : '_7 * '_6 -> '_6 * '_7 = fn a1.19 =>
+let swap : '_7 * '_6 -> '_6 * '_7 = fn a1.19 : '_7 * '_6 =>
   let p.57 : '_7 = #1 a1.19
   let p.58 : '_6 = #2 a1.19
   let a : '_7 = p.57
@@ -148,6 +157,11 @@ ret swap
 
 タプルパターンが `#1`・`#2` の射影になっていて、検査は1つも出ていません。タプルは形が
 1つしかないからです（[5章](5-matching.md)の3節）。
+
+`fix` ではなく `let` なのにも意味があります。`swap` は `fun` で書かれていますが自分を
+呼んでいないので、`Fix` にはなりません。**再帰していない `fun` を再帰束縛にすると、
+ダンプが毎行嘘をつくことになります。** 判定は自由変数を1回数えるだけで、その関数は
+`core.ml` にあります — 同じものをクロージャ変換も使います。
 
 型が消えるのはクロージャ変換のときです（[7章](7-closure.md)）。そこまで来ると、型に
 決めさせることが何も残っていません。
@@ -182,7 +196,7 @@ let fresh_name base =
 
 ```
 -- (報告しない)
-let rec even = ...
+fix even = ...
 and odd = ...
 let group = (even, odd)
 ret group
@@ -193,6 +207,41 @@ ret t
 
 `val () = print "hi"` のように何も束縛しない宣言も、ブロックは走ります。宣言は
 束縛のためだけでなく効果のためにも書かれるからです。
+
+## 7. なぜ A正規形なのか — SML の処理系は別の道を行った
+
+この道（ANF → 決定木 → join point → クロージャ変換 → 抽象機械）は、**OCaml と GHC の
+系譜**です。表層が SML なのに中身がそちらなのは選択で、SML の処理系は3つとも別のところに
+行きました。
+
+**SML/NJ は CPS です**（Appel 1992）。すべての呼び出しが末尾呼び出しになり、継続は
+ふつうの関数になります。すると「末尾でない位置」という概念が消えるので、
+**join point という区別も要らなくなります** — [6章](6-join.md)が2つの理由で必要とした
+ものは、CPS では単に「脱出しない継続」であって、他の関数と同じ形をしています。代償は
+逆側に出ます。どの継続がスタックに載せられるかを後で決め直さなければならず、それが
+あちらのクロージャ変換の主題になります。
+
+**MLton は全プログラムです。** ファンクタを適用ごとに複製して消し（defunctorization、
+[3章](3-modules.md)の参考文献）、多相を単相化してから、一階の SSA に落とします。SSA の
+基本ブロックは引数を持ち、合流点の引数は φ 節点です — これは join point の別の語彙で、
+[6章](6-join.md)がそう書いています。
+
+**Definition には中間表現がありません。** 意味論は構文に直接与えられていて、
+`val rec` は環境の knot として定義されます。
+
+ここで ANF を選んだ理由は3つです。
+
+1. **末尾位置が構文の性質になる最小の正規形**だから。おかげで機械の継続フレームが
+   1種類で済みます（[8章](8-cesk.md)の3節）。
+2. **ソースの横に置いて読める**から。CPS はプログラムを裏返すので、`--dump-core` を
+   ソースと見比べる読み方ができなくなります。本のための処理系なので、これは重い。
+3. **join point とクロージャの区別が「選択」として見える**から。CPS では全部が関数で、
+   SSA では全部がブロックです。両方が同じ IR に並んでいるのは ANF だからで、
+   [7章](7-closure.md)が「片方だけ変換する」と言えるのもそのためです。
+
+失うものもあります。継続が第一級でないので `callcc` の類は表現できませんし、CPS なら
+β簡約で消せる管理用の中間束縛（`let t.60 = ...` の列）がそのまま残ります。後者は
+最適化パスの仕事で、ここにはそれがありません。
 
 ## していないこと
 
@@ -213,8 +262,13 @@ ret t
 - Simon Peyton Jones, "Implementing Lazy Functional Languages on Stock Hardware:
   the Spineless Tagless G-machine", *JFP* 2(2), 1992. 型付き中間言語を最後まで
   持つ路線。
+- Andrew Appel, David MacQueen, "Standard ML of New Jersey", *PLILP* 1991、および
+  Appel 1992。CPS を選んだ側（7節）。
+- Stephen Weeks, "Whole-Program Compilation in MLton", *ML Workshop* 2006。
+  defunctorize と単相化のあと SSA へ（7節）。
 - 同じ repo の MartenML は K正規形（KNF）を使っています。ANF との違いは実質
-  「どこまでを1つの束縛にするか」で、`doc/knormal.md` にあります。
+  「どこまでを1つの束縛にするか」で、`doc/knormal.md` にあります。再帰束縛の節点も
+  min-caml 由来の `LetRec of fundef` で、1節で言っているのはその形のことです。
 
 ## 実装の地図
 

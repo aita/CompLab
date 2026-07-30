@@ -594,11 +594,11 @@ and elab_dec env (dc : Ast.dec) (k : Sem.env -> bound list -> C.block) : C.block
             S.add_val env f.Ast.fname (mono ty) { S.root = v; path = [] })
           env entries
       in
-      let fns =
+      let defs =
         List.map
           (fun ((f : Ast.fundec), v, ty) ->
-            let param, body = elab_fun env_rec f ty in
-            { C.fn_name = v; fn_ty = ty; fn_param = param; fn_body = body })
+            let param, dom, body = elab_fun env_rec f ty in
+            (v, ty, C.Lam (param, dom, body)))
           entries
       in
       let rw = close_ann ann in
@@ -611,7 +611,13 @@ and elab_dec env (dc : Ast.dec) (k : Sem.env -> bound list -> C.block) : C.block
               acc @ [ BVal (f.Ast.fname, sch, v) ] ))
           (env, []) entries
       in
-      C.LetRec (fns, k env' bounds)
+      (* Only a group that refers to itself is a [Fix]; the rest are ordinary
+         bindings, and the dump says so. *)
+      if C.recursive defs then C.Fix (defs, k env' bounds)
+      else
+        List.fold_right
+          (fun (x, t, r) rest -> C.Let (x, t, r, rest))
+          defs (k env' bounds)
   | Ast.DType binds ->
       let env', bounds =
         List.fold_left
@@ -699,7 +705,8 @@ and elab_fun env (f : Ast.fundec) (fty : ty) =
       let g = C.fresh_name "f" in
       C.Let (g, fty, C.Lam (v, t, wrap (i + 1)), C.Tail (C.Ret (C.AVar g)))
   in
-  (fst (List.hd params), wrap 0)
+  let name, dom = List.hd params in
+  (name, dom, wrap 0)
 
 (* Structures.
 

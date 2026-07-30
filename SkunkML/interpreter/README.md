@@ -217,12 +217,12 @@ eqtype discipline.
 | `ast.ml` | 137 | the surface tree |
 | `types.ml` | 400 | types, levels, destructive unification, schemes, printing |
 | `sem.ml` | 496 | environments, semantic signatures, matching, realisation |
-| `core.ml` | 221 | typed Core, and its printer |
-| `elab.ml` | 978 | inference and normalisation in one pass; modules become records |
+| `core.ml` | 291 | typed Core, its free variables, and its printer |
+| `elab.ml` | 985 | inference and normalisation in one pass; modules become records |
 | `patmat.ml` | 360 | pattern matrices, decision trees, exhaustiveness |
-| `flat.ml` | 152 | the flat IR, and its printer |
-| `closure.ml` | 157 | free variables, code blocks, captures |
-| `machine.ml` | 466 | the CESK machine and the primitives |
+| `flat.ml` | 153 | the flat IR, and its printer |
+| `closure.ml` | 115 | code blocks, captures, and what is deliberately not captured |
+| `machine.ml` | 470 | the CESK machine and the primitives |
 | `basis.ml` | 157 | the initial environment, and the prelude source |
 | `skunk.ml` | 148 | the command line |
 

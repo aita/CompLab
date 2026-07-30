@@ -34,8 +34,9 @@ type rhs =
 and block =
   | Let of string * rhs * block
   (* A group of closures that can see each other, so the captures are filled
-     in after all of them exist. *)
-  | LetRec of (string * string * atom list) list * block
+     in after all of them exist.  Only a group that really recurs gets here;
+     everything else is an ordinary [Let]. *)
+  | Fix of (string * rhs) list * block
   | Join of label * string list * block * block
   | Tail of tail
 
@@ -73,12 +74,12 @@ let rec print_block b ind out =
   | Let (x, r, rest) ->
       add out (Printf.sprintf "%slet %s = %s\n" pad x (rhs_str r));
       print_block rest ind out
-  | LetRec (defs, rest) ->
-      List.iter
-        (fun (x, code, caps) ->
+  | Fix (defs, rest) ->
+      List.iteri
+        (fun i (x, r) ->
           add out
-            (Printf.sprintf "%slet rec %s = closure %s [%s]\n" pad x code
-               (String.concat ", " (List.map atom_str caps))))
+            (Printf.sprintf "%s%s %s = %s\n" pad (if i = 0 then "fix" else "and") x
+               (rhs_str r)))
         defs;
       print_block rest ind out
   | Join (j, ps, body, rest) ->

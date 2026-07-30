@@ -54,7 +54,7 @@ fun depth xs = 1 + (case xs of [] => 0 | _ :: rest => depth rest)
 ```
 $ skunk --dump-core tests/core.sk
 -- val depth : 'a list -> int
-let rec depth : '_31 list -> int = fn a1.22 =>
+fix depth : '_31 list -> int = fn a1.22 : '_31 list =>
   let xs.13 : '_31 list = a1.22
   join k (v : int) =
     let t.66 : int = +(1, v)
@@ -88,7 +88,7 @@ fun overlap (true, _, 1) = "first"
 最後の腕には複数の道からたどり着きます。
 
 ```
-let rec overlap : bool * bool * int -> string = fn a1.20 =>
+fix overlap : bool * bool * int -> string = fn a1.20 : bool * bool * int =>
   join arm () =
     ret "second"
   join arm.2 () =
@@ -150,6 +150,10 @@ join point を単なる局所関数にしても、意味は同じです。違う
 
 一番下の行が本質です。join point が自由変数を捕獲しなくてよいのは、**跳ぶ側が必ず
 それを定義したブロックの内側にいる**からです。値が消えていることがありえない。
+
+CPS ならこの区別は要りません。継続がふつうの関数で、末尾でない位置というものが存在
+しないからです。区別が要るのは ANF を選んだからで、その選択の理由は
+[4章](4-core.md)の7節にあります。
 
 これが成り立つのは、この処理系が join point を上の2箇所でしか作らず、どちらも
 「`case` を包んで、その腕から跳ぶ」形だからです。ラムダの境界をまたぐ join point は

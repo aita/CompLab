@@ -321,14 +321,18 @@ let rec run w (st : state) : value =
       | _ ->
           let v = eval w st.env rhs in
           step_on w st x v rest)
-  | F.LetRec (defs, rest) ->
+  | F.Fix (defs, rest) ->
       (* Every closure of the group exists before any of their captures are
-         computed, so they can see each other. *)
+         computed, so they can see each other.  The store is what makes that
+         possible: the addresses are handed out first and filled in after. *)
       let made =
         List.map
-          (fun (name, label, caps) ->
-            let base = alloc w (max (List.length caps) 1) in
-            (name, VClos (label, base, List.length caps), base, caps))
+          (fun (name, r) ->
+            match r with
+            | F.Closure (label, caps) ->
+                let base = alloc w (max (List.length caps) 1) in
+                (name, VClos (label, base, List.length caps), base, caps)
+            | _ -> fault "a fix binding must be a closure")
           defs
       in
       let env =
@@ -447,8 +451,8 @@ and eval w env (rhs : F.rhs) : value =
 and head_of (b : F.block) =
   match b with
   | F.Let (x, r, _) -> Printf.sprintf "let %s = %s" x (F.rhs_str r)
-  | F.LetRec (defs, _) ->
-      Printf.sprintf "let rec %s" (String.concat ", " (List.map (fun (x, _, _) -> x) defs))
+  | F.Fix (defs, _) ->
+      Printf.sprintf "fix %s" (String.concat ", " (List.map fst defs))
   | F.Join (j, _, _, _) -> Printf.sprintf "join %s" j
   | F.Tail (F.Ret a) -> Printf.sprintf "ret %s" (F.atom_str a)
   | F.Tail (F.TCall (f, a)) ->
