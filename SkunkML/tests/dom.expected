@@ -1,0 +1,37 @@
+func answer$1:
+  reverse postorder  b0 b1 b2
+  b0    idom -     frontier {  }
+  b1    idom b0    frontier {  }
+  b2    idom b0    frontier {  }
+func describe$2:
+  reverse postorder  b0
+  b0    idom -     frontier {  }
+func inline$3:
+  reverse postorder  b0 b1 b2 b3
+  b0    idom -     frontier {  }
+  b1    idom b0    frontier { b3 }
+  b2    idom b0    frontier { b3 }
+  b3    idom b0    frontier {  }   1 phi
+func both$4:
+  reverse postorder  b0 b1 b2 b3 b4 b5
+  b0    idom -     frontier {  }
+  b1    idom b0    frontier { b4 }
+  b2    idom b0    frontier { b4 }
+  b3    idom b2    frontier { b4 }
+  b4    idom b0    frontier {  }
+  b5    idom b2    frontier {  }
+func $answer:
+  reverse postorder  b0
+  b0    idom -     frontier {  }
+func $describe:
+  reverse postorder  b0
+  b0    idom -     frontier {  }
+func $inline:
+  reverse postorder  b0
+  b0    idom -     frontier {  }
+func $both:
+  reverse postorder  b0
+  b0    idom -     frontier {  }
+func $shown:
+  reverse postorder  b0
+  b0    idom -     frontier {  }

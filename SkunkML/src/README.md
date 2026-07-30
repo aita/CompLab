@@ -47,6 +47,7 @@ skunk [options] file.sk
 skunkc [options] file.sk
 
       --dump-ssa    print the SSA of the program (not of the basis)
+      --dump-dom    print the dominator tree and the dominance frontiers
       --dump-flat   print the A-normal form it was built from
       --no-verify   skip the check that every use is dominated by its definition
   -h, --help
@@ -280,7 +281,7 @@ And the compiler, in `src/compiler/`:
 | --- | --- | --- |
 | `ssa.ml` | 269 | value SSA: values, blocks, phis, and the printer |
 | `build.ml` | 232 | Flat to SSA. A join point is a block with phi-functions |
-| `dom.ml` | 149 | dominators, and the check that every use is dominated |
+| `dom.ml` | 241 | dominators, dominance frontiers, and the checks they are for |
 | `skunkc.ml` | 122 | the command line |
 
 ## Layout

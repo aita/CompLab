@@ -176,6 +176,16 @@
 
 (rule
  (with-stdout-to
+  dom.out
+  (run %{exe:../src/compiler/skunkc.exe} --dump-dom %{dep:join.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff dom.expected dom.out)))
+
+(rule
+ (with-stdout-to
   verify.out
   (progn
    (run %{exe:../src/compiler/skunkc.exe} --dump-ssa %{dep:../examples/tour.sk})

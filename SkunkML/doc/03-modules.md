@@ -90,7 +90,7 @@ errors/toospecific.sk:1:42: signature error: f is int -> int here,
   but the signature asks for 'a -> 'a
 ```
 
-これは[2章](2-hm.md)の4節で注釈の型変数に対してやっていることと同じ手です。違うのは、
+これは[2章](02-hm.md)の4節で注釈の型変数に対してやっていることと同じ手です。違うのは、
 あちらは宣言のあいだだけ rigid にして最後に戻すのに対し、こちらは照合のあいだだけ
 rigid にして捨てるところです。
 
@@ -281,4 +281,4 @@ $ skunk --trace examples/modules.sk
 
 ---
 
-[← 2. Hindley–Milner](2-hm.md) ・ [4. 型付き Core と A正規形 →](4-core.md)
+[← 2. Hindley–Milner](02-hm.md) ・ [4. 型付き Core と A正規形 →](04-core.md)

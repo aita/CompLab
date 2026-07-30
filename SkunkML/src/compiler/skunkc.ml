@@ -12,12 +12,14 @@ let usage () =
     \n\
      options:\n\
     \      --dump-ssa    print the SSA of the program (not of the basis)\n\
+    \      --dump-dom    print the dominator tree and the dominance frontiers\n\
     \      --dump-flat   print the A-normal form it was built from\n\
     \      --no-verify   skip the check that every use is dominated by its \
      definition\n\
     \  -h, --help        this\n"
 
 let dump_ssa = ref false
+let dump_dom = ref false
 let dump_flat = ref false
 let verify = ref true
 
@@ -59,6 +61,9 @@ let () =
     | [] -> ()
     | "--dump-ssa" :: rest ->
         dump_ssa := true;
+        args rest
+    | "--dump-dom" :: rest ->
+        dump_dom := true;
         args rest
     | "--dump-flat" :: rest ->
         dump_flat := true;
@@ -114,7 +119,9 @@ let () =
                 List.iter (fun m -> Printf.eprintf "skunkc: not in SSA: %s\n" m) bad;
                 exit 1);
          if !dump_ssa then print_string (Ssa.prog_to_string prog);
-         if (not !dump_ssa) && not !dump_flat then
+         if !dump_dom then
+           List.iter (fun f -> print_string (Dom.to_string f)) (Dom.all_funcs prog);
+         if (not !dump_ssa) && (not !dump_dom) && not !dump_flat then
            prerr_endline "skunkc: the back end stops at SSA for now; try --dump-ssa"
        with Loc.Error { loc; where; msg } ->
          flush stdout;

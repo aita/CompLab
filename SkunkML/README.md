@@ -120,8 +120,8 @@ The implementation is in [`src/`](src) and the book is in
 [`doc/`](doc/index.md): see [`src/README.md`](src/README.md) for the language,
 the two command lines and a map of the source, and
 [`doc/index.md`](doc/index.md) for a chapter per pass. Two to start with, in
-Japanese: [プログラムが通る道](doc/0-pipeline.md) と
-[パターンマッチを決定木にする](doc/5-matching.md)。
+Japanese: [プログラムが通る道](doc/00-pipeline.md) と
+[パターンマッチを決定木にする](doc/05-matching.md)。
 
 ## What is deliberately missing
 
