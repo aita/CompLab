@@ -1,0 +1,27 @@
+(* Lists and allocation.
+
+   Every partial solution is a fresh cons cell and every call carries a tuple,
+   so the search spends most of its time in the allocator and walking the cells
+   it just made.  `ok` reads a list it will never write, which is what makes it
+   worth watching: whether the argument tuple survives to the heap, and whether
+   the cons cells that die one recursion later cost anything.
+
+   Eleven queens has 2680 solutions -- large enough to run for a while, small
+   enough that the tree-walking interpreter still finishes. *)
+fun ok (q, ds, n) =
+  case ds of
+      [] => true
+    | d :: rest => if q = d orelse q = d + n orelse q = d - n then false
+                   else ok (q, rest, n + 1)
+
+fun place (n, row, ds) =
+  if row = 0 then 1
+  else
+    let fun tryAll (q, acc) =
+          if q > n then acc
+          else if ok (q, ds, 1) then tryAll (q + 1, acc + place (n, row - 1, q :: ds))
+          else tryAll (q + 1, acc)
+    in tryAll (1, 0)
+    end
+
+val () = print (Int.toString (place (11, 11, [])) ^ "\n")

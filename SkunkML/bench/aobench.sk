@@ -1,0 +1,207 @@
+(* aobench: ambient occlusion over three spheres and a plane.
+
+   Everything here is Q16.16 fixed point -- an int that stands for itself
+   divided by 65536 -- because the compiler has no `real`.  The interpreter
+   grew one, but `skunkc` still answers `unsupported`, and a benchmark whose
+   whole point is that both back ends agree cannot use a type only one of them
+   has.  So `mul` and `dvd` put the scale back after multiplying and dividing,
+   and every constant below is its real value times 65536.
+
+   What that leaves is the mix the original has: long runs of multiplies and
+   square roots, a short-lived tuple for every vector, a datatype to say
+   whether a ray hit anything, and an array of sample directions read on every
+   shadow ray.  Nothing here is tail-recursive by accident -- the pixel and
+   sample loops are, so what the timing shows is arithmetic and allocation
+   rather than stack growth. *)
+
+val one = 65536
+fun mul (a, b) = a * b div one
+fun dvd (a, b) = a * one div b
+
+(* Integer square root by Newton's method, then `sqrtq` for a Q16.16 argument:
+   sqrt(a/one) * one is sqrt(a * one), so the scaling costs one multiply.  The
+   first guess is the argument itself, which always converges from above; a
+   better guess would halve the iteration count but this is the arithmetic the
+   benchmark is here to spend. *)
+fun isqrt n =
+  if n <= 0 then 0
+  else
+    let fun step x =
+          let val y = (x + n div x) div 2
+          in if y >= x then x else step y
+          end
+    in step (if n < one then one else n)
+    end
+
+fun sqrtq a = isqrt (a * one)
+
+fun vadd ((ax, ay, az), (bx, by, bz)) = (ax + bx, ay + by, az + bz)
+fun vsub ((ax, ay, az), (bx, by, bz)) = (ax - bx, ay - by, az - bz)
+fun vdot ((ax, ay, az), (bx, by, bz)) = mul (ax, bx) + mul (ay, by) + mul (az, bz)
+fun vscale ((x, y, z), s) = (mul (x, s), mul (y, s), mul (z, s))
+
+fun vcross ((ax, ay, az), (bx, by, bz)) =
+  (mul (ay, bz) - mul (az, by), mul (az, bx) - mul (ax, bz), mul (ax, by) - mul (ay, bx))
+
+fun vnorm (v as (x, y, z)) =
+  let val l = sqrtq (vdot (v, v))
+  in if l = 0 then v else (dvd (x, l), dvd (y, l), dvd (z, l))
+  end
+
+(* A ray either misses everything or hits one surface, and the shader needs the
+   distance to pick the nearest, the point to shoot shadow rays from and the
+   normal to orient them by.  A datatype says exactly that, and makes the
+   nearest-so-far argument threaded through the four intersection tests one
+   value rather than a flag and three dummies. *)
+datatype isect = Miss | Hit of int * (int * int * int) * (int * int * int)
+
+fun nearer (t, best) =
+  case best of
+      Miss => true
+    | Hit (bt, _, _) => t < bt
+
+fun sphere (org, dir, ctr, r, best) =
+  let val rs = vsub (org, ctr)
+      val b = vdot (rs, dir)
+      val c = vdot (rs, rs) - mul (r, r)
+      val d = mul (b, b) - c
+  in if d <= 0 then best
+     else
+       let val t = ~b - sqrtq d
+       in if t <= 0 orelse not (nearer (t, best)) then best
+          else
+            let val p = vadd (org, vscale (dir, t))
+            in Hit (t, p, vnorm (vsub (p, ctr)))
+            end
+       end
+  end
+
+(* The floor, y = ~0.5, normal straight up.  A ray nearly parallel to it would
+   divide by something close to zero and land somewhere absurd, so anything
+   flatter than about 0.001 counts as a miss. *)
+fun plane (org as (_, oy, _), dir as (_, dy, _), best) =
+  if dy > ~66 then best
+  else
+    let val t = dvd (~(oy + 32768), dy)
+    in if t <= 0 orelse not (nearer (t, best)) then best
+       else Hit (t, vadd (org, vscale (dir, t)), (0, one, 0))
+    end
+
+val s0 = (~131072, 0, ~229376)
+val s1 = (~32768, 0, ~196608)
+val s2 = (65536, 0, ~144179)
+val radius = 32768
+
+fun intersect (org, dir) =
+  let val a = sphere (org, dir, s0, radius, Miss)
+      val b = sphere (org, dir, s1, radius, a)
+      val c = sphere (org, dir, s2, radius, b)
+  in plane (org, dir, c)
+  end
+
+(* Sample directions, drawn once into an array and then reused.  Rejection
+   sampling inside the unit ball gives a direction with no trigonometry at all,
+   which matters when there is no `real` to do trigonometry in; the seed is
+   threaded rather than kept in a `ref` so that the table does not depend on
+   the order the two back ends happen to evaluate things in.  Very short
+   vectors are thrown away too: normalising one of those in 16 fractional bits
+   is mostly noise. *)
+val ndirs = 64
+val nao = 12
+
+fun rand s = (s * 1103515245 + 12345) mod 1073741824
+fun coord s = s mod 131072 - one
+
+fun makeDir s =
+  let val s1 = rand s
+      val s2 = rand s1
+      val s3 = rand s2
+      val x = coord s1
+      val y = coord s2
+      val z = coord s3
+      val l2 = mul (x, x) + mul (y, y) + mul (z, z)
+  in if l2 > one orelse l2 < 1024 then makeDir s3
+     else
+       let val l = sqrtq l2
+       in ((dvd (x, l), dvd (y, l), dvd (if z < 0 then ~z else z, l)), s3)
+       end
+  end
+
+fun fillDirs (a, i, s) =
+  if i >= ndirs then ()
+  else
+    let val (d, next) = makeDir s
+    in Array.update (a, i, d); fillDirs (a, i + 1, next)
+    end
+
+(* An orthonormal frame around the normal.  Crossing with whichever axis the
+   normal leans on least keeps the cross product from collapsing. *)
+fun basis (n as (nx, ny, _)) =
+  let val b = if nx < 39321 andalso nx > ~39321 then (one, 0, 0)
+              else if ny < 39321 andalso ny > ~39321 then (0, one, 0)
+              else (0, 0, one)
+      val u = vnorm (vcross (b, n))
+  in (u, vcross (n, u))
+  end
+
+(* Occlusion at one surface point: shoot `nao` rays over the hemisphere and
+   count the ones that hit something.  The origin is lifted along the normal
+   first, or the surface shadows itself -- 0.01 rather than the original's
+   0.0001, because 0.0001 is six units in Q16.16 and rounds away. *)
+fun ao (dirs, p, n, tag) =
+  let val (u, v) = basis n
+      val org = vadd (p, vscale (n, 655))
+      fun go (i, occ) =
+        if i >= nao then occ
+        else
+          let val (lx, ly, lz) = Array.sub (dirs, (tag + i) mod ndirs)
+              val d = vadd (vadd (vscale (u, lx), vscale (v, ly)), vscale (n, lz))
+          in case intersect (org, d) of
+                 Miss => go (i + 1, occ)
+               | Hit _ => go (i + 1, occ + 1)
+          end
+  in (nao - go (0, 0)) * 255 div nao
+  end
+
+(* The camera sits at the origin looking down ~z, one pixel spanning 2/w of the
+   image plane, with `nsub` by `nsub` samples inside each pixel. *)
+val w = 96
+val h = 96
+val nsub = 2
+val eye = (0, 0, 0)
+
+fun pixelDir (px, py, sx, sy) =
+  let val half = w * nsub div 2
+      val fx = dvd (px * nsub + sx - half, half)
+      val fy = dvd (half - (py * nsub + sy), half)
+  in vnorm (fx, fy, ~one)
+  end
+
+fun render dirs =
+  let fun pixel (px, py) =
+        let fun sub (sx, sy, acc) =
+              if sy >= nsub then acc
+              else if sx >= nsub then sub (0, sy + 1, acc)
+              else
+                case intersect (eye, pixelDir (px, py, sx, sy)) of
+                    Miss => sub (sx + 1, sy, acc)
+                  | Hit (_, p, n) =>
+                      sub (sx + 1, sy, acc + ao (dirs, p, n, px + py + sx + sy))
+        in sub (0, 0, 0) div (nsub * nsub)
+        end
+      fun row (py, acc) =
+        if py >= h then acc
+        else
+          let fun col (px, a) = if px >= w then a else col (px + 1, a + pixel (px, py))
+          in row (py + 1, col (0, acc))
+          end
+  in row (0, 0)
+  end
+
+(* The table stays inside the `let` so that the top level does not echo sixty
+   four tuples before the one line that matters. *)
+val () =
+  let val dirs = Array.array (ndirs, (0, 0, 0))
+      val () = fillDirs (dirs, 0, 20250731)
+  in print ("aobench " ^ Int.toString (render dirs) ^ "\n")
+  end
