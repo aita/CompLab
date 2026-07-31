@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from wolv import driver, emit
+from wolv import copies, driver
 
 HERE = Path(__file__).parent
 
@@ -14,21 +14,21 @@ def asm(source: str, opts: driver.Options | None = None) -> str:
 # -- parallel copies ----------------------------------------------------------
 
 
-def perform(steps: list[emit._Step], registers: dict[int, str]) -> dict[int, str]:
+def perform(steps: list[copies.Step], registers: dict[int, str]) -> dict[int, str]:
     state = dict(registers)
     for step in steps:
         match step:
-            case emit._Mov(dst, src):
+            case copies.Mov(dst, src):
                 state[dst] = state[src]
-            case emit._Swap(a, b):
+            case copies.Swap(a, b):
                 state[a], state[b] = state[b], state[a]
     return state
 
 
-def check(moves: list[tuple[int, int]], borrowed: int | None) -> list[emit._Step]:
+def check(moves: list[tuple[int, int]], borrowed: int | None) -> list[copies.Step]:
     """Run a parallel copy on a register file and insist it did what it said."""
     registers = {r: f"v{r}" for r in range(32)}
-    steps = emit._sequentialize(moves, borrowed)
+    steps = copies.sequentialize(moves, borrowed)
     after = perform(steps, registers)
     for dst, src in moves:
         assert after[dst] == registers[src], f"x{dst} should hold v{src}"
@@ -37,7 +37,7 @@ def check(moves: list[tuple[int, int]], borrowed: int | None) -> list[emit._Step
 
 def test_a_copy_with_no_cycle_is_just_moves() -> None:
     steps = check([(1, 2), (3, 4), (5, 5)], borrowed=9)
-    assert all(isinstance(s, emit._Mov) for s in steps)
+    assert all(isinstance(s, copies.Mov) for s in steps)
     assert len(steps) == 2
 
 
@@ -47,18 +47,18 @@ def test_a_chain_is_ordered_so_nothing_is_lost() -> None:
 
 def test_a_cycle_borrows_a_register_when_there_is_one() -> None:
     steps = check([(1, 2), (2, 1)], borrowed=9)
-    assert all(isinstance(s, emit._Mov) for s in steps)
-    assert any(s.dst == 9 for s in steps if isinstance(s, emit._Mov))
+    assert all(isinstance(s, copies.Mov) for s in steps)
+    assert any(s.dst == 9 for s in steps if isinstance(s, copies.Mov))
 
 
 def test_a_cycle_swaps_when_there_is_nothing_to_borrow() -> None:
     steps = check([(1, 2), (2, 1)], borrowed=None)
-    assert [isinstance(s, emit._Swap) for s in steps] == [True]
+    assert [isinstance(s, copies.Swap) for s in steps] == [True]
 
 
 def test_a_longer_cycle_swaps_its_way_round() -> None:
     steps = check([(1, 2), (2, 3), (3, 1)], borrowed=None)
-    assert all(isinstance(s, emit._Swap) for s in steps)
+    assert all(isinstance(s, copies.Swap) for s in steps)
     assert len(steps) == 2
 
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from wolv import allocator, ir, liveness, lower, machine, opt, outofssa, ssa
+from wolv import allocator, ir, liveness, lower, opt, outofssa, registers, ssa
 from wolv.parser import parse
 from wolv.typecheck import check
 
@@ -51,7 +51,7 @@ def prepared(name: str, source: str = SOURCE) -> ir.Module:
 
 
 def allocated(
-    name: str, registers: machine.Registers | None = None, source: str = SOURCE
+    name: str, registers: registers.Registers | None = None, source: str = SOURCE
 ) -> ir.Module:
     mod = prepared(name, source)
     allocator.allocate_module(mod, allocator.ALLOCATORS[name], registers)
@@ -83,30 +83,30 @@ def test_a_value_live_across_a_call_is_callee_saved(name: str) -> None:
     for func in allocated(name).funcs:
         live = liveness.analyse(func)
         for reg in liveness.across_calls(func, live):
-            assert func.colours[reg] in machine.CALLEE_SAVED
+            assert func.colours[reg] in registers.CALLEE_SAVED
 
 
 @pytest.mark.parametrize("name", NAMES)
 def test_only_the_callee_saved_it_used_are_saved(name: str) -> None:
     for func in allocated(name).funcs:
         assert set(func.saved) == set(func.colours.values()) & set(
-            machine.CALLEE_SAVED
+            registers.CALLEE_SAVED
         )
 
 
 @pytest.mark.parametrize("name", NAMES)
 @pytest.mark.parametrize("size", [5, 6, 8, 12, 16, 26])
 def test_a_smaller_machine_still_works(name: str, size: int) -> None:
-    registers = machine.limited(size)
-    for func in allocated(name, registers).funcs:
+    machine = registers.limited(size)
+    for func in allocated(name, machine).funcs:
         allocator.verify(func)
         for colour in func.colours.values():
-            assert colour in registers.anywhere
+            assert colour in machine.anywhere
 
 
 @pytest.mark.parametrize("name", NAMES)
 def test_a_small_machine_spills(name: str) -> None:
-    mod = allocated(name, machine.limited(6))
+    mod = allocated(name, registers.limited(6))
     assert any(func.spill_slots for func in mod.funcs), "nothing spilled"
     for func in mod.funcs:
         for slot in func.spill_slots.values():
@@ -115,10 +115,10 @@ def test_a_small_machine_spills(name: str) -> None:
 
 @pytest.mark.parametrize("name", NAMES)
 def test_pressure_falls_to_what_the_machine_has(name: str) -> None:
-    registers = machine.limited(5)
-    for func in allocated(name, registers).funcs:
+    machine = registers.limited(5)
+    for func in allocated(name, machine).funcs:
         live = liveness.analyse(func)
-        assert liveness.pressure(func, live) <= registers.count()
+        assert liveness.pressure(func, live) <= machine.count()
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -130,7 +130,7 @@ def test_an_impossible_demand_is_reported(name: str) -> None:
     )
     mod = prepared(name, source)
     with pytest.raises(allocator.OutOfRegisters, match="more registers"):
-        allocator.allocate_module(mod, allocator.ALLOCATORS[name], machine.limited(8))
+        allocator.allocate_module(mod, allocator.ALLOCATORS[name], registers.limited(8))
 
 
 # -- what each of them does about copies --------------------------------------

@@ -30,8 +30,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from wolv import ir, liveness, ssa
+from wolv.allocator.hints import preferences
 from wolv.allocator.spill import choose_victim, spill
-from wolv.machine import ARGUMENT_REGS, CALLEE_SAVED, Registers
+from wolv.registers import CALLEE_SAVED, Registers
 
 
 class SpillNeeded(Exception):
@@ -85,10 +86,9 @@ class _Colouring:
         return self.colours
 
     def _collect_hints(self) -> None:
-        """Copy-related values want one colour; the ABI says which one."""
-        for i, param in enumerate(self.func.params):
-            if i < len(ARGUMENT_REGS):
-                self.preferred[param] = ARGUMENT_REGS[i]
+        """What each value would like: a colour of its own copy-relations, or
+        the one the calling convention is about to want it in."""
+        self.preferred = preferences(self.func)
         for block in self.func.walk():
             for phi in block.phis:
                 for arg in phi.args.values():
@@ -99,14 +99,6 @@ class _Colouring:
                     case ir.Move(dst, src):
                         self.hints.setdefault(dst, []).append(src)
                         self.hints.setdefault(src, []).append(dst)
-                    case ir.Call(dst, _, args):
-                        for i, arg in enumerate(args):
-                            if i < len(ARGUMENT_REGS):
-                                self.preferred[arg] = ARGUMENT_REGS[i]
-                        if dst is not None:
-                            self.preferred[dst] = ARGUMENT_REGS[0]
-                    case ir.Ret(value) if value is not None:
-                        self.preferred[value] = ARGUMENT_REGS[0]
 
     def _block(self, label: str) -> None:
         block = self.func.blocks[label]

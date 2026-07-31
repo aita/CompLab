@@ -22,7 +22,7 @@ from dataclasses import dataclass
 from wolv import ir, liveness
 from wolv.allocator import chordal, graph
 from wolv.allocator.spill import OutOfRegisters
-from wolv.machine import Registers
+from wolv.registers import Registers
 
 __all__ = [
     "ALLOCATORS",

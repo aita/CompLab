@@ -29,28 +29,6 @@ from wolv import dag, ir, liveness, mach
 # What `add`, `sub` and `cmp` take as an immediate operand.
 IMMEDIATE = 4095
 
-CONDITIONS: dict[str, str] = {
-    "=": "eq",
-    "<>": "ne",
-    "<": "lt",
-    "<=": "le",
-    ">": "gt",
-    ">=": "ge",
-    "u<": "lo",
-    "u>=": "hs",
-}
-
-INVERSE: dict[str, str] = {
-    "eq": "ne",
-    "ne": "eq",
-    "lt": "ge",
-    "ge": "lt",
-    "gt": "le",
-    "le": "gt",
-    "lo": "hs",
-    "hs": "lo",
-}
-
 LOGICAL: dict[str, str] = {"and": "and", "or": "orr", "xor": "eor"}
 SHIFTS: dict[str, str] = {"shl": "lsl", "shr": "asr"}
 
@@ -158,9 +136,6 @@ class _Selector:
     ) -> None:
         self.emit(mach.Mach(form, dst, srcs, imm, symbol, effect))
 
-    def reg(self) -> ir.Reg:
-        return self.func.new_reg()
-
     def operand(self, index: int | None, reg: ir.Reg) -> ir.Reg:
         """The register holding an operand, computing it here if it was deferred.
 
@@ -197,7 +172,7 @@ class _Selector:
                 return dst
             case ir.Cmp(dst, op, lhs, rhs):
                 self.compare(node, op, lhs, rhs)
-                self.mach("cset", dst, [], symbol=CONDITIONS[op])
+                self.mach("cset", dst, [], symbol=mach.CONDITION[op])
                 return dst
             case ir.Load(dst, base, offset):
                 self.load(node, dst, base, offset)
@@ -221,52 +196,78 @@ class _Selector:
     def arithmetic(
         self, node: dag.Node, dst: ir.Reg, op: str, lhs: ir.Reg, rhs: ir.Reg
     ) -> None:
-        left, right = node.operands[0], node.operands[1]
+        match op:
+            case "+" | "-":
+                self.additive(node, dst, op, lhs, rhs)
+            case "*":
+                self.multiply(node, dst, lhs, rhs)
+            case "/":
+                self.mach("sdiv", dst, self.both(node, lhs, rhs))
+            case "shl" | "shr":
+                self.shift(node, dst, op, lhs, rhs)
+            case "and" | "or" | "xor":
+                self.logical(node, dst, op, lhs, rhs)
+            case _:
+                raise AssertionError(f"no instruction for `{op}`")
+
+    def both(self, node: dag.Node, lhs: ir.Reg, rhs: ir.Reg) -> list[ir.Reg]:
+        """Both operands in registers, which is what the plain forms want."""
+        return [
+            self.at(node.operands[0], lhs),
+            self.at(node.operands[1], rhs),
+        ]
+
+    def additive(
+        self, node: dag.Node, dst: ir.Reg, op: str, lhs: ir.Reg, rhs: ir.Reg
+    ) -> None:
+        """`add` and `sub`, in whichever of their four forms fits."""
         # A shifted operand comes first: `a + b * 8` is one instruction that
         # way and two as a multiply-add, because the 8 would need a register.
-        if op in ("+", "-") and self.shift_into(node, dst, op, lhs, rhs):
+        if self.shift_into(node, dst, op, lhs, rhs):
             return
-        if op in ("+", "-") and self.multiply_into(node, dst, op, lhs, rhs):
+        if self.multiply_into(node, dst, op, lhs, rhs):
             return
-        if op in ("+", "-"):
-            value = self.constant(right)
+        left, right = node.operands[0], node.operands[1]
+        value = self.constant(right)
+        if value is not None and 0 <= value <= IMMEDIATE:
+            form = "addi" if op == "+" else "subi"
+            self.mach(form, dst, [self.at(left, lhs)], imm=value)
+            return
+        if op == "+":
+            # Only addition may take its constant from the other side.
+            value = self.constant(left)
             if value is not None and 0 <= value <= IMMEDIATE:
-                self.mach("addi" if op == "+" else "subi", dst, [self.at(left, lhs)],
-                          imm=value)
+                self.mach("addi", dst, [self.at(right, rhs)], imm=value)
                 return
-            if op == "+":
-                value = self.constant(left)
-                if value is not None and 0 <= value <= IMMEDIATE:
-                    self.mach("addi", dst, [self.at(right, rhs)], imm=value)
-                    return
-            self.mach("add" if op == "+" else "sub", dst,
-                      [self.at(left, lhs), self.at(right, rhs)])
+        self.mach("add" if op == "+" else "sub", dst, self.both(node, lhs, rhs))
+
+    def multiply(
+        self, node: dag.Node, dst: ir.Reg, lhs: ir.Reg, rhs: ir.Reg
+    ) -> None:
+        value = self.constant(node.operands[1])
+        if value is not None and value > 0 and not value & (value - 1):
+            amount = value.bit_length() - 1
+            self.mach("lsli", dst, [self.at(node.operands[0], lhs)], imm=amount)
             return
-        if op == "*":
-            value = self.constant(right)
-            if value is not None and value > 0 and value & (value - 1) == 0:
-                self.mach("lsli", dst, [self.at(left, lhs)], imm=value.bit_length() - 1)
-                return
-            self.mach("mul", dst, [self.at(left, lhs), self.at(right, rhs)])
+        self.mach("mul", dst, self.both(node, lhs, rhs))
+
+    def shift(
+        self, node: dag.Node, dst: ir.Reg, op: str, lhs: ir.Reg, rhs: ir.Reg
+    ) -> None:
+        value = self.constant(node.operands[1])
+        if value is not None and 0 <= value < 64:
+            self.mach(SHIFTS[op] + "i", dst, [self.at(node.operands[0], lhs)], imm=value)
             return
-        if op == "/":
-            self.mach("sdiv", dst, [self.at(left, lhs), self.at(right, rhs)])
+        self.mach(SHIFTS[op], dst, self.both(node, lhs, rhs))
+
+    def logical(
+        self, node: dag.Node, dst: ir.Reg, op: str, lhs: ir.Reg, rhs: ir.Reg
+    ) -> None:
+        if op == "xor" and self.constant(node.operands[1]) == 1:
+            # Which is how `not` arrives.
+            self.mach("eori", dst, [self.at(node.operands[0], lhs)], imm=1)
             return
-        if op in SHIFTS:
-            value = self.constant(right)
-            if value is not None and 0 <= value < 64:
-                self.mach(SHIFTS[op] + "i", dst, [self.at(left, lhs)], imm=value)
-                return
-            self.mach(SHIFTS[op], dst, [self.at(left, lhs), self.at(right, rhs)])
-            return
-        if op in LOGICAL:
-            value = self.constant(right)
-            if op == "xor" and value == 1:
-                self.mach("eori", dst, [self.at(left, lhs)], imm=1)
-                return
-            self.mach(LOGICAL[op], dst, [self.at(left, lhs), self.at(right, rhs)])
-            return
-        raise AssertionError(f"no instruction for `{op}`")
+        self.mach(LOGICAL[op], dst, self.both(node, lhs, rhs))
 
     def multiply_into(
         self, node: dag.Node, dst: ir.Reg, op: str, lhs: ir.Reg, rhs: ir.Reg
@@ -374,7 +375,7 @@ class _Selector:
         if node.users != 1 or node.escapes:
             return False
         self.compare(node, node.instr.op, node.instr.lhs, node.instr.rhs)
-        terminator.code = CONDITIONS[node.instr.op]
+        terminator.code = mach.CONDITION[node.instr.op]
         return True
 
     # -- reading operands -------------------------------------------------

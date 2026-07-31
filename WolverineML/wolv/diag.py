@@ -16,8 +16,6 @@ class Span:
         return f"{self.line}:{self.col}"
 
 
-NOWHERE = Span(0, 0)
-
 
 class WolvError(Exception):
     """A user-facing compile error, carrying where it happened."""

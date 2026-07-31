@@ -12,8 +12,9 @@ arguments sit at the bottom, at `sp`, where the callee expects them.
            | saved x19...   |
     sp  -> | outgoing args  |
 
-Phis are resolved here rather than in the IR.  A phi is a copy on an edge, so
-the copies go at the end of the predecessor, all at once: the values are read
+A phi that reaches here — which is the ones the dominance-order allocator
+coloured, the other allocator having left SSA already — is a copy on an edge,
+so the copies go at the end of the predecessor, all at once: the values are read
 before any is written, which is what `_sequentialize` arranges.  When the
 copies form a cycle it borrows a register the function never used, and when
 there is none it swaps the two ends with three `eor`s, so no register has to be
@@ -24,8 +25,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from wolv import ir, mach
-from wolv.machine import ARGUMENT_REGS, CALLER_SAVED, SCRATCH
+from wolv import copies, ir, mach
+from wolv.registers import ARGUMENT_REGS, CALLER_SAVED, SCRATCH
 
 UNSCALED: dict[str, str] = {"ldr": "ldur", "str": "stur"}
 
@@ -49,9 +50,6 @@ class Frame:
     def __post_init__(self) -> None:
         raw = ir.WORD * (self.slots + len(self.saved) + self.stack_args)
         self.size = (raw + 15) & ~15
-
-    def slot_offset(self, slot: int) -> int:
-        return ir.slot_offset(slot)
 
     def saved_offset(self, index: int) -> int:
         return -ir.WORD * (self.slots + index + 1)
@@ -179,7 +177,7 @@ class FuncEmitter:
                 else_label = f".L{self.func.label}_{els}"
                 if code:
                     if then == nxt:
-                        self.line(f"b.{_invert(code)} {else_label}")
+                        self.line(f"b.{mach.OPPOSITE[code]} {else_label}")
                     else:
                         self.line(f"b.{code} {then_label}")
                         if els != nxt:
@@ -206,11 +204,11 @@ class FuncEmitter:
         )
 
     def copies(self, moves: list[tuple[int, int]]) -> None:
-        for step in _sequentialize(moves, self.borrowed(moves)):
+        for step in copies.sequentialize(moves, self.borrowed(moves)):
             match step:
-                case _Mov(dst, src):
+                case copies.Mov(dst, src):
                     self.mov(dst, src)
-                case _Swap(a, b):
+                case copies.Swap(a, b):
                     self.line(f"eor x{a}, x{a}, x{b}")
                     self.line(f"eor x{b}, x{a}, x{b}")
                     self.line(f"eor x{a}, x{a}, x{b}")
@@ -238,9 +236,9 @@ class FuncEmitter:
             case ir.Move(dst, src):
                 self.mov(self.colour(dst), self.colour(src))
             case ir.LoadSlot(dst, slot):
-                self.access("ldr", self.colour(dst), 29, self.frame.slot_offset(slot))
+                self.access("ldr", self.colour(dst), 29, ir.slot_offset(slot))
             case ir.StoreSlot(slot, src):
-                self.access("str", self.colour(src), 29, self.frame.slot_offset(slot))
+                self.access("str", self.colour(src), 29, ir.slot_offset(slot))
             case ir.FrameAddr(dst):
                 self.mov(self.colour(dst), 29)
             case ir.Call(dst, callee, args):
@@ -288,20 +286,6 @@ class FuncEmitter:
             self.mov(self.colour(dst), ARGUMENT_REGS[0])
 
 
-def _invert(condition: str) -> str:
-    pairs = {
-        "eq": "ne",
-        "ne": "eq",
-        "lt": "ge",
-        "ge": "lt",
-        "gt": "le",
-        "le": "gt",
-        "lo": "hs",
-        "hs": "lo",
-    }
-    return pairs[condition]
-
-
 def _registers_read(func: ir.Func) -> set[ir.Reg]:
     read: set[ir.Reg] = set()
     for block in func.walk():
@@ -310,65 +294,6 @@ def _registers_read(func: ir.Func) -> set[ir.Reg]:
         for instr in block.instrs:
             read.update(instr.uses())
     return read
-
-
-@dataclass(frozen=True, slots=True)
-class _Mov:
-    dst: int
-    src: int
-
-
-@dataclass(frozen=True, slots=True)
-class _Swap:
-    a: int
-    b: int
-
-
-type _Step = _Mov | _Swap
-
-
-def _sequentialize(
-    moves: list[tuple[int, int]], borrowed: int | None
-) -> list[_Step]:
-    """Order a parallel copy so that no move overwrites a value still to be read.
-
-    Moves whose destination nobody else reads can go first; when only cycles
-    are left, one register has to be got out of the way.  A borrowed register
-    does that in one move, and without one the two ends swap, which costs three
-    `eor`s and no register at all.
-    """
-    real = [(dst, src) for dst, src in moves if dst != src]
-    pending = dict(real)
-    assert len(pending) == len(real), "a parallel copy writes a register twice"
-    done: list[_Step] = []
-    while pending:
-        sources = set(pending.values())
-        ready = [dst for dst in pending if dst not in sources]
-        if ready:
-            for dst in ready:
-                done.append(_Mov(dst, pending.pop(dst)))
-            continue
-        stuck = next(iter(pending))
-        if borrowed is not None:
-            done.append(_Mov(borrowed, stuck))
-            _reads_elsewhere_now(pending, stuck, borrowed)
-            continue
-        # Swapping satisfies `stuck` outright and leaves its old value where
-        # the other end was, so everything still to read it reads there.
-        other = pending.pop(stuck)
-        done.append(_Swap(stuck, other))
-        _reads_elsewhere_now(pending, stuck, other)
-    return done
-
-
-def _reads_elsewhere_now(pending: dict[int, int], was: int, now: int) -> None:
-    """The value that was in `was` is in `now`; whoever wanted it looks there."""
-    for dst, src in list(pending.items()):
-        if src == was:
-            if dst == now:
-                del pending[dst]  # the swap already put it where it belongs
-            else:
-                pending[dst] = now
 
 
 # -- modules ------------------------------------------------------------------

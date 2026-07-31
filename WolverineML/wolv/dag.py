@@ -49,7 +49,6 @@ class Node:
 
 @dataclass(slots=True)
 class Dag:
-    block: ir.Block
     nodes: list[Node] = field(default_factory=list)
     by_value: dict[ir.Reg, int] = field(default_factory=dict)
 
@@ -80,7 +79,7 @@ class Dag:
 
 def build(block: ir.Block, live_out: set[ir.Reg]) -> Dag:
     """Read a block into a graph.  `live_out` includes what the phis will read."""
-    dag = Dag(block)
+    dag = Dag()
     for i, instr in enumerate(block.instrs):
         operands: list[int | None] = [dag.by_value.get(r) for r in instr.uses()]
         node = Node(i, instr, operands)
@@ -113,10 +112,11 @@ def show(dag: Dag) -> str:
             ]
         )
         lines.append(
-            f"  {node.index:>3}{marks:<2} {ir.show_instr(_bare, node.instr):<38}"
+            f"  {node.index:>3}{marks:<2} {node.instr.show(_plain):<38}"
             f" reads [{reads}]  users {node.users}"
         )
     return "\n".join(lines)
 
 
-_bare = ir.Func(label="", name="", params=[], depth=0)
+def _plain(r: ir.Reg) -> str:
+    return f"%{r}"

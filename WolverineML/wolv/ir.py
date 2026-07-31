@@ -424,7 +424,6 @@ class Func:
     nregs: int = 0
     nslots: int = 0
     static_link_slot: int = -1
-    returns_value: bool = False
     colours: dict[Reg, int] = field(default_factory=dict)
     spill_slots: dict[Reg, int] = field(default_factory=dict)
     saved: list[int] = field(default_factory=list)

@@ -100,14 +100,6 @@ def compatible(a: Type, b: Type) -> bool:
             return same(a, b)
 
 
-def is_pointer(t: Type) -> bool:
-    match t:
-        case RecordT() | ArrayT() | StringT() | NilT():
-            return True
-        case _:
-            return False
-
-
 # -- symbols ------------------------------------------------------------------
 
 

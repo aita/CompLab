@@ -33,8 +33,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from wolv import ir, liveness
+from wolv.allocator.hints import preferences
 from wolv.allocator.spill import OutOfRegisters, costs, spill
-from wolv.machine import ARGUMENT_REGS, CALLEE_SAVED, Registers
+from wolv.registers import CALLEE_SAVED, Registers
 
 
 def allocate(func: ir.Func, machine: Registers) -> None:
@@ -131,6 +132,7 @@ class _Colouring:
         return self.degree[r] + len(self.forbidden[r])
 
     def build(self) -> None:
+        self.preferred = preferences(self.func)
         live = liveness.analyse(self.func)
         caller_saved = set(self.machine.caller)
         for block in self.func.walk():
@@ -160,27 +162,15 @@ class _Colouring:
                     for r in alive:
                         if r != defined:
                             self.forbidden[r] |= caller_saved
-                    self.ABI_hints(instr)
                 if defined is not None:
                     alive.discard(defined)
                 alive |= set(instr.uses())
-                if isinstance(instr, ir.Ret) and instr.value is not None:
-                    self.preferred[instr.value] = ARGUMENT_REGS[0]
             if block.label == self.func.entry:
                 self.entry_edges(alive)
-
-    def ABI_hints(self, call: ir.Call) -> None:
-        for i, arg in enumerate(call.args):
-            if i < len(ARGUMENT_REGS):
-                self.preferred[arg] = ARGUMENT_REGS[i]
-        if call.dst is not None:
-            self.preferred[call.dst] = ARGUMENT_REGS[0]
 
     def entry_edges(self, alive: set[ir.Reg]) -> None:
         """Parameters arrive together, so they interfere with each other."""
         for i, param in enumerate(self.func.params):
-            if i < len(ARGUMENT_REGS):
-                self.preferred[param] = ARGUMENT_REGS[i]
             for other in alive:
                 self.add_edge(param, other)
             for another in self.func.params[i + 1 :]:
@@ -357,12 +347,3 @@ class _Colouring:
         for r in sorted(self.coalesced):
             self.colour[r] = self.colour.get(self.get_alias(r), self.machine.anywhere[0])
         return spilled
-
-    def copies_left(self) -> int:
-        """How many of the copies coalescing did not get rid of."""
-        return sum(
-            1
-            for i, move in enumerate(self.moves)
-            if i not in self.coalesced_moves
-            and self.colour.get(move.dst) != self.colour.get(move.src)
-        )

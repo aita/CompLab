@@ -51,6 +51,25 @@ FORMS: Final[dict[str, str]] = {
     "cset": "cset {d}, {sym}",
 }
 
+# Which condition code each comparison sets, and which one says the opposite --
+# the emitter needs the opposite when the branch it is writing falls through to
+# the block the comparison was true for.
+CONDITION: Final[dict[str, str]] = {
+    "=": "eq",
+    "<>": "ne",
+    "<": "lt",
+    "<=": "le",
+    ">": "gt",
+    ">=": "ge",
+    "u<": "lo",
+    "u>=": "hs",
+}
+
+OPPOSITE: Final[dict[str, str]] = {
+    "eq": "ne", "ne": "eq", "lt": "ge", "ge": "lt",
+    "gt": "le", "le": "gt", "lo": "hs", "hs": "lo",
+}  # fmt: skip
+
 # The ones the emitter writes itself, because they are not one instruction.
 EXPANDED: Final[frozenset[str]] = frozenset({"const", "adr", "ldr", "str"})
 

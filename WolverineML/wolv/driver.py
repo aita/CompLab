@@ -1,7 +1,10 @@
 """The pipeline, and the toolchain around it.
 
     source ─lex─▶ tokens ─parse─▶ tree ─check─▶ typed tree ─lower─▶ CFG
-           ─ssa─▶ SSA ─opt─▶ SSA ─regalloc─▶ coloured SSA ─emit─▶ ARMv8
+           ─ssa─▶ SSA ─opt─▶ SSA ─select─▶ machine IR ─regalloc─▶ coloured
+           ─emit─▶ ARMv8
+
+    `--regalloc graph` leaves SSA between selection and allocation.
 
 Assembling and linking is left to a cross `gcc`, and running to `qemu-aarch64`
 when the machine underneath is not itself an ARM.
@@ -33,7 +36,7 @@ from wolv import (
     typecheck,
 )
 from wolv.astshow import show_program
-from wolv.machine import Registers, limited
+from wolv.registers import Registers, limited
 
 RUNTIME = Path(__file__).parent / "runtime" / "runtime.c"
 
@@ -60,18 +63,35 @@ def to_ir(source: str, opts: Options) -> ir.Module:
     return lower.lower(program, lower.Options(checks=opts.checks))
 
 
-def compile_module(source: str, opts: Options) -> ir.Module:
+def compile_module(source: str, opts: Options, upto: str = "asm") -> ir.Module:
+    """The pipeline, stopped as soon as `upto` has something to show.
+
+    There is one of these and not two: a dump is the pipeline halted, not a
+    second description of it that has to be kept in step.
+    """
     mod = to_ir(source, opts)
+    if upto == "ir":
+        return mod
     ssa.construct_module(mod)
+    if upto == "ssa":
+        return mod
     if opts.optimise:
         opt.optimise(mod)
+    if upto == "opt":
+        return mod
     for func in mod.funcs:
         ssa.split_critical_edges(func)
+    if upto == "dag":
+        return mod  # the DAGs are a view of this, taken without changing it
     select.select_module(mod)
     mach.verify_module(mod)
+    if upto == "mach":
+        return mod
     chosen = opts.allocator()
     if not chosen.on_ssa:
         outofssa.destruct_module(mod)
+    if upto == "flat":
+        return mod
     allocator.allocate_module(mod, chosen, opts.registers())
     return mod
 
@@ -88,39 +108,23 @@ def stage(source: str, name: str, opts: Options) -> str:
         program = parser.parse(source)
         typecheck.check(program)
         return show_program(program)
-    mod = to_ir(source, opts)
-    if name == "ir":
-        return ir.show_module(mod)
-    ssa.construct_module(mod)
-    if name == "ssa":
-        return ir.show_module(mod)
-    if opts.optimise:
-        opt.optimise(mod)
-    if name == "opt":
-        return ir.show_module(mod)
-    for func in mod.funcs:
-        ssa.split_critical_edges(func)
+    mod = compile_module(source, opts, upto=name)
     if name == "dag":
-        return "\n\n".join(
-            f"fun {func.label}\n"
-            + "\n".join(
-                f"{label}:\n{dag.show(graph)}"
-                for label, graph in select.graphs(func).items()
-            )
-            for func in mod.funcs
-        ) + "\n"
-    select.select_module(mod)
-    if name == "mach":
-        return ir.show_module(mod)
-    chosen = opts.allocator()
-    if not chosen.on_ssa:
-        outofssa.destruct_module(mod)
-    if name == "flat":
-        return ir.show_module(mod)
-    allocator.allocate_module(mod, chosen, opts.registers())
-    if name == "ra":
-        return ir.show_module(mod)
-    return emit.emit_module(mod)
+        return show_dags(mod)
+    if name == "asm":
+        return emit.emit_module(mod)
+    return ir.show_module(mod)
+
+
+def show_dags(mod: ir.Module) -> str:
+    return "\n\n".join(
+        f"fun {func.label}\n"
+        + "\n".join(
+            f"{label}:\n{dag.show(graph)}"
+            for label, graph in select.graphs(func).items()
+        )
+        for func in mod.funcs
+    ) + "\n"
 
 
 # -- the toolchain ------------------------------------------------------------

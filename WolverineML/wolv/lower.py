@@ -20,10 +20,6 @@ from dataclasses import dataclass
 from wolv import ast, ir
 from wolv.types import FunSym, RecordT, StringT, UnitT, VarSym
 
-CMP_OF_OP = {"=": "=", "<>": "<>", "<": "<", "<=": "<=", ">": ">", ">=": ">="}
-
-ARGUMENT_REGISTERS = ir.ARGUMENT_REGISTERS
-
 
 @dataclass(slots=True)
 class Options:
@@ -120,9 +116,9 @@ class FuncLowerer:
             self.func.params.append(link)
             self.emit(ir.StoreSlot(self.func.static_link_slot, link))
         for index, psym in enumerate(sym.params, start=len(self.func.params)):
-            if index >= ARGUMENT_REGISTERS:
+            if index >= ir.ARGUMENT_REGISTERS:
                 psym.escapes = True
-                psym.slot = -(index - ARGUMENT_REGISTERS + 1)
+                psym.slot = -(index - ir.ARGUMENT_REGISTERS + 1)
                 continue
             r = self.reg()
             self.func.params.append(r)
@@ -132,8 +128,8 @@ class FuncLowerer:
             else:
                 psym.reg = r
         value = self.exp(bind.body)
-        self.func.returns_value = not isinstance(sym.result, UnitT)
-        self.terminate(ir.Ret(value if self.func.returns_value else None))
+        returns = not isinstance(sym.result, UnitT)
+        self.terminate(ir.Ret(value if returns else None))
         self.finish()
 
     def finish(self) -> None:
@@ -340,8 +336,8 @@ class FuncLowerer:
             return self.binop(e.op, lhs, rhs)
         if isinstance(e.lhs.ty, StringT):
             order = self.call_runtime("wol_string_cmp", [lhs, rhs])
-            return self.compare(CMP_OF_OP[e.op], order, self.const(0))
-        return self.compare(CMP_OF_OP[e.op], lhs, rhs)
+            return self.compare(e.op, order, self.const(0))
+        return self.compare(e.op, lhs, rhs)
 
     def logic(self, e: ast.Logic) -> ir.Reg:
         """`andalso` and `orelse` are branches, so the result needs a register."""
