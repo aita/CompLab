@@ -33,6 +33,11 @@ $ uv run python -m wolv run examples/tour.wol
 $ uv run python -m wolv build examples/queens.wol -o queens && qemu-aarch64 ./queens
 ```
 
+The book is in [`doc/`](doc/index.md), a chapter per pass, in Japanese, with
+every dump in it taken from an actual run. Two to start with:
+[パイプライン](doc/00-pipeline.md) と
+[レジスタ割り当て(1) 支配木彩色](doc/07-chordal.md)。
+
 ## Build and run
 
 ```sh
@@ -143,10 +148,12 @@ A program is a sequence of declarations, run in order; there is no `main`.
 | `dag.py` | one block as a graph of expressions, and which nodes may be folded |
 | `select.py` | covering that graph with instructions: `madd`, shifted operands, addressing modes |
 | `outofssa.py` | phis become copies in the predecessors, for the allocator that wants that |
-| `machine.py` | the register file, and which registers a call may clobber |
+| `registers.py` | the register file, and which registers a call may clobber |
 | `allocator/chordal.py` | colouring the SSA in dominance order, no graph |
 | `allocator/graph.py` | Chaitin's algorithm with iterated coalescing |
 | `allocator/spill.py` | the rewrite both of them spill with, and what a spill costs |
+| `allocator/hints.py` | which colour a value would like, which both of them ask |
+| `copies.py` | putting a permutation of registers into a sequence of instructions |
 | `emit.py` | frames, the copies a phi turns into, and one line per instruction |
 | `runtime/runtime.c` | allocation, strings, and the errors a check can raise |
 
@@ -338,20 +345,23 @@ the emitter — so the call convention rides along as a set of colours a node ma
 not take, and a node with `f` of those and `d` neighbours needs `d + f < K`.
 That sum stands in for the degree in every test.
 
-The two are worth comparing, and the answer is that they are level:
+The two are worth comparing:
 
 | | instructions | `mov`s |
 | --- | --- | --- |
-| `chordal`, over the examples and test programs | 3225 | 416 |
-| `graph` | 3226 | 417 |
+| `chordal`, over the examples and test programs | 3275 | 425 |
+| `graph` | 3249 | 399 |
 
-`graph` is ahead on the bigger programs (`queens` 348 → 341, `sort` 534 → 528)
-and behind on the small ones, and the reason for both is the same: leaving SSA
-made copies that were never there before, and coalescing has to earn them back.
-It earns back 96–100% of them — of the 30 copies that leaving SSA adds to
-`tour`, one survives. What is left in the output of *either* allocator is
-almost entirely the ABI copies, and those are made by the emitter, where no
-allocator can see them.
+`graph` is ahead on every program and further ahead on the big ones (`queens`
+348 → 341, `sort` 534 → 528), and what it is ahead by is copies: 26 of the 26
+instructions between them are `mov`s that coalescing removed and biased
+colouring could not. That it is ahead *at all* is the interesting part, because
+leaving SSA makes copies that were never there before and coalescing has to
+earn them back first — it earns back 96–100% of them, and of the 30 that
+leaving SSA adds to `tour`, one survives.
+
+What neither can touch is the ABI copies, which the emitter makes on its own at
+a call, where no allocator can see them.
 
 ### Leaving SSA, for the allocator that stays in it
 

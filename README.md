@@ -28,6 +28,10 @@
   Japanese.
 - [`WolverineML/`](WolverineML) — Tiger's language in SML's syntax, compiled to
   ARMv8 in Python: records, arrays and nested functions with static links, SSA
-  built the textbook way with dominance frontiers, and register allocation on
-  SSA — colouring in dominance order, because an SSA interference graph is
-  chordal and there is no graph to build.
+  built the textbook way with dominance frontiers, instructions chosen by
+  covering a DAG of each block, and then the same function allocated two ways —
+  by colouring the SSA in dominance order, because an SSA interference graph is
+  chordal and there is no graph to build, and by leaving SSA and colouring the
+  graph with iterated coalescing, so that the two can be measured against each
+  other. The book is in [`WolverineML/doc/`](WolverineML/doc/index.md), a
+  chapter per pass, in Japanese.
