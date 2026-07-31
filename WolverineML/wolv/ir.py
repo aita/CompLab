@@ -111,6 +111,24 @@ class FrameAddr(Instr):
 
 
 @dataclass(slots=True)
+class Mach(Instr):
+    """One machine instruction, chosen by `select.py` out of the DAG.
+
+    `form` names an entry in the emitter's table, which knows how to write it
+    and how many operands it reads.  Everything downstream — liveness, both
+    allocators, the verifier — only needs `dst` and `srcs`, so none of it has
+    to know what an `madd` is.
+    """
+
+    form: str
+    dst: Reg | None
+    srcs: list[Reg]
+    imm: int = 0
+    symbol: str = ""
+    effect: bool = False
+
+
+@dataclass(slots=True)
 class Call(Instr):
     dst: Reg | None
     callee: str
@@ -133,6 +151,9 @@ class CBr(Instr):
     cond: Reg
     then: str
     els: str
+    # After selection a branch may read the flags a `cmp` just set instead of
+    # testing a register, and then it reads no register at all.
+    code: str = ""
 
 
 @dataclass(slots=True)
@@ -224,6 +245,8 @@ def defs(instr: Instr) -> Reg | None:
             return dst
         case Call(dst):
             return dst
+        case Mach(_, dst):
+            return dst
         case _:
             return None
 
@@ -241,8 +264,10 @@ def uses(instr: Instr) -> list[Reg]:
             return [base, src]
         case Call(_, _, args):
             return list(args)
-        case CBr(cond, _, _):
-            return [cond]
+        case Mach(_, _, srcs):
+            return list(srcs)
+        case CBr(cond, _, _, code):
+            return [] if code else [cond]
         case _:
             return []
 
@@ -266,8 +291,11 @@ def map_uses(instr: Instr, f: Callable[[Reg], Reg]) -> None:
             instr.src = f(instr.src)
         case Call():
             instr.args = [f(a) for a in instr.args]
+        case Mach():
+            instr.srcs = [f(s) for s in instr.srcs]
         case CBr():
-            instr.cond = f(instr.cond)
+            if not instr.code:
+                instr.cond = f(instr.cond)
         case _:
             pass
 
@@ -278,7 +306,7 @@ def set_def(instr: Instr, r: Reg) -> None:
             instr.dst = r
         case Bin() | Cmp() | Load() | LoadSlot():
             instr.dst = r
-        case Call():
+        case Call() | Mach():
             instr.dst = r
         case _:
             raise AssertionError("instruction defines nothing")
@@ -286,6 +314,8 @@ def set_def(instr: Instr, r: Reg) -> None:
 
 def has_effect(instr: Instr) -> bool:
     """True when an instruction has to be kept even if its result is dead."""
+    if isinstance(instr, Mach):
+        return instr.effect
     return isinstance(instr, (Store, StoreSlot, Call, Jmp, CBr, Ret))
 
 
@@ -394,10 +424,19 @@ def show_instr(func: Func, instr: Instr) -> str:
         case Phi(dst, args):
             parts = ", ".join(f"{p}: {n(r)}" for p, r in args.items())
             return f"{n(dst)} = phi [{parts}]"
+        case Mach(form, dst, srcs, imm, symbol):
+            operands = [n(s) for s in srcs]
+            if symbol:
+                operands.append(symbol)
+            elif imm or form == "const":
+                operands.append(f"#{imm}")
+            written = f"{form} {', '.join(operands)}".rstrip()
+            return written if dst is None else f"{n(dst)} = {written}"
         case Jmp(target):
             return f"jmp {target}"
-        case CBr(cond, then, els):
-            return f"br {n(cond)} ? {then} : {els}"
+        case CBr(cond, then, els, code):
+            test = f"{code}?" if code else f"{n(cond)} ?"
+            return f"br {test} {then} : {els}"
         case Ret(value):
             return "ret" if value is None else f"ret {n(value)}"
         case _:

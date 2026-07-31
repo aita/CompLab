@@ -19,6 +19,7 @@ from pathlib import Path
 
 from wolv import (
     allocator,
+    dag,
     emit,
     ir,
     lexer,
@@ -26,6 +27,7 @@ from wolv import (
     opt,
     outofssa,
     parser,
+    select,
     ssa,
     typecheck,
 )
@@ -34,7 +36,7 @@ from wolv.machine import Registers, limited
 
 RUNTIME = Path(__file__).parent / "runtime" / "runtime.c"
 
-STAGES = ("tokens", "ast", "ir", "ssa", "opt", "flat", "ra", "asm")
+STAGES = ("tokens", "ast", "ir", "ssa", "opt", "dag", "mach", "flat", "ra", "asm")
 
 
 @dataclass(slots=True)
@@ -64,6 +66,7 @@ def compile_module(source: str, opts: Options) -> ir.Module:
         opt.optimise(mod)
     for func in mod.funcs:
         ssa.split_critical_edges(func)
+    select.select_module(mod)
     chosen = opts.allocator()
     if not chosen.on_ssa:
         outofssa.destruct_module(mod)
@@ -95,6 +98,18 @@ def stage(source: str, name: str, opts: Options) -> str:
         return ir.show_module(mod)
     for func in mod.funcs:
         ssa.split_critical_edges(func)
+    if name == "dag":
+        return "\n\n".join(
+            f"fun {func.label}\n"
+            + "\n".join(
+                f"{label}:\n{dag.show(graph)}"
+                for label, graph in select.graphs(func).items()
+            )
+            for func in mod.funcs
+        ) + "\n"
+    select.select_module(mod)
+    if name == "mach":
+        return ir.show_module(mod)
     chosen = opts.allocator()
     if not chosen.on_ssa:
         outofssa.destruct_module(mod)

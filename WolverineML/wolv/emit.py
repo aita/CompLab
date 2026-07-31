@@ -27,27 +27,33 @@ from dataclasses import dataclass
 from wolv import ir
 from wolv.machine import ARGUMENT_REGS, CALLER_SAVED, SCRATCH
 
-CONDITIONS: dict[str, str] = {
-    "=": "eq",
-    "<>": "ne",
-    "<": "lt",
-    "<=": "le",
-    ">": "gt",
-    ">=": "ge",
-    "u<": "lo",
-    "u>=": "hs",
-}
-
-ARITHMETIC: dict[str, str] = {
-    "+": "add",
-    "-": "sub",
-    "*": "mul",
-    "/": "sdiv",
-    "and": "and",
-    "or": "orr",
-    "xor": "eor",
-    "shl": "lsl",
-    "shr": "asr",
+# How each form the selector chose is written down.  `ldr`, `str`, `const` and
+# `adr` are not here because they are not one instruction each: what they come
+# out as depends on how far the offset reaches or how wide the constant is.
+FORMS: dict[str, str] = {
+    "add": "add {d}, {s0}, {s1}",
+    "addi": "add {d}, {s0}, #{imm}",
+    "adds": "add {d}, {s0}, {s1}, lsl #{imm}",
+    "sub": "sub {d}, {s0}, {s1}",
+    "subi": "sub {d}, {s0}, #{imm}",
+    "subs": "sub {d}, {s0}, {s1}, lsl #{imm}",
+    "mul": "mul {d}, {s0}, {s1}",
+    "madd": "madd {d}, {s0}, {s1}, {s2}",
+    "msub": "msub {d}, {s0}, {s1}, {s2}",
+    "sdiv": "sdiv {d}, {s0}, {s1}",
+    "and": "and {d}, {s0}, {s1}",
+    "orr": "orr {d}, {s0}, {s1}",
+    "eor": "eor {d}, {s0}, {s1}",
+    "eori": "eor {d}, {s0}, #{imm}",
+    "lsl": "lsl {d}, {s0}, {s1}",
+    "lsli": "lsl {d}, {s0}, #{imm}",
+    "asr": "asr {d}, {s0}, {s1}",
+    "asri": "asr {d}, {s0}, #{imm}",
+    "cmp": "cmp {s0}, {s1}",
+    "cmpi": "cmp {s0}, #{imm}",
+    "cset": "cset {d}, {sym}",
+    "ldrx": "ldr {d}, [{s0}, {s1}, lsl #{imm}]",
+    "strx": "str {s2}, [{s0}, {s1}, lsl #{imm}]",
 }
 
 UNSCALED: dict[str, str] = {"ldr": "ldur", "str": "stur"}
@@ -96,11 +102,8 @@ class FuncEmitter:
         self.frame = frame_of(func)
         self.out: list[str] = []
         self.epilogue = f".Lepi_{func.label}"
-        reads = _read_counts(func)
-        self.uses_once = {r for r, n in reads.items() if n == 1}
-        self.read_somewhere = set(reads)
+        self.read_somewhere = _registers_read(func)
         self.taken = set(func.colours.values())
-        self.constants, self.immediate_only = _inlineable_constants(func)
 
     # -- helpers ----------------------------------------------------------
 
@@ -114,12 +117,6 @@ class FuncEmitter:
         colour = self.func.colours.get(reg)
         assert colour is not None, f"%{reg} was never coloured"
         return colour
-
-    def operand(self, reg: ir.Reg) -> str:
-        """A register, or the constant it holds if the instruction can take one."""
-        if reg in self.immediate_only:
-            return f"#{self.constants[reg]}"
-        return f"x{self.colour(reg)}"
 
     def mov(self, dst: int, src: int) -> None:
         if dst != src:
@@ -194,73 +191,26 @@ class FuncEmitter:
             self.access("ldr", reg, 29, self.frame.saved_offset(i))
 
     def block(self, block: ir.Block, nxt: str | None) -> None:
-        pending_condition: str | None = None
-        body = block.instrs[:-1]
-        fused = -1
-        for i, instr in enumerate(body):
-            if i == fused:
-                continue
-            if self._compares_for(instr, i, body, block):
-                assert isinstance(instr, ir.Cmp)
-                self.line(f"cmp x{self.colour(instr.lhs)}, {self.operand(instr.rhs)}")
-                pending_condition = CONDITIONS[instr.op]
-                continue
-            difference = self._subtracts_from(instr, i, body)
-            if difference is not None:
-                assert isinstance(instr, ir.Bin)
-                self.multiply_subtract(instr, difference)
-                fused = i + 1
-                continue
+        for instr in block.instrs[:-1]:
             self.instruction(instr)
-        self.terminator(block, nxt, pending_condition)
+        self.terminator(block, nxt)
 
-    def _compares_for(
-        self, instr: ir.Instr, i: int, body: list[ir.Instr], block: ir.Block
-    ) -> bool:
-        """A comparison read only by the branch right after it sets the flags."""
-        return (
-            isinstance(instr, ir.Cmp)
-            and i == len(body) - 1
-            and isinstance(block.terminator, ir.CBr)
-            and block.terminator.cond == instr.dst
-            and instr.dst in self.uses_once
-        )
-
-    def _subtracts_from(
-        self, instr: ir.Instr, i: int, body: list[ir.Instr]
-    ) -> ir.Bin | None:
-        """A product read only by the subtraction right after it becomes `msub`."""
-        if not isinstance(instr, ir.Bin) or instr.op != "*":
-            return None
-        if instr.dst not in self.uses_once or i + 1 >= len(body):
-            return None
-        nxt = body[i + 1]
-        if not isinstance(nxt, ir.Bin) or nxt.op != "-":
-            return None
-        if nxt.rhs != instr.dst or nxt.lhs == instr.dst:
-            return None
-        if instr.rhs in self.immediate_only or nxt.rhs in self.immediate_only:
-            return None
-        return nxt
-
-    def terminator(
-        self, block: ir.Block, nxt: str | None, condition: str | None
-    ) -> None:
+    def terminator(self, block: ir.Block, nxt: str | None) -> None:
         match block.terminator:
             case ir.Jmp(target):
                 self.edge(block.label, target)
                 if target != nxt:
                     self.line(f"b .L{self.func.label}_{target}")
-            case ir.CBr(cond, then, els):
+            case ir.CBr(cond, then, els, code):
                 assert not self.func.blocks[then].phis
                 assert not self.func.blocks[els].phis
                 then_label = f".L{self.func.label}_{then}"
                 else_label = f".L{self.func.label}_{els}"
-                if condition is not None:
+                if code:
                     if then == nxt:
-                        self.line(f"b.{_invert(condition)} {else_label}")
+                        self.line(f"b.{_invert(code)} {else_label}")
                     else:
-                        self.line(f"b.{condition} {then_label}")
+                        self.line(f"b.{code} {then_label}")
                         if els != nxt:
                             self.line(f"b {else_label}")
                 elif then == nxt:
@@ -312,24 +262,10 @@ class FuncEmitter:
 
     def instruction(self, instr: ir.Instr) -> None:
         match instr:
-            case ir.Const(dst, value):
-                if dst not in self.immediate_only:
-                    self.immediate(self.colour(dst), value)
-            case ir.StrConst(dst, symbol):
-                d = self.colour(dst)
-                self.line(f"adrp x{d}, {symbol}")
-                self.line(f"add x{d}, x{d}, :lo12:{symbol}")
+            case ir.Mach():
+                self.machine(instr)
             case ir.Move(dst, src):
                 self.mov(self.colour(dst), self.colour(src))
-            case ir.Bin(dst, op, lhs, rhs):
-                self.arithmetic(op, self.colour(dst), self.colour(lhs), rhs)
-            case ir.Cmp(dst, op, lhs, rhs):
-                self.line(f"cmp x{self.colour(lhs)}, {self.operand(rhs)}")
-                self.line(f"cset x{self.colour(dst)}, {CONDITIONS[op]}")
-            case ir.Load(dst, base, offset):
-                self.access("ldr", self.colour(dst), self.colour(base), offset)
-            case ir.Store(base, offset, src):
-                self.access("str", self.colour(src), self.colour(base), offset)
             case ir.LoadSlot(dst, slot):
                 self.access("ldr", self.colour(dst), 29, self.frame.slot_offset(slot))
             case ir.StoreSlot(slot, src):
@@ -341,15 +277,32 @@ class FuncEmitter:
             case _:
                 raise AssertionError(f"cannot emit {instr}")
 
-    def arithmetic(self, op: str, dst: int, lhs: int, rhs: ir.Reg) -> None:
-        self.line(f"{ARITHMETIC[op]} x{dst}, x{lhs}, {self.operand(rhs)}")
-
-    def multiply_subtract(self, product: ir.Bin, difference: ir.Bin) -> None:
-        """`a - x * y` in one instruction, which is how a remainder ends up."""
-        self.line(
-            f"msub x{self.colour(difference.dst)}, x{self.colour(product.lhs)}, "
-            f"x{self.colour(product.rhs)}, x{self.colour(difference.lhs)}"
-        )
+    def machine(self, instr: ir.Mach) -> None:
+        """Write down one selected instruction, or the sequence it stands for."""
+        srcs = [self.colour(s) for s in instr.srcs]
+        match instr.form:
+            case "const":
+                assert instr.dst is not None
+                self.immediate(self.colour(instr.dst), instr.imm)
+            case "adr":
+                assert instr.dst is not None
+                d = self.colour(instr.dst)
+                self.line(f"adrp x{d}, {instr.symbol}")
+                self.line(f"add x{d}, x{d}, :lo12:{instr.symbol}")
+            case "ldr":
+                assert instr.dst is not None
+                self.access("ldr", self.colour(instr.dst), srcs[0], instr.imm)
+            case "str":
+                self.access("str", srcs[1], srcs[0], instr.imm)
+            case _:
+                names = {f"s{i}": f"x{c}" for i, c in enumerate(srcs)}
+                if instr.dst is not None:
+                    names["d"] = f"x{self.colour(instr.dst)}"
+                self.line(
+                    FORMS[instr.form].format(
+                        **names, imm=instr.imm, sym=instr.symbol
+                    )
+                )
 
     def call(self, dst: ir.Reg | None, callee: str, args: list[ir.Reg]) -> None:
         in_registers = [
@@ -378,50 +331,14 @@ def _invert(condition: str) -> str:
     return pairs[condition]
 
 
-def _takes_an_immediate(instr: ir.Instr, reg: ir.Reg, value: int) -> bool:
-    """Whether this instruction can read `reg`'s constant as an immediate."""
-    match instr:
-        case ir.Bin(_, op, lhs, rhs) if rhs == reg and lhs != reg:
-            if op in ("+", "-"):
-                return 0 <= value <= 4095
-            if op in ("shl", "shr"):
-                return 0 <= value < 64
-            return False
-        case ir.Cmp(_, _, lhs, rhs) if rhs == reg and lhs != reg:
-            return 0 <= value <= 4095
-        case _:
-            return False
-
-
-def _inlineable_constants(func: ir.Func) -> tuple[dict[ir.Reg, int], set[ir.Reg]]:
-    """Constants every reader can take as an immediate need never be materialised."""
-    constants: dict[ir.Reg, int] = {}
-    for block in func.walk():
-        for instr in block.instrs:
-            match instr:
-                case ir.Const(dst, value):
-                    constants[dst] = value
-    inline = set(constants)
+def _registers_read(func: ir.Func) -> set[ir.Reg]:
+    read: set[ir.Reg] = set()
     for block in func.walk():
         for phi in block.phis:
-            inline -= set(phi.args.values())
+            read.update(phi.args.values())
         for instr in block.instrs:
-            for r in ir.uses(instr):
-                if r in constants and not _takes_an_immediate(instr, r, constants[r]):
-                    inline.discard(r)
-    return constants, inline
-
-
-def _read_counts(func: ir.Func) -> dict[ir.Reg, int]:
-    counts: dict[ir.Reg, int] = {}
-    for block in func.walk():
-        for phi in block.phis:
-            for arg in phi.args.values():
-                counts[arg] = counts.get(arg, 0) + 1
-        for instr in block.instrs:
-            for r in ir.uses(instr):
-                counts[r] = counts.get(r, 0) + 1
-    return counts
+            read.update(ir.uses(instr))
+    return read
 
 
 @dataclass(frozen=True, slots=True)

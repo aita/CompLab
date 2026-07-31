@@ -1,0 +1,2 @@
+# qemu writes one of these when a test program crashes
+*.core

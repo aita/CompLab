@@ -3,11 +3,12 @@
 A small ML-flavoured language, compiled to ARMv8 (AArch64), in Python. The
 language is Tiger's — records, arrays, nested functions with static links,
 loops with `break` — written the way SML writes things. The back end is the
-point: the compiler builds SSA the textbook way, optimises there, and then
-allocates registers **two different ways**, over the same IR, so that the two
-can be held next to each other — by colouring the SSA itself in dominance
-order, and by leaving SSA first and colouring the interference graph with
-iterated coalescing.
+point: the compiler builds SSA the textbook way, optimises there, chooses
+instructions by covering a **DAG** of each block with the things ARM can do in
+one, and then allocates registers **two different ways** over the same IR, so
+that the two can be held next to each other — by colouring the SSA itself in
+dominance order, and by leaving SSA first and colouring the interference graph
+with iterated coalescing.
 
 ```sml
 type point = { x : int, y : int }
@@ -36,7 +37,7 @@ $ uv run python -m wolv build examples/queens.wol -o queens && qemu-aarch64 ./qu
 
 ```sh
 uv sync
-uv run pytest                     # 144 tests
+uv run pytest                     # 158 tests
 uv run mypy                       # every module is strictly typed
 uv run ruff check .
 
@@ -121,9 +122,11 @@ A program is a sequence of declarations, run in order; there is no `main`.
 
 ```
  .wol ──lex──▶ tokens ──parse──▶ tree ──check──▶ typed tree ──lower──▶ CFG
-      ──ssa──▶ SSA ──opt──▶ SSA ──split──▶ ──regalloc──▶ coloured ──emit──▶ ARMv8
-                                             │
-                          out of SSA first, if the allocator wants a graph
+      ──ssa──▶ SSA ──opt──▶ SSA ──split──▶ ──select──▶ machine IR
+                                                  │
+                                                  ├─ out of SSA, for the graph
+                                                  ▼
+                                    ──regalloc──▶ coloured ──emit──▶ ARMv8
 ```
 
 | module | what it does |
@@ -136,12 +139,14 @@ A program is a sequence of declarations, run in order; there is no `main`.
 | `ssa.py` | dominators, dominance frontiers, phi placement, renaming, and a verifier |
 | `opt.py` | constant folding, copy propagation, phi simplification, branch folding, dead code |
 | `liveness.py` | liveness on SSA, where a phi reads its arguments on the edges |
+| `dag.py` | one block as a graph of expressions, and which nodes may be folded |
+| `select.py` | covering that graph with instructions: `madd`, shifted operands, addressing modes |
 | `outofssa.py` | phis become copies in the predecessors, for the allocator that wants that |
 | `machine.py` | the register file, and which registers a call may clobber |
 | `allocator/chordal.py` | colouring the SSA in dominance order, no graph |
 | `allocator/graph.py` | Chaitin's algorithm with iterated coalescing |
 | `allocator/spill.py` | the rewrite both of them spill with, and what a spill costs |
-| `emit.py` | AAPCS64 assembly, frames, and the copies a phi turns into |
+| `emit.py` | frames, the copies a phi turns into, and one line per instruction |
 | `runtime/runtime.c` | allocation, strings, and the errors a check can raise |
 
 ### Lowering never builds a phi
@@ -166,18 +171,17 @@ already in SSA and keeps its name.
 $ uv run python -m wolv emit -s ra --no-checks loop.wol
 fun wol_count(%0:0, %1:1)  ; depth 1, 0 slots
 entry:
-    %2:9 = 0
-    %4:0 = 0
+    %2:9 = const #0
+    %4:0 = const #0
     jmp test1
 test1:  ; preds: entry, body2
     %12:9 = phi [entry: %2:9, body2: %9:9]
     %13:0 = phi [entry: %4:0, body2: %7:0]
-    %6:10 = %12:9 < %1:1
-    br %6:10 ? body2 : done3
+    cmp %12:9, %1:1
+    br lt? body2 : done3
 body2:  ; preds: test1
-    %7:0 = %13:0 + %12:9
-    %8:10 = 1
-    %9:9 = %12:9 + %8:10
+    %7:0 = add %13:0, %12:9
+    %9:9 = addi %12:9, #1
     jmp test1
 done3:  ; preds: test1
     ret %13:0
@@ -185,8 +189,9 @@ done3:  ; preds: test1
 
 `%12:9` is virtual register 12, coloured `x9`. Every argument of each phi ended
 up the same colour as the phi itself, so both copies on the back edge cost
-nothing; `%8`, a constant every reader can take as an immediate, is never
-materialised at all; and the loop comes out as three instructions:
+nothing; the comparison sets the flags the branch reads, so it needs no
+register; the 1 became an immediate rather than a value; and the loop comes out
+as three instructions:
 
 ```
 .Lwol_count_test1:
@@ -197,6 +202,58 @@ materialised at all; and the loop comes out as three instructions:
 	add x9, x9, #1
 	b .Lwol_count_test1
 ```
+
+### The machine IR, chosen off a DAG
+
+An instruction is chosen where the whole expression is visible, not by looking
+at the line before. Each block is read into a graph — a node per instruction,
+an edge per operand — and the selector covers that graph with the things this
+machine can do in one instruction:
+
+    a + b * c            madd
+    a - b * c            msub
+    a + (b << k)         add with a shifted operand
+    a * 8                lsl
+    a + 4095             add with an immediate
+    [a + 24]             a load with a displacement
+    a < b, then branch   cmp, and a branch on the flags it set
+
+```
+$ uv run python -m wolv emit -s dag --no-checks loop.wol
+body2:
+    0*  %7 = %13 + %12                         reads [-, -]  users 0
+    1   %8 = 1                                 reads []  users 1
+    2*  %9 = %12 + %8                          reads [-, 1]  users 0
+    3!  jmp test1                              reads []  users 0
+```
+
+`*` is a value the block does not keep to itself and `!` is one that has to
+happen whether or not anything reads it; `reads` names the nodes an operand
+comes from, and `-` is a value from somewhere else. So node 1 has one reader
+and node 2 is the only one — which is what lets the 1 disappear into an `addi`.
+
+What comes out is machine instructions with virtual registers, still in the
+same CFG and still in SSA, so liveness, both allocators and the SSA verifier
+carry on unchanged. `wolv emit -s mach` shows it.
+
+The rule about folding is the whole of the difficulty. A node with one reader
+*can* be computed where it is read rather than where it was written — but only
+if the reader's instruction actually swallows it. Deferring one on the chance
+that it will be swallowed is how `a + b + c + d + ...` ends up computed on its
+last line, with every term alive until then: measured, that cost a 40-term sum
+about fifty instructions of spilling. So the selector plans first, asking of
+each node whether its reader has a tile with room for it, and everything else
+is computed where it was written. Constants are the exception in the other
+direction: repeating one is free, so any number of readers may take it as an
+immediate, and it becomes an instruction only if somebody needs it in a
+register.
+
+Selection is worth about 2% of the code, and the same in both allocators:
+
+| | instructions |
+| --- | --- |
+| before, with peepholes in the emitter | 3288 |
+| after, chosen off the DAG | 3225 |
 
 ### Register allocation on SSA
 
@@ -276,10 +333,10 @@ The two are worth comparing, and the answer is that they are level:
 
 | | instructions | `mov`s |
 | --- | --- | --- |
-| `chordal`, over the examples and test programs | 3288 | 421 |
-| `graph` | 3286 | 420 |
+| `chordal`, over the examples and test programs | 3225 | 416 |
+| `graph` | 3226 | 417 |
 
-`graph` is ahead on the bigger programs (`queens` 359 → 352, `sort` 546 → 540)
+`graph` is ahead on the bigger programs (`queens` 348 → 341, `sort` 534 → 528)
 and behind on the small ones, and the reason for both is the same: leaving SSA
 made copies that were never there before, and coalescing has to earn them back.
 It earns back 96–100% of them — of the 30 copies that leaving SSA adds to

@@ -400,6 +400,12 @@ class FuncLowerer:
         return r
 
     def element_address(self, e: ast.Index) -> ir.Reg:
+        """The address of `a[i]`, without the length word the elements follow.
+
+        The selector turns this into one `add` with a shifted operand, and the
+        word is the load's displacement, so the two instructions that come out
+        are the two the machine has.
+        """
         base = self.value(e.array)
         idx = self.value(e.index)
         self.check_not_nil(base)
