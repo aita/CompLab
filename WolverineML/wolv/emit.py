@@ -14,8 +14,10 @@ arguments sit at the bottom, at `sp`, where the callee expects them.
 
 Phis are resolved here rather than in the IR.  A phi is a copy on an edge, so
 the copies go at the end of the predecessor, all at once: the values are read
-before any is written, which is what `_sequentialize` arranges, using x16 when
-the copies form a cycle.
+before any is written, which is what `_sequentialize` arranges.  When the
+copies form a cycle it borrows a register the function never used, and when
+there is none it swaps the two ends with three `eor`s, so no register has to be
+reserved for it.
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from wolv import ir
-from wolv.regalloc import ARGUMENT_REGS, SCRATCH
+from wolv.machine import ARGUMENT_REGS, CALLER_SAVED, SCRATCH
 
 CONDITIONS: dict[str, str] = {
     "=": "eq",
@@ -50,8 +52,14 @@ ARITHMETIC: dict[str, str] = {
 
 UNSCALED: dict[str, str] = {"ldr": "ldur", "str": "stur"}
 
-SAFE = SCRATCH[0]
-SPARE = SCRATCH[1]
+# The one register kept back.  A frame big enough to put a slot out of reach of
+# `ldur` is only discovered after allocation has added its spill slots, so the
+# address has to be computed somewhere the allocator does not know about.
+SPARE = SCRATCH[0]
+
+# Nothing of ours is live at the top of the prologue except the incoming
+# arguments, so a caller-saved register that is not one of them is free there.
+PROLOGUE_TEMP = 9
 
 
 @dataclass(slots=True)
@@ -91,6 +99,7 @@ class FuncEmitter:
         reads = _read_counts(func)
         self.uses_once = {r for r, n in reads.items() if n == 1}
         self.read_somewhere = set(reads)
+        self.taken = set(func.colours.values())
         self.constants, self.immediate_only = _inlineable_constants(func)
 
     # -- helpers ----------------------------------------------------------
@@ -168,8 +177,8 @@ class FuncEmitter:
             if self.frame.size <= 4095:
                 self.line(f"sub sp, sp, #{self.frame.size}")
             else:
-                self.immediate(SAFE, self.frame.size)
-                self.line(f"sub sp, sp, x{SAFE}")
+                self.immediate(PROLOGUE_TEMP, self.frame.size)
+                self.line(f"sub sp, sp, x{PROLOGUE_TEMP}")
         for i, reg in enumerate(self.frame.saved):
             self.access("str", reg, 29, self.frame.saved_offset(i))
         self.copies(
@@ -187,19 +196,52 @@ class FuncEmitter:
     def block(self, block: ir.Block, nxt: str | None) -> None:
         pending_condition: str | None = None
         body = block.instrs[:-1]
+        fused = -1
         for i, instr in enumerate(body):
-            if (
-                isinstance(instr, ir.Cmp)
-                and i == len(body) - 1
-                and isinstance(block.terminator, ir.CBr)
-                and block.terminator.cond == instr.dst
-                and instr.dst in self.uses_once
-            ):
+            if i == fused:
+                continue
+            if self._compares_for(instr, i, body, block):
+                assert isinstance(instr, ir.Cmp)
                 self.line(f"cmp x{self.colour(instr.lhs)}, {self.operand(instr.rhs)}")
                 pending_condition = CONDITIONS[instr.op]
                 continue
+            difference = self._subtracts_from(instr, i, body)
+            if difference is not None:
+                assert isinstance(instr, ir.Bin)
+                self.multiply_subtract(instr, difference)
+                fused = i + 1
+                continue
             self.instruction(instr)
         self.terminator(block, nxt, pending_condition)
+
+    def _compares_for(
+        self, instr: ir.Instr, i: int, body: list[ir.Instr], block: ir.Block
+    ) -> bool:
+        """A comparison read only by the branch right after it sets the flags."""
+        return (
+            isinstance(instr, ir.Cmp)
+            and i == len(body) - 1
+            and isinstance(block.terminator, ir.CBr)
+            and block.terminator.cond == instr.dst
+            and instr.dst in self.uses_once
+        )
+
+    def _subtracts_from(
+        self, instr: ir.Instr, i: int, body: list[ir.Instr]
+    ) -> ir.Bin | None:
+        """A product read only by the subtraction right after it becomes `msub`."""
+        if not isinstance(instr, ir.Bin) or instr.op != "*":
+            return None
+        if instr.dst not in self.uses_once or i + 1 >= len(body):
+            return None
+        nxt = body[i + 1]
+        if not isinstance(nxt, ir.Bin) or nxt.op != "-":
+            return None
+        if nxt.rhs != instr.dst or nxt.lhs == instr.dst:
+            return None
+        if instr.rhs in self.immediate_only or nxt.rhs in self.immediate_only:
+            return None
+        return nxt
 
     def terminator(
         self, block: ir.Block, nxt: str | None, condition: str | None
@@ -243,8 +285,28 @@ class FuncEmitter:
         )
 
     def copies(self, moves: list[tuple[int, int]]) -> None:
-        for dst, src in _sequentialize(moves):
-            self.mov(dst, src)
+        for step in _sequentialize(moves, self.borrowed(moves)):
+            match step:
+                case _Mov(dst, src):
+                    self.mov(dst, src)
+                case _Swap(a, b):
+                    self.line(f"eor x{a}, x{a}, x{b}")
+                    self.line(f"eor x{b}, x{a}, x{b}")
+                    self.line(f"eor x{a}, x{a}, x{b}")
+
+    def borrowed(self, moves: list[tuple[int, int]]) -> int | None:
+        """A register free to clobber here, if the function left one over.
+
+        A caller-saved register this function never gave to a value holds
+        nothing of ours anywhere, and one that this copy neither reads nor
+        writes holds nothing of the copy's either.  With no such register the
+        copies swap instead, which needs no scratch at all.
+        """
+        touched = {r for pair in moves for r in pair}
+        for reg in CALLER_SAVED:
+            if reg not in self.taken and reg not in touched:
+                return reg
+        return None
 
     # -- one instruction --------------------------------------------------
 
@@ -280,12 +342,14 @@ class FuncEmitter:
                 raise AssertionError(f"cannot emit {instr}")
 
     def arithmetic(self, op: str, dst: int, lhs: int, rhs: ir.Reg) -> None:
-        if op == "mod":
-            divisor = self.colour(rhs)
-            self.line(f"sdiv x{SAFE}, x{lhs}, x{divisor}")
-            self.line(f"msub x{dst}, x{SAFE}, x{divisor}, x{lhs}")
-            return
         self.line(f"{ARITHMETIC[op]} x{dst}, x{lhs}, {self.operand(rhs)}")
+
+    def multiply_subtract(self, product: ir.Bin, difference: ir.Bin) -> None:
+        """`a - x * y` in one instruction, which is how a remainder ends up."""
+        self.line(
+            f"msub x{self.colour(difference.dst)}, x{self.colour(product.lhs)}, "
+            f"x{self.colour(product.rhs)}, x{self.colour(difference.lhs)}"
+        )
 
     def call(self, dst: ir.Reg | None, callee: str, args: list[ir.Reg]) -> None:
         in_registers = [
@@ -360,25 +424,63 @@ def _read_counts(func: ir.Func) -> dict[ir.Reg, int]:
     return counts
 
 
-def _sequentialize(moves: list[tuple[int, int]]) -> list[tuple[int, int]]:
-    """Order a parallel copy so that no move overwrites a value still to be read."""
+@dataclass(frozen=True, slots=True)
+class _Mov:
+    dst: int
+    src: int
+
+
+@dataclass(frozen=True, slots=True)
+class _Swap:
+    a: int
+    b: int
+
+
+type _Step = _Mov | _Swap
+
+
+def _sequentialize(
+    moves: list[tuple[int, int]], borrowed: int | None
+) -> list[_Step]:
+    """Order a parallel copy so that no move overwrites a value still to be read.
+
+    Moves whose destination nobody else reads can go first; when only cycles
+    are left, one register has to be got out of the way.  A borrowed register
+    does that in one move, and without one the two ends swap, which costs three
+    `eor`s and no register at all.
+    """
     real = [(dst, src) for dst, src in moves if dst != src]
     pending = dict(real)
     assert len(pending) == len(real), "a parallel copy writes a register twice"
-    done: list[tuple[int, int]] = []
+    done: list[_Step] = []
     while pending:
         sources = set(pending.values())
         ready = [dst for dst in pending if dst not in sources]
         if ready:
             for dst in ready:
-                done.append((dst, pending.pop(dst)))
+                done.append(_Mov(dst, pending.pop(dst)))
             continue
-        cycle = next(iter(pending))
-        done.append((SAFE, cycle))
-        for dst, src in list(pending.items()):
-            if src == cycle:
-                pending[dst] = SAFE
+        stuck = next(iter(pending))
+        if borrowed is not None:
+            done.append(_Mov(borrowed, stuck))
+            _reads_elsewhere_now(pending, stuck, borrowed)
+            continue
+        # Swapping satisfies `stuck` outright and leaves its old value where
+        # the other end was, so everything still to read it reads there.
+        other = pending.pop(stuck)
+        done.append(_Swap(stuck, other))
+        _reads_elsewhere_now(pending, stuck, other)
     return done
+
+
+def _reads_elsewhere_now(pending: dict[int, int], was: int, now: int) -> None:
+    """The value that was in `was` is in `now`; whoever wanted it looks there."""
+    for dst, src in list(pending.items()):
+        if src == was:
+            if dst == now:
+                del pending[dst]  # the swap already put it where it belongs
+            else:
+                pending[dst] = now
 
 
 # -- modules ------------------------------------------------------------------

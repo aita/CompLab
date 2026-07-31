@@ -6,7 +6,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from wolv import driver, regalloc
+from wolv import allocator, driver
 from wolv.diag import WolvError
 
 
@@ -16,6 +16,7 @@ def main(argv: list[str] | None = None) -> int:
         checks=not args.no_checks,
         optimise=not args.no_opt,
         max_regs=args.max_regs,
+        regalloc=args.regalloc,
     )
     path = Path(args.file)
     try:
@@ -41,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     except WolvError as error:
         print(f"{path}:{error}", file=sys.stderr)
         return 1
-    except (driver.ToolchainError, regalloc.OutOfRegisters) as error:
+    except (driver.ToolchainError, allocator.OutOfRegisters) as error:
         print(f"wolv: {error}", file=sys.stderr)
         return 1
     return 0
@@ -68,6 +69,13 @@ def _parser() -> argparse.ArgumentParser:
         choices=driver.STAGES,
         default="asm",
         help="which stage `emit` should show",
+    )
+    p.add_argument(
+        "--regalloc",
+        choices=sorted(allocator.ALLOCATORS),
+        default=allocator.DEFAULT,
+        help="which register allocator to use: "
+        + ", ".join(f"{a.name} ({a.blurb})" for a in allocator.ALLOCATORS.values()),
     )
     p.add_argument("--no-checks", action="store_true", help="no nil or bounds checks")
     p.add_argument("--no-opt", action="store_true", help="do not optimise the SSA")

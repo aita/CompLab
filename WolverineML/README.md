@@ -3,9 +3,11 @@
 A small ML-flavoured language, compiled to ARMv8 (AArch64), in Python. The
 language is Tiger's — records, arrays, nested functions with static links,
 loops with `break` — written the way SML writes things. The back end is the
-point: the compiler builds SSA the textbook way, optimises there, and allocates
-registers **on** SSA, colouring in dominance order instead of building an
-interference graph.
+point: the compiler builds SSA the textbook way, optimises there, and then
+allocates registers **two different ways**, over the same IR, so that the two
+can be held next to each other — by colouring the SSA itself in dominance
+order, and by leaving SSA first and colouring the interference graph with
+iterated coalescing.
 
 ```sml
 type point = { x : int, y : int }
@@ -34,7 +36,7 @@ $ uv run python -m wolv build examples/queens.wol -o queens && qemu-aarch64 ./qu
 
 ```sh
 uv sync
-uv run pytest                     # 102 tests
+uv run pytest                     # 144 tests
 uv run mypy                       # every module is strictly typed
 uv run ruff check .
 
@@ -51,6 +53,7 @@ skip.
 
 | flag | what it does |
 | --- | --- |
+| `--regalloc chordal\|graph` | which allocator; `chordal` is the default |
 | `--no-checks` | leave out the nil, bounds and divide-by-zero checks |
 | `--no-opt` | skip the SSA optimiser |
 | `--max-regs N` | pretend the machine has N registers, to make it spill |
@@ -119,6 +122,8 @@ A program is a sequence of declarations, run in order; there is no `main`.
 ```
  .wol ──lex──▶ tokens ──parse──▶ tree ──check──▶ typed tree ──lower──▶ CFG
       ──ssa──▶ SSA ──opt──▶ SSA ──split──▶ ──regalloc──▶ coloured ──emit──▶ ARMv8
+                                             │
+                          out of SSA first, if the allocator wants a graph
 ```
 
 | module | what it does |
@@ -131,7 +136,11 @@ A program is a sequence of declarations, run in order; there is no `main`.
 | `ssa.py` | dominators, dominance frontiers, phi placement, renaming, and a verifier |
 | `opt.py` | constant folding, copy propagation, phi simplification, branch folding, dead code |
 | `liveness.py` | liveness on SSA, where a phi reads its arguments on the edges |
-| `regalloc.py` | colouring in dominance order, spilling, coalescing by biased colouring |
+| `outofssa.py` | phis become copies in the predecessors, for the allocator that wants that |
+| `machine.py` | the register file, and which registers a call may clobber |
+| `allocator/chordal.py` | colouring the SSA in dominance order, no graph |
+| `allocator/graph.py` | Chaitin's algorithm with iterated coalescing |
+| `allocator/spill.py` | the rewrite both of them spill with, and what a spill costs |
 | `emit.py` | AAPCS64 assembly, frames, and the copies a phi turns into |
 | `runtime/runtime.c` | allocation, strings, and the errors a check can raise |
 
@@ -198,6 +207,17 @@ dominance order, holding the set of values that are live and giving every
 definition a colour none of them has. If no program point has more than `k`
 values live, `k` registers always suffice.
 
+Why the graph is chordal is one theorem away. In SSA a value's definition
+dominates its whole live range, so a live range is a subtree of the dominator
+tree — and by Gavril's theorem a graph is chordal exactly when it is the
+intersection graph of subtrees of a tree. That is the only thing SSA is doing
+here: `x := a` in one branch and `x := b` in the other is a live range that is
+not a subtree, and a phi is what cuts it into two that are. The allocator is
+Hack, Grund and Goos (CC 2006); Pereira and Palsberg (APLAS 2005) reached the
+same graphs and coloured them with an explicit chordal colouring instead.
+Linear scan is the same idea one level down: flatten the tree into a line, and
+subtrees become intervals.
+
 Three things ride along on that walk:
 
 * **Spilling.** When a definition finds no colour free, the value that is read
@@ -210,23 +230,71 @@ Three things ride along on that walk:
 * **Coalescing.** A definition prefers a colour already given to something it
   is copy-related to — a phi and its arguments — and, failing that, the colour
   that thing is itself going to ask for. That is what makes the copies on the
-  edges disappear.
+  edges disappear. It is also the weak point: a graph-colouring allocator can
+  *merge* two nodes and re-test, which is what iterated coalescing does with
+  Briggs' and George's tests, and merging two values is precisely what SSA does
+  not allow. Coalescing by recolouring (Hack and Goos, PLDI 2008) is the answer
+  to that, and it is not implemented here — the other allocator is.
 * **The calling convention.** A value that is live across a call may only take
   a callee-saved register, which is why nothing has to be saved around a `bl`.
   Argument and result positions are hints, so a value that is about to be
   argument 2 tends to be sitting in `x2` already.
 
-`x0`–`x15` and `x19`–`x28` are allocatable, twenty-six registers. `x16` and
-`x17` are the ABI's scratch, which the emitter keeps for parallel copies, large
-immediates and long offsets. `--max-regs N` shrinks the machine, and the test
-suite runs the whole example set at `N = 12` to exercise the spiller.
+`x0`–`x16` and `x19`–`x28` are allocatable, twenty-seven registers. Only `x17`
+is held back, and only for one thing: a frame big enough to put a slot out of
+reach of `ldur` is not known until allocation has added its spill slots, so
+that address has to be computed somewhere the allocator was never told about.
+Everything else that used to want a scratch register was given a way not to —
+a remainder is spelled out in the IR, where its quotient is a value like any
+other, and the prologue borrows a caller-saved register that nothing is live
+in yet. `--max-regs N` shrinks the machine, and the test suite runs the whole
+example set at `N = 12` to exercise the spiller.
 
-### Leaving SSA
+### The other one: graph colouring, `--regalloc graph`
+
+Chaitin's algorithm, with the iterated coalescing of George and Appel (1996).
+The interference graph is built for real this time; a node with fewer than `K`
+neighbours is removed and pushed on a stack, because Kempe says it can always
+be coloured later; when nothing is trivially removable one node is pushed
+optimistically, and if the guess was wrong that value is rewritten into memory
+and the whole thing runs again.
+
+For this allocator the phis have to go first, so `outofssa.py` turns each one
+into copies at the ends of its predecessors. That is not a cost to be sorry
+about — it is the point. Copies are what coalescing eats: merging the two ends
+of one removes it, and a merge only happens when Briggs' test proves it cannot
+make the graph uncolourable. Because merging raises degrees and simplifying
+lowers them, each making the other possible, the two run interleaved, with
+freezing as the way out.
+
+This machine has no fixed registers to colour against — the ABI is handled by
+the emitter — so the call convention rides along as a set of colours a node may
+not take, and a node with `f` of those and `d` neighbours needs `d + f < K`.
+That sum stands in for the degree in every test.
+
+The two are worth comparing, and the answer is that they are level:
+
+| | instructions | `mov`s |
+| --- | --- | --- |
+| `chordal`, over the examples and test programs | 3288 | 421 |
+| `graph` | 3286 | 420 |
+
+`graph` is ahead on the bigger programs (`queens` 359 → 352, `sort` 546 → 540)
+and behind on the small ones, and the reason for both is the same: leaving SSA
+made copies that were never there before, and coalescing has to earn them back.
+It earns back 96–100% of them — of the 30 copies that leaving SSA adds to
+`tour`, one survives. What is left in the output of *either* allocator is
+almost entirely the ABI copies, and those are made by the emitter, where no
+allocator can see them.
+
+### Leaving SSA, for the allocator that stays in it
 
 Critical edges are split first — and so is any edge into a block that still has
 a phi — so every phi becomes a parallel copy at the end of a block that ends in
 a jump. The copies are then ordered so that nothing is overwritten before it is
-read, with `x16` breaking a cycle when the copies form one.
+read. When they form a cycle the ordering borrows a register the function never
+used, and when the function used them all the two ends swap with three `eor`s,
+which needs no register at all.
 
 ### Frames and calls
 
@@ -256,14 +324,20 @@ uv run pytest
 ```
 
 Unit tests for the lexer, the parser's precedence, the checker's errors and its
-escape analysis. Structural tests for the middle: after construction and after
-every optimisation, `ssa.verify` insists on one definition per register and
-that each definition dominates its uses and reaches each phi through the right
-edge; `regalloc.verify` insists that no two values live at the same point share
-a colour. And end-to-end tests, which compile five programs to ARMv8, link them
-against the runtime, run them under qemu, and compare the output — under five
-configurations each, because `--no-opt`, `--no-checks` and a machine small
-enough to spill all have to agree on the answer.
+escape analysis, and for the ordering of a parallel copy — which is checked by
+running the ordering on a register file and insisting the permutation came out
+right, a test that caught a swap the ordering was doing twice.
+
+Structural tests for the middle. After construction and after every
+optimisation, `ssa.verify` insists on one definition per register, that each
+definition dominates its uses, and that it reaches each phi through the edge
+that names it. `allocator.verify` insists that no two values live at the same
+point share a colour, and every test that says so runs against both allocators.
+
+And end-to-end tests, which compile six programs to ARMv8, link them against
+the runtime, run them under qemu, and compare the output — under eight
+configurations each, because `--no-opt`, `--no-checks`, a machine small enough
+to spill, and both allocators all have to agree on the answer.
 
 ## What it does not do
 

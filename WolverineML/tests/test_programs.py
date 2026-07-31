@@ -23,6 +23,9 @@ CONFIGURATIONS = {
     "no-checks": driver.Options(checks=False),
     "spilling": driver.Options(max_regs=12),
     "spilling-no-opt": driver.Options(max_regs=12, optimise=False),
+    "graph": driver.Options(regalloc="graph"),
+    "graph-no-opt": driver.Options(regalloc="graph", optimise=False),
+    "graph-spilling": driver.Options(regalloc="graph", max_regs=12),
 }
 
 
@@ -56,7 +59,7 @@ def test_examples_agree_with_themselves(example: Path) -> None:
     source = example.read_text()
     baseline = run(source, CONFIGURATIONS["default"])
     assert baseline
-    for name in ("no-opt", "spilling"):
+    for name in ("no-opt", "spilling", "graph", "graph-spilling"):
         assert run(source, CONFIGURATIONS[name]) == baseline, name
 
 

@@ -327,7 +327,15 @@ class FuncLowerer:
             return self.call_runtime("wol_concat", [lhs, rhs])
         if e.op in ("/", "mod"):
             self.check_nonzero(rhs)
-            return self.binop(e.op, lhs, rhs)
+            if e.op == "/":
+                return self.binop("/", lhs, rhs)
+            # The remainder is spelled out rather than left to the emitter: the
+            # quotient it needs in between is a value like any other, and the
+            # allocator can find it a register.  The emitter fuses the last two
+            # back into one `msub`.
+            quotient = self.binop("/", lhs, rhs)
+            product = self.binop("*", quotient, rhs)
+            return self.binop("-", lhs, product)
         if e.op in ("+", "-", "*"):
             return self.binop(e.op, lhs, rhs)
         if isinstance(e.lhs.ty, StringT):

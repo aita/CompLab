@@ -17,12 +17,24 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from wolv import emit, ir, lexer, lower, opt, parser, regalloc, ssa, typecheck
+from wolv import (
+    allocator,
+    emit,
+    ir,
+    lexer,
+    lower,
+    opt,
+    outofssa,
+    parser,
+    ssa,
+    typecheck,
+)
 from wolv.astshow import show_program
+from wolv.machine import Registers, limited
 
 RUNTIME = Path(__file__).parent / "runtime" / "runtime.c"
 
-STAGES = ("tokens", "ast", "ir", "ssa", "opt", "ra", "asm")
+STAGES = ("tokens", "ast", "ir", "ssa", "opt", "flat", "ra", "asm")
 
 
 @dataclass(slots=True)
@@ -30,9 +42,13 @@ class Options:
     checks: bool = True
     optimise: bool = True
     max_regs: int | None = None
+    regalloc: str = allocator.DEFAULT
 
-    def registers(self) -> regalloc.Registers | None:
-        return None if self.max_regs is None else regalloc.limited(self.max_regs)
+    def registers(self) -> Registers:
+        return Registers() if self.max_regs is None else limited(self.max_regs)
+
+    def allocator(self) -> allocator.Allocator:
+        return allocator.ALLOCATORS[self.regalloc]
 
 
 def to_ir(source: str, opts: Options) -> ir.Module:
@@ -48,7 +64,10 @@ def compile_module(source: str, opts: Options) -> ir.Module:
         opt.optimise(mod)
     for func in mod.funcs:
         ssa.split_critical_edges(func)
-    regalloc.allocate_module(mod, opts.registers())
+    chosen = opts.allocator()
+    if not chosen.on_ssa:
+        outofssa.destruct_module(mod)
+    allocator.allocate_module(mod, chosen, opts.registers())
     return mod
 
 
@@ -76,7 +95,12 @@ def stage(source: str, name: str, opts: Options) -> str:
         return ir.show_module(mod)
     for func in mod.funcs:
         ssa.split_critical_edges(func)
-    regalloc.allocate_module(mod, opts.registers())
+    chosen = opts.allocator()
+    if not chosen.on_ssa:
+        outofssa.destruct_module(mod)
+    if name == "flat":
+        return ir.show_module(mod)
+    allocator.allocate_module(mod, chosen, opts.registers())
     if name == "ra":
         return ir.show_module(mod)
     return emit.emit_module(mod)
