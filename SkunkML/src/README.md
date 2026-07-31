@@ -50,10 +50,16 @@ skunk [options] file.sk
 ```
 skunkc [options] file.sk
 
-      --dump-ssa    print the SSA of the program (not of the basis)
+      --dump-ssa    print the SSA of the program as it was built, before any
+                    pass (not the basis)
+      --dump-opt    print the SSA again, after optimisation
       --dump-dom    print the dominator tree and the dominance frontiers
       --dump-flat   print the A-normal form it was built from
       --dump-mach   print the amd64 graph after register allocation
+      --no-opt      do not optimise
+      --sched-pre[=N]
+                    schedule before register allocation too, watching register
+                    pressure.  Measured and it did not pay, so it is off
       --no-verify   skip the check that every use is dominated by its definition
   -o FILE           write the executable here (the default is a.out)
       --dynamic     link against libc.so.6 instead of writing a freestanding

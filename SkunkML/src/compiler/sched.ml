@@ -308,12 +308,9 @@ let pre_func (f : M.func) =
       pre_block (Hashtbl.find live_in b.M.id) (Hashtbl.find live_out b.M.id) b)
     f.M.blocks
 
-(* Off unless the environment asks for it, because it did not pay: see 17.6.
-   `SKUNK_SCHED_PRE=1` turns it on, and a number turns it on with that as the
-   pressure threshold, which is how the table there was made. *)
-let pre (p : M.prog) =
-  match Sys.getenv_opt "SKUNK_SCHED_PRE" with
-  | None | Some "" | Some "0" -> ()
-  | Some v ->
-      (match int_of_string_opt v with Some n when n > 1 -> pressure_limit := n | _ -> ());
-      List.iter pre_func p.M.funcs
+(* Off unless asked for, because it did not pay: see 17.6.  The threshold is a
+   parameter because that is how the table there was made -- sweeping it is the
+   measurement, and every setting lost. *)
+let pre ?threshold (p : M.prog) =
+  (match threshold with Some n when n > 1 -> pressure_limit := n | _ -> ());
+  List.iter pre_func p.M.funcs

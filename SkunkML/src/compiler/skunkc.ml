@@ -21,6 +21,10 @@ let usage () =
     \                    the linker and the ELF writer on their own\n\
     \      --dump-opt    print the SSA again, after optimisation\n\
     \      --dump-mach   print the amd64 graph after register allocation\n\
+    \      --sched-pre[=N]\n\
+    \                    schedule before register allocation too, watching\n\
+    \                    register pressure.  Measured and it did not pay, so it\n\
+    \                    is off; N is the pressure threshold (see 17章の6節)\n\
     \      --no-opt      do not optimise: skip inlining, folding, sccp, gvn,\n\
     \                    dce and instruction scheduling\n\
     \  -o FILE           write the executable here (the default is a.out)\n\
@@ -36,6 +40,7 @@ let dump_flat = ref false
 let verify = ref true
 let dump_opt = ref false
 let dump_mach = ref false
+let sched_pre = ref None
 let optimise = ref true
 let dynamic = ref false
 let out = ref None
@@ -106,6 +111,11 @@ let encodings () =
     M.Alu ("sub", r r11, M.Imm 7);
     M.Alu ("and", r rax, M.Imm 4096);
     M.Alu ("imul", r rdx, r rsi);
+    (* Strength reduction's two shapes: an immediate multiplier, in both widths,
+       and an address with a scale but no base. *)
+    M.Alu ("imul", r rdx, M.Imm 7);
+    M.Alu ("imul", r rdx, M.Imm 255);
+    M.Lea (M.R rbx, mem ~index:(M.R rax) ~scale:2 ~disp:(-1) ());
     M.Sar (r rax, 1);
     M.Shl (r r13, 3);
     M.Neg (r rbx);
@@ -148,6 +158,9 @@ let () =
     | "--dump-mach" :: rest ->
         dump_mach := true;
         args rest
+    | "--sched-pre" :: rest ->
+        sched_pre := Some None;
+        args rest
     | "--no-opt" :: rest ->
         optimise := false;
         args rest
@@ -166,6 +179,9 @@ let () =
     | ("-h" | "--help") :: _ ->
         usage ();
         exit 0
+    | a :: rest when String.length a > 12 && String.sub a 0 12 = "--sched-pre=" ->
+        sched_pre := Some (int_of_string_opt (String.sub a 12 (String.length a - 12)));
+        args rest
     | a :: rest ->
         if String.length a > 0 && a.[0] = '-' then begin
           Printf.eprintf "skunkc: unknown option %s\n" a;
@@ -259,7 +275,9 @@ let () =
          Statics.reset ();
          Stubs.register ();
          let mach = Select.program whole in
-         Outofssa.program mach;
+         (match !sched_pre with
+         | None -> Outofssa.program mach
+         | Some threshold -> Outofssa.program ~sched_pre:threshold mach);
          Regalloc.program mach;
          if !optimise then Sched.program mach;
          if !dump_mach then print_string (Mach.to_string mach);

@@ -15,6 +15,9 @@
 4983eb07                 sub $7, %r11
 4881e000100000           and $4096, %rax
 480fafd6                 imul %rsi, %rdx
+486bd207                 imul $7, %rdx
+4869d2ff000000           imul $255, %rdx
+488d1c45ffffffff         lea -1(,%rax,2), %rbx
 48c1f801                 sar $1, %rax
 49c1e503                 shl $3, %r13
 48f7db                   neg %rbx
