@@ -160,6 +160,11 @@ type t = {
   (* A global name to the code block it holds, for the names that qualify. *)
   known : (string, string) Hashtbl.t;
   code : (string, F.code) Hashtbl.t;
+  (* Labels two units both claim.  There should be none: a label is a Core
+     binder and a counter, and Core binders are unique for a whole run.  But
+     splicing the wrong body is the worst thing this pass could do, and one
+     lookup is what it costs to know it did not. *)
+  ambiguous : (string, unit) Hashtbl.t;
   size_of : (string, int) Hashtbl.t;
   free_of : (string, SS.t) Hashtbl.t;
   (* How many places call this global, and how many mention it any other way.
@@ -242,6 +247,7 @@ let analyse (units : F.program list) =
     {
       known = Hashtbl.create 32;
       code = Hashtbl.create 32;
+      ambiguous = Hashtbl.create 4;
       size_of = Hashtbl.create 32;
       free_of = Hashtbl.create 32;
       called = Hashtbl.create 32;
@@ -253,6 +259,7 @@ let analyse (units : F.program list) =
     (fun (p : F.program) ->
       List.iter
         (fun (c : F.code) ->
+          if Hashtbl.mem e.code c.F.c_label then Hashtbl.replace e.ambiguous c.F.c_label ();
           Hashtbl.replace e.code c.F.c_label c;
           Hashtbl.replace e.size_of c.F.c_label (size c.F.c_body);
           Hashtbl.replace e.free_of c.F.c_label
@@ -277,7 +284,8 @@ let analyse (units : F.program list) =
         (fun (i : F.item) ->
           if i.F.iname <> "" && count bindings i.F.iname = 1 then
             match item_label i with
-            | Some l when Hashtbl.mem e.code l -> Hashtbl.replace e.known i.F.iname l
+            | Some l when Hashtbl.mem e.code l && not (Hashtbl.mem e.ambiguous l) ->
+                Hashtbl.replace e.known i.F.iname l
             | _ -> ())
         p.F.items)
     units;
