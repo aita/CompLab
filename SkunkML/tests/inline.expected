@@ -1,0 +1,186 @@
+func double$1:
+  b0:
+    v0 = param                             ; a1.19
+    v1 = prim + v0, v0                     ; t.60
+    ret v1
+
+func spread$2:
+  b0:
+    v0 = param                             ; a1.20
+    v1 = field v0, 1(0)                    ; p.57
+    v2 = field v0, 2(1)                    ; p.58
+    v3 = prim + v1, v2                     ; t.63
+    v4 = prim - v1, v2                     ; t.64
+    v5 = prim * v3, v4                     ; t.65
+    v6 = record { diff = v4, prod = v5, sum = v3 } ; t.66
+    ret v6
+
+func dist$3:
+  b0:
+    v0 = param                             ; a1.21
+    v1 = field v0, 1(0)                    ; p.59
+    v2 = field v0, 2(1)                    ; p.60
+    v3 = prim < v1, v2                     ; t.70
+    switch v3 [true -> b2, false -> b1]
+  b1:                             ; preds b0
+    v4 = prim - v1, v2                     ; t.72
+    ret v4
+  b2:                             ; preds b0
+    v5 = prim - v2, v1                     ; t.71
+    ret v5
+
+func fact$4:
+  b0:
+    v0 = param                             ; a1.22
+    v1 = const 1
+    v2 = prim <= v0, v1                    ; t.75
+    switch v2 [true -> b5, false -> b1]
+  b1:                             ; preds b0
+    v3 = prim - v0, v1                     ; t.76
+    v4 = prim <= v3, v1                    ; t.75#66
+    switch v4 [true -> b3, false -> b2]
+  b2:                             ; preds b1
+    v5 = prim - v3, v1                     ; t.76#67
+    v6 = global fact
+    v7 = call v6, v5                       ; t.77#68
+    v8 = prim * v3, v7                     ; t.78#69
+    jump b4
+  b3:                             ; preds b1
+    jump b4
+  b4:                             ; preds b3 b2
+    v9 = phi [b3: v1, b2: v8]              ; t.77
+    v10 = prim * v0, v9                    ; t.78
+    ret v10
+  b5:                             ; preds b0
+    ret v1
+
+func count$5:
+  b0:
+    v0 = param                             ; a1.23
+    v1 = const 0
+    v2 = const 1
+    jump b1
+  b1:                             ; preds b0 b2
+    v3 = phi [b0: v0, b2: v9]              ; a1.23
+    v4 = field v3, 1(0)                    ; p.61
+    v5 = field v3, 2(1)                    ; p.62
+    v6 = prim = v4, v1                     ; t.80
+    switch v6 [true -> b3, false -> b2]
+  b2:                             ; preds b1
+    v7 = prim - v4, v2                     ; t.81
+    v8 = prim + v5, v4                     ; t.82
+    v9 = record { 1 = v7, 2 = v8 }         ; t.83
+    jump b1
+  b3:                             ; preds b1
+    ret v5
+
+func inc$6:
+  b0:
+    v0 = param                             ; a1.24
+    v1 = const 1
+    v2 = prim + v0, v1                     ; t.86
+    ret v2
+
+func applyTo$7:
+  b0:
+    v0 = param                             ; a1.25
+    v1 = field v0, 1(0)                    ; p.63
+    v2 = field v0, 2(1)                    ; p.64
+    tailcall v1, v2
+
+-- val double : int -> int
+func $double:
+  b0:
+    v0 = mkclos double$1, 0                ; double
+    ret v0
+
+-- val four : int
+func $four:
+  b0:
+    v0 = const 4
+    ret v0
+
+-- val forty : int
+func $forty:
+  b0:
+    v0 = const 40
+    ret v0
+
+-- val spread : int * int -> { diff : int, prod : int, sum : int }
+func $spread:
+  b0:
+    v0 = mkclos spread$2, 0                ; spread
+    ret v0
+
+-- val product : int
+func $product:
+  b0:
+    v0 = const 40
+    ret v0
+
+-- val dist : int * int -> int
+func $dist:
+  b0:
+    v0 = mkclos dist$3, 0                  ; dist
+    ret v0
+
+-- val apart : int
+func $apart:
+  b0:
+    v0 = const 6
+    ret v0
+
+-- val fact : int -> int
+func $fact:
+  b0:
+    v0 = mkclos fact$4, 0                  ; fact
+    ret v0
+
+-- val six : int
+func $six:
+  b0:
+    v0 = const 1
+    v1 = const 2
+    v2 = const 3
+    v3 = global fact
+    v4 = call v3, v0                       ; t.77#36
+    v5 = prim * v1, v4                     ; t.78#37
+    v6 = prim * v2, v5                     ; t.78#31
+    ret v6
+
+-- val count : int * int -> int
+func $count:
+  b0:
+    v0 = mkclos count$5, 0                 ; count
+    ret v0
+
+-- val counted : int
+func $counted:
+  b0:
+    v0 = const 19
+    v1 = const 8
+    v2 = record { 1 = v1, 2 = v0 }         ; t.83#56
+    v3 = global count
+    v4 = call v3, v2                       ; t#57
+    ret v4
+
+-- val inc : int -> int
+func $inc:
+  b0:
+    v0 = mkclos inc$6, 0                   ; inc
+    ret v0
+
+-- val applyTo : ('a -> 'b) * 'a -> 'b
+func $applyTo:
+  b0:
+    v0 = mkclos applyTo$7, 0               ; applyTo
+    ret v0
+
+-- val applied : int
+func $applied:
+  b0:
+    v0 = global inc
+    v1 = const 41
+    v2 = call v0, v1                       ; t#63
+    ret v2
+

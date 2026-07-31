@@ -1,0 +1,44 @@
+(* What inlining is for.
+
+   Every call here is an indirect call through a closure, and copying the body
+   to the call site is not about the call: it is that every other pass then
+   works across it.  One declaration per thing that only happens afterwards. *)
+
+(* Small, called from two places, both with a constant.  sccp follows the
+   argument in and finishes what inlining started. *)
+fun double n = n + n
+val four = double 2
+val forty = double 20
+
+(* Called from exactly one place, so the size threshold does not get a say: the
+   copy replaces the original rather than joining it. *)
+fun spread (a, b) =
+  let val s = a + b
+      val d = a - b
+  in { sum = s, diff = d, prod = s * d }
+  end
+val product = #prod (spread (7, 3))
+
+(* The argument is a tuple built at the call site and taken apart inside the
+   callee, so after inlining it is built and read in the same block -- which is
+   the one shape `fold` can see through and `dce` can then remove. *)
+fun dist (x, y) = if x < y then y - x else x - y
+val apart = dist (3, 9)
+
+(* Not a tail call, so one level is peeled and the recursive call inside the
+   copy stays a call: that is the bound. *)
+fun fact n = if n <= 1 then 1 else n * fact (n - 1)
+val six = fact 3
+
+(* A tail call is a loop and 17章 turns it into one, so inlining leaves it
+   alone: unrolling a loop is a different decision. *)
+fun count (n, acc) = if n = 0 then acc else count (n - 1, acc + n)
+val counted = count (10, 0)
+
+(* `inc` is passed as a value as well as called, so its call sites are not all
+   of its uses.  And `applyTo` calls whatever it was handed, which is not a name
+   this pass can look up -- the projection that finds it is folded one IR
+   later. *)
+fun inc n = n + 1
+fun applyTo (f, n) = f n
+val applied = applyTo (inc, 41)
