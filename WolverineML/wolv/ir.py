@@ -1,10 +1,21 @@
-"""The intermediate representation: a control flow graph of three-address code.
+"""The three-address IR, and the control flow graph both IRs are written in.
 
-One IR serves the whole back end.  It comes out of lowering with variables
-written many times, goes through `ssa.py` and comes back with one definition
-per register and phis at the joins, and leaves register allocation with a
-colour attached to every register.  Nothing about it is ARM-specific except
-that a register holds exactly one 64-bit word.
+There are two instruction sets in this compiler.  This module has the first:
+three-address code over virtual registers, which is what lowering produces,
+what `ssa.py` puts into SSA and what `opt.py` rewrites.  The second is in
+`mach.py`, and instruction selection replaces the arithmetic of this one with
+it.
+
+What they share is everything else — the registers, the blocks, the graph, the
+frame — so the passes that only care about the shape of a function (liveness,
+dominance, both register allocators, the verifiers) work on either, and neither
+has to know what the other's instructions mean.  That is what the methods on
+`Instr` are for: an instruction says which register it writes and which it
+reads, and nothing outside it has to match on what it is.
+
+Nothing here is ARM-specific except that a register holds exactly one 64-bit
+word, and the frame layout at the top, which the emitter and the nested
+functions have to agree about.
 """
 
 from __future__ import annotations
@@ -14,6 +25,8 @@ from dataclasses import dataclass, field
 from typing import Final
 
 type Reg = int
+type Name = Callable[[Reg], str]  # how a register is written in a dump
+type Rewrite = Callable[[Reg], Reg]  # how a register is renamed
 
 WORD: Final = 8
 
@@ -36,9 +49,41 @@ def slot_offset(slot: int) -> int:
     return -WORD * (slot + 1)
 
 
+# -- what every instruction of either set can be asked -------------------------
+
+
 @dataclass(slots=True)
 class Instr:
-    pass
+    """The base of both instruction sets.
+
+    A pass that walks a function asks these five questions and no others, which
+    is why one liveness analysis and one register allocator serve both levels.
+    """
+
+    def defs(self) -> Reg | None:
+        """The register it writes, if it writes one."""
+        return None
+
+    def uses(self) -> list[Reg]:
+        """The registers it reads.  A phi's arguments are read on the edges,
+        not here, so they are not among them."""
+        return []
+
+    def map_uses(self, f: Rewrite) -> None:
+        """Rewrite the registers it reads, in place."""
+
+    def set_def(self, r: Reg) -> None:
+        raise AssertionError(f"{type(self).__name__} defines nothing")
+
+    def has_effect(self) -> bool:
+        """True when it has to be kept even if its result is dead."""
+        return False
+
+    def show(self, name: Name) -> str:
+        return "?"
+
+
+# -- the three-address instructions -------------------------------------------
 
 
 @dataclass(slots=True)
@@ -46,17 +91,50 @@ class Const(Instr):
     dst: Reg
     value: int
 
+    def defs(self) -> Reg | None:
+        return self.dst
+
+    def set_def(self, r: Reg) -> None:
+        self.dst = r
+
+    def show(self, name: Name) -> str:
+        return f"{name(self.dst)} = {self.value}"
+
 
 @dataclass(slots=True)
 class StrConst(Instr):
     dst: Reg
     symbol: str
 
+    def defs(self) -> Reg | None:
+        return self.dst
+
+    def set_def(self, r: Reg) -> None:
+        self.dst = r
+
+    def show(self, name: Name) -> str:
+        return f"{name(self.dst)} = &{self.symbol}"
+
 
 @dataclass(slots=True)
 class Move(Instr):
     dst: Reg
     src: Reg
+
+    def defs(self) -> Reg | None:
+        return self.dst
+
+    def uses(self) -> list[Reg]:
+        return [self.src]
+
+    def map_uses(self, f: Rewrite) -> None:
+        self.src = f(self.src)
+
+    def set_def(self, r: Reg) -> None:
+        self.dst = r
+
+    def show(self, name: Name) -> str:
+        return f"{name(self.dst)} = {name(self.src)}"
 
 
 @dataclass(slots=True)
@@ -66,6 +144,22 @@ class Bin(Instr):
     lhs: Reg
     rhs: Reg
 
+    def defs(self) -> Reg | None:
+        return self.dst
+
+    def uses(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
+
+    def map_uses(self, f: Rewrite) -> None:
+        self.lhs = f(self.lhs)
+        self.rhs = f(self.rhs)
+
+    def set_def(self, r: Reg) -> None:
+        self.dst = r
+
+    def show(self, name: Name) -> str:
+        return f"{name(self.dst)} = {name(self.lhs)} {self.op} {name(self.rhs)}"
+
 
 @dataclass(slots=True)
 class Cmp(Instr):
@@ -74,6 +168,22 @@ class Cmp(Instr):
     lhs: Reg
     rhs: Reg
 
+    def defs(self) -> Reg | None:
+        return self.dst
+
+    def uses(self) -> list[Reg]:
+        return [self.lhs, self.rhs]
+
+    def map_uses(self, f: Rewrite) -> None:
+        self.lhs = f(self.lhs)
+        self.rhs = f(self.rhs)
+
+    def set_def(self, r: Reg) -> None:
+        self.dst = r
+
+    def show(self, name: Name) -> str:
+        return f"{name(self.dst)} = {name(self.lhs)} {self.op} {name(self.rhs)}"
+
 
 @dataclass(slots=True)
 class Load(Instr):
@@ -81,12 +191,43 @@ class Load(Instr):
     base: Reg
     offset: int
 
+    def defs(self) -> Reg | None:
+        return self.dst
+
+    def uses(self) -> list[Reg]:
+        return [self.base]
+
+    def map_uses(self, f: Rewrite) -> None:
+        self.base = f(self.base)
+
+    def set_def(self, r: Reg) -> None:
+        self.dst = r
+
+    def show(self, name: Name) -> str:
+        return f"{name(self.dst)} = [{name(self.base)} + {self.offset}]"
+
 
 @dataclass(slots=True)
 class Store(Instr):
     base: Reg
     offset: int
     src: Reg
+
+    def uses(self) -> list[Reg]:
+        return [self.base, self.src]
+
+    def map_uses(self, f: Rewrite) -> None:
+        self.base = f(self.base)
+        self.src = f(self.src)
+
+    def has_effect(self) -> bool:
+        return True
+
+    def show(self, name: Name) -> str:
+        return f"[{name(self.base)} + {self.offset}] = {name(self.src)}"
+
+
+# -- the frame, calls and joins, which both instruction sets keep --------------
 
 
 @dataclass(slots=True)
@@ -96,11 +237,32 @@ class LoadSlot(Instr):
     dst: Reg
     slot: int
 
+    def defs(self) -> Reg | None:
+        return self.dst
+
+    def set_def(self, r: Reg) -> None:
+        self.dst = r
+
+    def show(self, name: Name) -> str:
+        return f"{name(self.dst)} = slot{self.slot}"
+
 
 @dataclass(slots=True)
 class StoreSlot(Instr):
     slot: int
     src: Reg
+
+    def uses(self) -> list[Reg]:
+        return [self.src]
+
+    def map_uses(self, f: Rewrite) -> None:
+        self.src = f(self.src)
+
+    def has_effect(self) -> bool:
+        return True
+
+    def show(self, name: Name) -> str:
+        return f"slot{self.slot} = {name(self.src)}"
 
 
 @dataclass(slots=True)
@@ -109,23 +271,14 @@ class FrameAddr(Instr):
 
     dst: Reg
 
+    def defs(self) -> Reg | None:
+        return self.dst
 
-@dataclass(slots=True)
-class Mach(Instr):
-    """One machine instruction, chosen by `select.py` out of the DAG.
+    def set_def(self, r: Reg) -> None:
+        self.dst = r
 
-    `form` names an entry in the emitter's table, which knows how to write it
-    and how many operands it reads.  Everything downstream — liveness, both
-    allocators, the verifier — only needs `dst` and `srcs`, so none of it has
-    to know what an `madd` is.
-    """
-
-    form: str
-    dst: Reg | None
-    srcs: list[Reg]
-    imm: int = 0
-    symbol: str = ""
-    effect: bool = False
+    def show(self, name: Name) -> str:
+        return f"{name(self.dst)} = frame"
 
 
 @dataclass(slots=True)
@@ -134,16 +287,54 @@ class Call(Instr):
     callee: str
     args: list[Reg]
 
+    def defs(self) -> Reg | None:
+        return self.dst
+
+    def uses(self) -> list[Reg]:
+        return list(self.args)
+
+    def map_uses(self, f: Rewrite) -> None:
+        self.args = [f(a) for a in self.args]
+
+    def set_def(self, r: Reg) -> None:
+        self.dst = r
+
+    def has_effect(self) -> bool:
+        return True
+
+    def show(self, name: Name) -> str:
+        call = f"{self.callee}({', '.join(name(a) for a in self.args)})"
+        return call if self.dst is None else f"{name(self.dst)} = {call}"
+
 
 @dataclass(slots=True)
 class Phi(Instr):
     dst: Reg
     args: dict[str, Reg]
 
+    def defs(self) -> Reg | None:
+        return self.dst
+
+    def set_def(self, r: Reg) -> None:
+        self.dst = r
+
+    def show(self, name: Name) -> str:
+        parts = ", ".join(f"{p}: {name(r)}" for p, r in self.args.items())
+        return f"{name(self.dst)} = phi [{parts}]"
+
+
+# -- control flow -------------------------------------------------------------
+
 
 @dataclass(slots=True)
 class Jmp(Instr):
     target: str
+
+    def has_effect(self) -> bool:
+        return True
+
+    def show(self, name: Name) -> str:
+        return f"jmp {self.target}"
 
 
 @dataclass(slots=True)
@@ -151,17 +342,47 @@ class CBr(Instr):
     cond: Reg
     then: str
     els: str
-    # After selection a branch may read the flags a `cmp` just set instead of
-    # testing a register, and then it reads no register at all.
+    # After selection a branch may read the flags a comparison just set instead
+    # of testing a register, and then it reads no register at all.
     code: str = ""
+
+    def uses(self) -> list[Reg]:
+        return [] if self.code else [self.cond]
+
+    def map_uses(self, f: Rewrite) -> None:
+        if not self.code:
+            self.cond = f(self.cond)
+
+    def has_effect(self) -> bool:
+        return True
+
+    def show(self, name: Name) -> str:
+        test = f"{self.code}?" if self.code else f"{name(self.cond)} ?"
+        return f"br {test} {self.then} : {self.els}"
 
 
 @dataclass(slots=True)
 class Ret(Instr):
     value: Reg | None
 
+    def uses(self) -> list[Reg]:
+        return [] if self.value is None else [self.value]
+
+    def map_uses(self, f: Rewrite) -> None:
+        if self.value is not None:
+            self.value = f(self.value)
+
+    def has_effect(self) -> bool:
+        return True
+
+    def show(self, name: Name) -> str:
+        return "ret" if self.value is None else f"ret {name(self.value)}"
+
 
 type Terminator = Jmp | CBr | Ret
+
+
+# -- the graph ----------------------------------------------------------------
 
 
 @dataclass(slots=True)
@@ -232,91 +453,6 @@ class Func:
 class Module:
     funcs: list[Func] = field(default_factory=list)
     strings: dict[str, str] = field(default_factory=dict)  # symbol -> text
-
-
-# -- reading and rewriting registers ------------------------------------------
-
-
-def defs(instr: Instr) -> Reg | None:
-    match instr:
-        case Const(dst) | StrConst(dst) | Move(dst) | FrameAddr(dst) | Phi(dst):
-            return dst
-        case Bin(dst) | Cmp(dst) | Load(dst) | LoadSlot(dst):
-            return dst
-        case Call(dst):
-            return dst
-        case Mach(_, dst):
-            return dst
-        case _:
-            return None
-
-
-def uses(instr: Instr) -> list[Reg]:
-    """The registers read, not counting a phi's — those belong to the edges."""
-    match instr:
-        case Move(_, src) | StoreSlot(_, src) | Ret(src) if src is not None:
-            return [src]
-        case Bin(_, _, a, b) | Cmp(_, _, a, b):
-            return [a, b]
-        case Load(_, base, _):
-            return [base]
-        case Store(base, _, src):
-            return [base, src]
-        case Call(_, _, args):
-            return list(args)
-        case Mach(_, _, srcs):
-            return list(srcs)
-        case CBr(cond, _, _, code):
-            return [] if code else [cond]
-        case _:
-            return []
-
-
-def map_uses(instr: Instr, f: Callable[[Reg], Reg]) -> None:
-    """Rewrite the registers an instruction reads, in place."""
-    match instr:
-        case Move():
-            instr.src = f(instr.src)
-        case StoreSlot():
-            instr.src = f(instr.src)
-        case Ret() if instr.value is not None:
-            instr.value = f(instr.value)
-        case Bin() | Cmp():
-            instr.lhs = f(instr.lhs)
-            instr.rhs = f(instr.rhs)
-        case Load():
-            instr.base = f(instr.base)
-        case Store():
-            instr.base = f(instr.base)
-            instr.src = f(instr.src)
-        case Call():
-            instr.args = [f(a) for a in instr.args]
-        case Mach():
-            instr.srcs = [f(s) for s in instr.srcs]
-        case CBr():
-            if not instr.code:
-                instr.cond = f(instr.cond)
-        case _:
-            pass
-
-
-def set_def(instr: Instr, r: Reg) -> None:
-    match instr:
-        case Const() | StrConst() | Move() | FrameAddr() | Phi():
-            instr.dst = r
-        case Bin() | Cmp() | Load() | LoadSlot():
-            instr.dst = r
-        case Call() | Mach():
-            instr.dst = r
-        case _:
-            raise AssertionError("instruction defines nothing")
-
-
-def has_effect(instr: Instr) -> bool:
-    """True when an instruction has to be kept even if its result is dead."""
-    if isinstance(instr, Mach):
-        return instr.effect
-    return isinstance(instr, (Store, StoreSlot, Call, Jmp, CBr, Ret))
 
 
 def rename_target(instr: Instr, old: str, new: str) -> None:
@@ -393,54 +529,15 @@ def reg_name(func: Func, r: Reg) -> str:
     return f"%{r}" if colour is None else f"%{r}:{colour}"
 
 
-def show_instr(func: Func, instr: Instr) -> str:
-    def n(r: Reg) -> str:
+def naming(func: Func) -> Name:
+    def name(r: Reg) -> str:
         return reg_name(func, r)
 
-    match instr:
-        case Const(dst, value):
-            return f"{n(dst)} = {value}"
-        case StrConst(dst, symbol):
-            return f"{n(dst)} = &{symbol}"
-        case Move(dst, src):
-            return f"{n(dst)} = {n(src)}"
-        case Bin(dst, op, a, b):
-            return f"{n(dst)} = {n(a)} {op} {n(b)}"
-        case Cmp(dst, op, a, b):
-            return f"{n(dst)} = {n(a)} {op} {n(b)}"
-        case Load(dst, base, off):
-            return f"{n(dst)} = [{n(base)} + {off}]"
-        case Store(base, off, src):
-            return f"[{n(base)} + {off}] = {n(src)}"
-        case LoadSlot(dst, slot):
-            return f"{n(dst)} = slot{slot}"
-        case StoreSlot(slot, src):
-            return f"slot{slot} = {n(src)}"
-        case FrameAddr(dst):
-            return f"{n(dst)} = frame"
-        case Call(dst, callee, args):
-            call = f"{callee}({', '.join(n(a) for a in args)})"
-            return call if dst is None else f"{n(dst)} = {call}"
-        case Phi(dst, args):
-            parts = ", ".join(f"{p}: {n(r)}" for p, r in args.items())
-            return f"{n(dst)} = phi [{parts}]"
-        case Mach(form, dst, srcs, imm, symbol):
-            operands = [n(s) for s in srcs]
-            if symbol:
-                operands.append(symbol)
-            elif imm or form == "const":
-                operands.append(f"#{imm}")
-            written = f"{form} {', '.join(operands)}".rstrip()
-            return written if dst is None else f"{n(dst)} = {written}"
-        case Jmp(target):
-            return f"jmp {target}"
-        case CBr(cond, then, els, code):
-            test = f"{code}?" if code else f"{n(cond)} ?"
-            return f"br {test} {then} : {els}"
-        case Ret(value):
-            return "ret" if value is None else f"ret {n(value)}"
-        case _:
-            return "?"
+    return name
+
+
+def show_instr(func: Func, instr: Instr) -> str:
+    return instr.show(naming(func))
 
 
 def show_func(func: Func) -> str:

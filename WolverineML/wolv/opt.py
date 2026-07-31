@@ -58,7 +58,7 @@ def rewrite(func: ir.Func, mapping: dict[ir.Reg, ir.Reg]) -> None:
         for phi in block.phis:
             phi.args = {p: resolve(r) for p, r in phi.args.items()}
         for instr in block.instrs:
-            ir.map_uses(instr, resolve)
+            instr.map_uses(resolve)
 
 
 def constants(func: ir.Func) -> dict[ir.Reg, int]:
@@ -226,7 +226,7 @@ def dead_code(func: ir.Func) -> bool:
             for phi in block.phis:
                 used.update(phi.args.values())
             for instr in block.instrs:
-                used.update(ir.uses(instr))
+                used.update(instr.uses())
         round_changed = False
         for block in func.walk():
             phis = [p for p in block.phis if p.dst in used]
@@ -235,8 +235,8 @@ def dead_code(func: ir.Func) -> bool:
                 round_changed = True
             kept: list[ir.Instr] = []
             for instr in block.instrs:
-                d = ir.defs(instr)
-                if d is not None and d not in used and not ir.has_effect(instr):
+                d = instr.defs()
+                if d is not None and d not in used and not instr.has_effect():
                     round_changed = True
                     continue
                 kept.append(instr)

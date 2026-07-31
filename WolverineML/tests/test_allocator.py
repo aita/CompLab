@@ -68,7 +68,7 @@ def test_every_value_gets_a_colour(name: str) -> None:
             for phi in block.phis:
                 assert phi.dst in func.colours
             for instr in block.instrs:
-                for r in [*ir.uses(instr), ir.defs(instr)]:
+                for r in [*instr.uses(), instr.defs()]:
                     assert r is None or r in func.colours
 
 

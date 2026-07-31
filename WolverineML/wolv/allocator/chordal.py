@@ -116,14 +116,14 @@ class _Colouring:
             alive.add(phi.dst)
         last_use: dict[ir.Reg, int] = {}
         for i, instr in enumerate(block.instrs):
-            for r in ir.uses(instr):
+            for r in instr.uses():
                 last_use[r] = i
         out = self.live.live_out[label]
         for i, instr in enumerate(block.instrs):
-            for r in ir.uses(instr):
+            for r in instr.uses():
                 if last_use[r] == i and r not in out:
                     alive.discard(r)
-            d = ir.defs(instr)
+            d = instr.defs()
             if d is not None:
                 self._assign(d, alive)
                 alive.add(d)

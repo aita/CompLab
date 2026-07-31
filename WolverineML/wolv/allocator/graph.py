@@ -135,7 +135,7 @@ class _Colouring:
         caller_saved = set(self.machine.caller)
         for block in self.func.walk():
             for instr in block.instrs:
-                for r in [*ir.uses(instr), ir.defs(instr)]:
+                for r in [*instr.uses(), instr.defs()]:
                     if r is not None:
                         self.node(r)
         for r in self.func.params:
@@ -151,7 +151,7 @@ class _Colouring:
                     self.moves_of.setdefault(instr.dst, set()).add(index)
                     self.moves_of.setdefault(instr.src, set()).add(index)
                     self.worklist_moves.add(index)
-                defined = ir.defs(instr)
+                defined = instr.defs()
                 if defined is not None:
                     alive.add(defined)
                     for other in alive:
@@ -163,7 +163,7 @@ class _Colouring:
                     self.ABI_hints(instr)
                 if defined is not None:
                     alive.discard(defined)
-                alive |= set(ir.uses(instr))
+                alive |= set(instr.uses())
                 if isinstance(instr, ir.Ret) and instr.value is not None:
                     self.preferred[instr.value] = ARGUMENT_REGS[0]
             if block.label == self.func.entry:

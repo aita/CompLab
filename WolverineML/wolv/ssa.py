@@ -100,7 +100,7 @@ def _definitions(func: ir.Func) -> _Defs:
     defs = _Defs()
     for block in func.walk():
         for instr in block.instrs:
-            r = ir.defs(instr)
+            r = instr.defs()
             if r is not None:
                 defs.blocks.setdefault(r, set()).add(block.label)
                 defs.count[r] = defs.count.get(r, 0) + 1
@@ -187,10 +187,10 @@ class _Renamer:
             phi.dst = self.rename(v)
             mine.append(v)
         for instr in block.instrs:
-            ir.map_uses(instr, self.use)
-            d = ir.defs(instr)
+            instr.map_uses(self.use)
+            d = instr.defs()
             if d is not None and d in self.variables:
-                ir.set_def(instr, self.rename(d))
+                instr.set_def(self.rename(d))
                 mine.append(d)
         for succ in block.succs:
             for phi, v in zip(
@@ -256,7 +256,7 @@ def verify(func: ir.Func) -> None:
             assert phi.dst not in definition, f"{phi.dst} defined twice"
             definition[phi.dst] = block.label
         for instr in block.instrs:
-            d = ir.defs(instr)
+            d = instr.defs()
             if d is not None:
                 assert d not in definition, f"%{d} defined twice"
                 definition[d] = block.label
@@ -275,7 +275,7 @@ def verify(func: ir.Func) -> None:
                     f"%{r} does not reach {block.label} through {pred}"
                 )
         for instr in block.instrs:
-            for r in ir.uses(instr):
+            for r in instr.uses():
                 where = definition.get(r)
                 assert where is not None, f"%{r} is never defined"
                 assert dom.dominates(where, block.label), (

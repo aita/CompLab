@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from wolv import dag, driver, ir, liveness, lower, opt, select, ssa
+from wolv import dag, driver, ir, liveness, lower, mach, opt, select, ssa
 from wolv.parser import parse
 from wolv.typecheck import check
 
@@ -24,7 +24,7 @@ def forms(source: str, name: str = "f", *, checks: bool = False) -> list[str]:
         instr.form
         for block in func.walk()
         for instr in block.instrs
-        if isinstance(instr, ir.Mach)
+        if isinstance(instr, mach.Mach)
     ]
 
 

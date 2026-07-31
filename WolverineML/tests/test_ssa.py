@@ -40,7 +40,7 @@ def test_lowering_writes_a_variable_more_than_once() -> None:
     written: dict[int, int] = {}
     for block in func.walk():
         for instr in block.instrs:
-            d = ir.defs(instr)
+            d = instr.defs()
             if d is not None:
                 written[d] = written.get(d, 0) + 1
     assert any(n > 1 for n in written.values())

@@ -24,37 +24,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from wolv import ir
+from wolv import ir, mach
 from wolv.machine import ARGUMENT_REGS, CALLER_SAVED, SCRATCH
-
-# How each form the selector chose is written down.  `ldr`, `str`, `const` and
-# `adr` are not here because they are not one instruction each: what they come
-# out as depends on how far the offset reaches or how wide the constant is.
-FORMS: dict[str, str] = {
-    "add": "add {d}, {s0}, {s1}",
-    "addi": "add {d}, {s0}, #{imm}",
-    "adds": "add {d}, {s0}, {s1}, lsl #{imm}",
-    "sub": "sub {d}, {s0}, {s1}",
-    "subi": "sub {d}, {s0}, #{imm}",
-    "subs": "sub {d}, {s0}, {s1}, lsl #{imm}",
-    "mul": "mul {d}, {s0}, {s1}",
-    "madd": "madd {d}, {s0}, {s1}, {s2}",
-    "msub": "msub {d}, {s0}, {s1}, {s2}",
-    "sdiv": "sdiv {d}, {s0}, {s1}",
-    "and": "and {d}, {s0}, {s1}",
-    "orr": "orr {d}, {s0}, {s1}",
-    "eor": "eor {d}, {s0}, {s1}",
-    "eori": "eor {d}, {s0}, #{imm}",
-    "lsl": "lsl {d}, {s0}, {s1}",
-    "lsli": "lsl {d}, {s0}, #{imm}",
-    "asr": "asr {d}, {s0}, {s1}",
-    "asri": "asr {d}, {s0}, #{imm}",
-    "cmp": "cmp {s0}, {s1}",
-    "cmpi": "cmp {s0}, #{imm}",
-    "cset": "cset {d}, {sym}",
-    "ldrx": "ldr {d}, [{s0}, {s1}, lsl #{imm}]",
-    "strx": "str {s2}, [{s0}, {s1}, lsl #{imm}]",
-}
 
 UNSCALED: dict[str, str] = {"ldr": "ldur", "str": "stur"}
 
@@ -262,7 +233,7 @@ class FuncEmitter:
 
     def instruction(self, instr: ir.Instr) -> None:
         match instr:
-            case ir.Mach():
+            case mach.Mach():
                 self.machine(instr)
             case ir.Move(dst, src):
                 self.mov(self.colour(dst), self.colour(src))
@@ -277,7 +248,7 @@ class FuncEmitter:
             case _:
                 raise AssertionError(f"cannot emit {instr}")
 
-    def machine(self, instr: ir.Mach) -> None:
+    def machine(self, instr: mach.Mach) -> None:
         """Write down one selected instruction, or the sequence it stands for."""
         srcs = [self.colour(s) for s in instr.srcs]
         match instr.form:
@@ -299,7 +270,7 @@ class FuncEmitter:
                 if instr.dst is not None:
                     names["d"] = f"x{self.colour(instr.dst)}"
                 self.line(
-                    FORMS[instr.form].format(
+                    mach.FORMS[instr.form].format(
                         **names, imm=instr.imm, sym=instr.symbol
                     )
                 )
@@ -337,7 +308,7 @@ def _registers_read(func: ir.Func) -> set[ir.Reg]:
         for phi in block.phis:
             read.update(phi.args.values())
         for instr in block.instrs:
-            read.update(ir.uses(instr))
+            read.update(instr.uses())
     return read
 
 

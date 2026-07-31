@@ -58,9 +58,9 @@ def costs(func: ir.Func) -> dict[ir.Reg, float]:
                 weight[arg] = weight.get(arg, 0.0) + 10.0 ** min(depth[pred], 4)
             weight[phi.dst] = weight.get(phi.dst, 0.0) + scale
         for instr in block.instrs:
-            for r in ir.uses(instr):
+            for r in instr.uses():
                 weight[r] = weight.get(r, 0.0) + scale
-            d = ir.defs(instr)
+            d = instr.defs()
             if d is not None:
                 weight[d] = weight.get(d, 0.0) + scale
     return weight
@@ -105,13 +105,13 @@ def spill(func: ir.Func, victim: ir.Reg) -> set[ir.Reg]:
         rebuilt: list[ir.Instr] = []
         for instr in block.instrs:
             spill_store = isinstance(instr, ir.StoreSlot) and instr.slot == slot
-            if victim in ir.uses(instr) and not spill_store:
+            if victim in instr.uses() and not spill_store:
                 fresh = func.new_reg()
                 reloads.add(fresh)
                 rebuilt.append(ir.LoadSlot(fresh, slot))
-                ir.map_uses(instr, _instead_of(victim, fresh))
+                instr.map_uses(_instead_of(victim, fresh))
             rebuilt.append(instr)
-            if ir.defs(instr) == victim:
+            if instr.defs() == victim:
                 rebuilt.append(ir.StoreSlot(slot, victim))
         block.instrs = rebuilt
 

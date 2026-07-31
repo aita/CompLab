@@ -40,7 +40,7 @@ class Node:
 
     @property
     def value(self) -> ir.Reg | None:
-        return ir.defs(self.instr)
+        return self.instr.defs()
 
     def alone(self) -> bool:
         """Read exactly once, inside the block, and computable where read."""
@@ -82,10 +82,10 @@ def build(block: ir.Block, live_out: set[ir.Reg]) -> Dag:
     """Read a block into a graph.  `live_out` includes what the phis will read."""
     dag = Dag(block)
     for i, instr in enumerate(block.instrs):
-        operands: list[int | None] = [dag.by_value.get(r) for r in ir.uses(instr)]
+        operands: list[int | None] = [dag.by_value.get(r) for r in instr.uses()]
         node = Node(i, instr, operands)
         dag.nodes.append(node)
-        defined = ir.defs(instr)
+        defined = instr.defs()
         if defined is not None:
             dag.by_value[defined] = i
         for operand in operands:
@@ -109,7 +109,7 @@ def show(dag: Dag) -> str:
         marks = "".join(
             [
                 "*" if node.escapes else "",
-                "!" if ir.has_effect(node.instr) else "",
+                "!" if node.instr.has_effect() else "",
             ]
         )
         lines.append(

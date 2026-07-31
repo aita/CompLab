@@ -29,10 +29,10 @@ def analyse(func: ir.Func) -> Liveness:
         for phi in block.phis:
             kill.add(phi.dst)
         for instr in block.instrs:
-            for r in ir.uses(instr):
+            for r in instr.uses():
                 if r not in kill:
                     use.add(r)
-            d = ir.defs(instr)
+            d = instr.defs()
             if d is not None:
                 kill.add(d)
         upward[block.label] = use
@@ -70,12 +70,12 @@ def across_calls(func: ir.Func, live: Liveness) -> set[ir.Reg]:
     for block in func.walk():
         after = set(live.live_out[block.label])
         for instr in reversed(block.instrs):
-            d = ir.defs(instr)
+            d = instr.defs()
             if d is not None:
                 after.discard(d)
             if isinstance(instr, ir.Call):
                 out |= after
-            after.update(ir.uses(instr))
+            after.update(instr.uses())
     return out
 
 
@@ -86,10 +86,10 @@ def pressure(func: ir.Func, live: Liveness) -> int:
         after = set(live.live_out[block.label])
         most = max(most, len(after))
         for instr in reversed(block.instrs):
-            d = ir.defs(instr)
+            d = instr.defs()
             if d is not None:
                 after.discard(d)
-            after.update(ir.uses(instr))
+            after.update(instr.uses())
             most = max(most, len(after))
         entry = set(live.live_in[block.label]) | {p.dst for p in block.phis}
         most = max(most, len(entry))

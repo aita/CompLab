@@ -80,9 +80,9 @@ def verify(func: ir.Func) -> None:
             alive.add(phi.dst)
             _no_clash(func, alive, block.label)
         for instr in block.instrs:
-            for r in ir.uses(instr):
+            for r in instr.uses():
                 assert r in func.colours, f"%{r} has no colour"
-            d = ir.defs(instr)
+            d = instr.defs()
             if d is not None:
                 assert d in func.colours, f"%{d} has no colour"
         _no_clash(func, set(live.live_out[block.label]), block.label)

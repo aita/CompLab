@@ -24,6 +24,7 @@ from wolv import (
     ir,
     lexer,
     lower,
+    mach,
     opt,
     outofssa,
     parser,
@@ -67,6 +68,7 @@ def compile_module(source: str, opts: Options) -> ir.Module:
     for func in mod.funcs:
         ssa.split_critical_edges(func)
     select.select_module(mod)
+    mach.verify_module(mod)
     chosen = opts.allocator()
     if not chosen.on_ssa:
         outofssa.destruct_module(mod)

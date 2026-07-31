@@ -37,7 +37,7 @@ $ uv run python -m wolv build examples/queens.wol -o queens && qemu-aarch64 ./qu
 
 ```sh
 uv sync
-uv run pytest                     # 158 tests
+uv run pytest                     # 183 tests
 uv run mypy                       # every module is strictly typed
 uv run ruff check .
 
@@ -134,11 +134,12 @@ A program is a sequence of declarations, run in order; there is no `main`.
 | `lexer.py` | one pass, no regexes; nested `(* *)`, `\ddd` escapes |
 | `parser.py` | a Pratt parser: one precedence table, prefix forms take their tail at binding power 0 |
 | `types.py`, `typecheck.py` | monomorphic checking, and escape analysis on the side |
-| `ir.py` | a CFG of three-address code over virtual registers |
+| `ir.py` | the three-address IR, and the graph and frame both IRs are written in |
 | `lower.py` | tree → CFG; decides which variables live in registers and which in the frame |
 | `ssa.py` | dominators, dominance frontiers, phi placement, renaming, and a verifier |
 | `opt.py` | constant folding, copy propagation, phi simplification, branch folding, dead code |
 | `liveness.py` | liveness on SSA, where a phi reads its arguments on the edges |
+| `mach.py` | the machine IR: one instruction, a table of forms, and what may no longer appear |
 | `dag.py` | one block as a graph of expressions, and which nodes may be folded |
 | `select.py` | covering that graph with instructions: `madd`, shifted operands, addressing modes |
 | `outofssa.py` | phis become copies in the predecessors, for the allocator that wants that |
@@ -232,9 +233,17 @@ happen whether or not anything reads it; `reads` names the nodes an operand
 comes from, and `-` is a value from somewhere else. So node 1 has one reader
 and node 2 is the only one — which is what lets the 1 disappear into an `addi`.
 
-What comes out is machine instructions with virtual registers, still in the
-same CFG and still in SSA, so liveness, both allocators and the SSA verifier
-carry on unchanged. `wolv emit -s mach` shows it.
+The two instruction sets are two modules. `ir.py` has the three-address one —
+what lowering writes, what SSA construction renames, what the optimiser
+rewrites — and `mach.py` has the machine one. What they share is everything
+that is not an instruction: the registers, the blocks, the graph, the frame.
+Each instruction answers for itself which register it writes and which it
+reads, so liveness, both allocators and the verifiers work on either level
+without knowing what an `madd` is, and the program is still in SSA after
+selection — a tile defines one new register. `mach.verify` says what may no
+longer appear once selection has run, so an abstract instruction that survived
+is caught there rather than in the emitter. `wolv emit -s mach` shows the
+result.
 
 The rule about folding is the whole of the difficulty. A node with one reader
 *can* be computed where it is read rather than where it was written — but only
@@ -391,10 +400,18 @@ definition dominates its uses, and that it reaches each phi through the edge
 that names it. `allocator.verify` insists that no two values live at the same
 point share a colour, and every test that says so runs against both allocators.
 
-And end-to-end tests, which compile six programs to ARMv8, link them against
+And end-to-end tests, which compile seven programs to ARMv8, link them against
 the runtime, run them under qemu, and compare the output — under eight
 configurations each, because `--no-opt`, `--no-checks`, a machine small enough
 to spill, and both allocators all have to agree on the answer.
+
+Agreeing with each other is not the same as being right, though, so the last
+lot generate a program at random, work out in Python what it should print, and
+then compile it: expressions over the arithmetic this language has, and
+programs of assignments, loops and branches over an array. Those found nothing,
+which is the point of writing them down — but the harness that runs them
+against thousands of programs at a time did find that two of the selector's
+tiles could never be reached, and they are gone.
 
 ## What it does not do
 

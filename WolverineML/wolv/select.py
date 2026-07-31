@@ -10,7 +10,7 @@ say:
     a + (b << k)         add with a shifted operand
     a + 4095             add with an immediate
     a * 8                lsl
-    [a + (i << 3)]       a scaled indexed load
+    [a + 24]             a load with the addition as its displacement
     a < b, then branch   cmp, and a branch on the flags
 
 What comes out is still the same CFG, and still in SSA — a tile defines one
@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from wolv import dag, ir, liveness
+from wolv import dag, ir, liveness, mach
 
 # What `add`, `sub` and `cmp` take as an immediate operand.
 IMMEDIATE = 4095
@@ -121,19 +121,12 @@ class _Selector:
                     return False
                 return self.as_shift(node.index) is not None or self.is_bin(node, "*")
             case ir.Load(_, _, offset) | ir.Store(_, offset, _):
-                return reader.operands[0] == node.index and (
-                    self.indexable(node, offset)
-                    or self.displaces(node, offset) is not None
+                return (
+                    reader.operands[0] == node.index
+                    and self.displaces(node, offset) is not None
                 )
             case _:
                 return False
-
-    def indexable(self, node: dag.Node, offset: int) -> bool:
-        """`[pointer + (index << k)]`, which needs nothing added to it."""
-        if offset != 0 or not self.is_bin(node, "+"):
-            return False
-        shift = self.as_shift(node.operands[1])
-        return shift is not None and shift[1] <= 4
 
     def displaces(self, node: dag.Node, offset: int) -> int | None:
         """`[pointer + 24]`, when what is added to the pointer is a constant."""
@@ -163,7 +156,7 @@ class _Selector:
         symbol: str = "",
         effect: bool = False,
     ) -> None:
-        self.emit(ir.Mach(form, dst, srcs, imm, symbol, effect))
+        self.emit(mach.Mach(form, dst, srcs, imm, symbol, effect))
 
     def reg(self) -> ir.Reg:
         return self.func.new_reg()
@@ -220,7 +213,7 @@ class _Selector:
                 for index in node.operands:
                     self.force(index)
                 self.emit(instr)
-                defined = ir.defs(instr)
+                defined = instr.defs()
                 return defined if defined is not None else 0
 
     # -- the tiles --------------------------------------------------------
@@ -337,11 +330,6 @@ class _Selector:
         return node, amount
 
     def load(self, node: dag.Node, dst: ir.Reg, base: ir.Reg, offset: int) -> None:
-        indexed = self.indexed(node.operands[0], offset)
-        if indexed is not None:
-            pointer, index, scale = indexed
-            self.mach("ldrx", dst, [pointer, index], imm=scale)
-            return
         pointer, offset = self.address(node.operands[0], base, offset)
         self.mach("ldr", dst, [pointer], imm=offset)
 
@@ -349,11 +337,6 @@ class _Selector:
         self, node: dag.Node, base: ir.Reg, offset: int, src: ir.Reg
     ) -> None:
         value = self.at(node.operands[1], src)
-        indexed = self.indexed(node.operands[0], offset)
-        if indexed is not None:
-            pointer, index, scale = indexed
-            self.mach("strx", None, [pointer, index, value], imm=scale, effect=True)
-            return
         pointer, offset = self.address(node.operands[0], base, offset)
         self.mach("str", None, [pointer, value], imm=offset, effect=True)
 
@@ -368,24 +351,6 @@ class _Selector:
                 assert isinstance(node.instr, ir.Bin)
                 return self.at(node.operands[0], node.instr.lhs), displaced
         return self.at(index, base), offset
-
-    def indexed(
-        self, address: int | None, offset: int
-    ) -> tuple[ir.Reg, ir.Reg, int] | None:
-        """`[pointer + (index << k)]` is one addressing mode, if nothing is added."""
-        total = self.graph.of(address)
-        if total is None or not total.alone() or not self.indexable(total, offset):
-            return None
-        assert isinstance(total.instr, ir.Bin)
-        shift = self.as_shift(total.operands[1])
-        assert shift is not None
-        shifted, amount = shift
-        assert isinstance(shifted.instr, ir.Bin)
-        return (
-            self.at(total.operands[0], total.instr.lhs),
-            self.at(shifted.operands[0], shifted.instr.lhs),
-            amount,
-        )
 
     # -- comparisons and the branch that reads them ------------------------
 
