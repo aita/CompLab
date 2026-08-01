@@ -1,0 +1,34 @@
+(* Recursion in tail position.  Every call here reuses the frame it is called
+   from, and the numbers are large enough that a machine which did not would
+   have run out of something by now. *)
+
+fun count (i, limit) = if i = limit then i else count (i + 1, limit)
+val million = count (0, 1000000)
+
+fun sum (i, acc) = if i = 0 then acc else sum (i - 1, acc + i)
+val triangular = sum (1000000, 0)
+
+(* Mutual recursion, both in tail position. *)
+fun even (n) = if n = 0 then true else odd (n - 1)
+and odd (n) = if n = 0 then false else even (n - 1)
+val parity = (even (1000000), odd (1000001))
+
+(* A tail call from the body of a `let`, and from both arms of an `if`. *)
+fun alternate (n, acc) =
+  let val next = acc + 1
+  in if n = 0 then acc
+     else if n mod 2 = 0 then alternate (n - 1, next)
+     else alternate (n - 1, acc)
+  end
+val alternated = alternate (100000, 0)
+
+(* A tail call through a closure, not a known function: the callee is a value
+   here, so this is [ReturnCall] rather than [ReturnCallStatic]. *)
+fun loopWith (f, n, acc) = if n = 0 then acc else loopWith (f, n - 1, f (acc))
+val throughAClosure = loopWith (fn (x) => x + 2, 100000, 0)
+
+(* A local recursive function that captures, called in tail position. *)
+fun scaledSum (factor, n) =
+  let fun go (i, acc) = if i = 0 then acc else go (i - 1, acc + i * factor)
+  in go (n, 0) end
+val scaled = scaledSum (3, 100000)

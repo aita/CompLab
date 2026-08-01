@@ -1,0 +1,10 @@
+; The whole processor is one library so that a test can drive a single pass on
+; its own, and `bin/` only wraps it in an executable.  The library is wrapped, so
+; a module of it is `Polecat.Machine` from outside and `Machine` from within.
+;
+; No dependencies: the standard library has everything a stack machine needs.
+
+(library
+ (name polecat)
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))

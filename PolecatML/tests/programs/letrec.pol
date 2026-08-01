@@ -1,0 +1,54 @@
+(* Local recursive functions, and what they capture.
+
+   A group with no free variables is a set of globals and costs nothing.  A group
+   with free variables captures them once, all its members sharing one vector, and
+   a member refers to itself or to a sibling by rebuilding it from that vector. *)
+
+(* Captures nothing: the members are globals. *)
+fun countdown (n) =
+  let fun go (i) = if i = 0 then 0 else go (i - 1)
+  in go (n) end
+val counted = countdown (10)
+
+(* Captures one local, and recurses on itself. *)
+fun repeat (times, value) =
+  let fun go (i, acc) = if i = 0 then acc else go (i - 1, acc + value)
+  in go (times, 0) end
+val repeated = repeat (5, 7)
+
+(* Two members, capturing the same thing, calling each other. *)
+fun alternating (base) =
+  let fun up (n) = if n = 0 then base else down (n - 1) + 1
+      and down (n) = if n = 0 then base else up (n - 1) - 1
+  in (up (4), down (4), up (5)) end
+val alternated = alternating (100)
+
+(* A closure built inside a group member, capturing the member itself.  That is
+   the case where a member has to be materialised into a slot first. *)
+fun indirect (base) =
+  let fun go (n) = if n = 0 then base else (fn (m) => go (m)) (n - 1)
+  in go (6) end
+val indirectly = indirect (33)
+
+(* The same, with two members. *)
+fun indirectPair (base) =
+  let fun ping (n) = if n = 0 then base else (fn (m) => pong (m)) (n - 1)
+      and pong (n) = if n = 0 then ~base else ping (n - 1)
+  in (ping (6), pong (6), ping (7)) end
+val pinged = indirectPair (4)
+
+(* Nested groups: the inner one captures the outer one's parameter and the
+   outer one's local function. *)
+fun nested (k) =
+  let fun outer (n) =
+        let fun inner (m) = if m = 0 then n + k else inner (m - 1)
+        in inner (n) end
+  in (outer (3), outer (0)) end
+val nestedResult = nested (1000)
+
+(* A group whose member is used as a value rather than called. *)
+fun asValue (k) =
+  let fun step (n) = n + k
+      val f = step
+  in (f (1), step (2)) end
+val valued = asValue (10)

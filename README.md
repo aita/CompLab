@@ -39,3 +39,13 @@
   comparison between the two allocators is in the Python one. The book is in
   [`WolverineML/doc/`](WolverineML/doc/index.md), a chapter per pass, in
   Japanese.
+- [`PolecatML/`](PolecatML) — a small strict ML compiled to a stack machine, in
+  OCaml: Hindley-Milner inference, and then a machine whose state is an operand
+  stack, a frame stack and a program counter — CEK's continuation with the
+  statically known part compiled away. The tail call is its own instruction, so
+  it is stated by the compiler rather than recognised by the machine; captures
+  are copies, so a recursive group rebuilds its members out of the one capture
+  vector they share, and no cell or back-patch appears anywhere; and a verifier
+  walks the operand stack's height over every path before anything runs. There
+  is a tree-walking evaluator beside the machine, and every test demands the two
+  print the same characters.

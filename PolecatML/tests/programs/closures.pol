@@ -1,0 +1,45 @@
+(* Closures: what they capture, and from where. *)
+
+(* One capture, from a local. *)
+fun adder (n) = fn (m) => n + m
+val addFive = adder (5)
+val eleven = addFive (6)
+
+(* Two closures over the same binding are two values, and each keeps its own
+   copy of it. *)
+val addOne = adder (1)
+val separate = (addOne (0), addFive (0))
+
+(* A capture from a capture: the inner function reaches two levels out, and the
+   middle one has to capture what the inner one needs. *)
+fun outer (a) = fn (b) => fn (c) => a * 100 + b * 10 + c
+val threeDeep = outer (1) (2) (3)
+
+(* Closures returned from `let`, capturing a `let` binding. *)
+fun scale (factor) =
+  let val doubled = factor * 2
+  in fn (n) => n * doubled end
+val scaled = scale (3) (5)
+
+(* Higher order: functions in, functions out. *)
+fun compose (f, g) = fn (x) => f (g (x))
+fun twice (f) = fn (x) => f (f (x))
+val incThenDouble = compose (fn (n) => n * 2, fn (n) => n + 1)
+val fourTimes = twice (twice (fn (n) => n + 1))
+val composed = (incThenDouble (5), fourTimes (0))
+
+(* A function with no free variables is a global: it is the same closure every
+   time it is named, and calling it needs no closure value at all. *)
+fun plain (n) = n + 1
+val sameEveryTime = (plain (1), plain (2))
+val asAValue = compose (plain, plain) (0)
+
+(* Capturing a parameter that is itself a function. *)
+fun applyLater (f, n) = fn () => f (n)
+val later = applyLater (plain, 41)
+val forty2 = later ()
+
+(* Closures inside tuples inside closures. *)
+fun counterPair (start) = (fn (n) => start + n, fn (n) => start - n)
+val (up, down) = counterPair (10)
+val bothWays = (up (5), down (5))

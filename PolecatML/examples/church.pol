@@ -1,0 +1,28 @@
+(* Church numerals: a number is what it does to a function.
+
+   The language has no data beyond tuples, and it does not need any to count —
+   arithmetic here is closures applied to closures, and every one of them is a
+   [MakeClosure] and a [Call] in the compiled code. *)
+
+fun zero (f, x) = x
+fun next (n) = fn (f, x) => f (n (f, x))
+
+fun add (m, n) = fn (f, x) => m (f, n (f, x))
+fun mul (m, n) = fn (f, x) => m (fn (y) => n (f, y), x)
+
+(* Back to an integer: apply "add one" that many times to nothing. *)
+fun toInt (n) = n (fn (i) => i + 1, 0)
+
+val one = next (zero)
+val two = next (one)
+val three = next (two)
+
+val five = add (two, three)
+val six = mul (two, three)
+val thirty = mul (five, six)
+
+val counted = (toInt (one), toInt (five), toInt (six), toInt (thirty))
+
+(* And a number that is not a numeral, to show the same closures do something
+   else just as well: three applications of "double". *)
+val eight = three (fn (n) => n * 2, 1)

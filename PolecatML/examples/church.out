@@ -1,0 +1,13 @@
+val zero : ('a, 'b) -> 'b = fn
+val next : (('a -> 'b, 'c) -> 'a) -> ('a -> 'b, 'c) -> 'b = fn
+val add : (('a, 'b) -> 'c, ('a, 'd) -> 'b) -> ('a, 'd) -> 'c = fn
+val mul : (('a -> 'b, 'c) -> 'd, ('e, 'a) -> 'b) -> ('e, 'c) -> 'd = fn
+val toInt : ((int -> int, int) -> 'a) -> 'a = fn
+val one : ('a -> 'b, 'a) -> 'b = fn
+val two : ('a -> 'a, 'a) -> 'a = fn
+val three : ('a -> 'a, 'a) -> 'a = fn
+val five : ('a -> 'a, 'a) -> 'a = fn
+val six : ('a -> 'a, 'a) -> 'a = fn
+val thirty : ('a -> 'a, 'a) -> 'a = fn
+val counted : int * int * int * int = (1, 5, 6, 30)
+val eight : int = 8

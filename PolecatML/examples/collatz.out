@@ -1,0 +1,5 @@
+val step : int -> int = fn
+val chain : (int, int) -> int = fn
+val search : (int, int, int, int) -> int * int = fn
+val below1000 : int * int = (871, 178)
+val below10000 : int * int = (6171, 261)

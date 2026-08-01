@@ -1,0 +1,17 @@
+val fact : int -> int = fn
+val factorials : int * int * int * int = (1, 1, 3628800, 2432902008176640000)
+val fib : int -> int = fn
+val fibs : int * int * int * int = (0, 1, 55, 6765)
+val gcd : (int, int) -> int = fn
+val divisors : int * int * int = (6, 1, 7)
+val power : (int, int) -> int = fn
+val powers : int * int * int = (1024, 243, 1)
+val even : int -> bool = fn
+val odd : int -> bool = fn
+val parities : bool * bool * bool * bool = (true, false, false, true)
+val countA : int -> int = fn
+val countB : int -> int = fn
+val countC : int -> int = fn
+val counted : int * int * int = (111, 112, 111)
+val ackermann : (int, int) -> int = fn
+val ack : int * int * int = (1, 9, 61)

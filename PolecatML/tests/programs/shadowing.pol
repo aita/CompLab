@@ -1,0 +1,40 @@
+(* Shadowing.  Names are made unique before anything is compiled, so a binding
+   that hides another is simply a different slot, and both are still there. *)
+
+val x = 1
+val x = x + 1
+val x = x * 10
+val firstThree = x
+
+val y = 100
+val inner =
+  let val y = y + 1
+      val y = y + 1
+  in y end
+val outerStillThere = y
+
+(* `fun` binds a name that is in scope in its own body, so the `f` inside the
+   second one is the second one.  `val` does not, so the `f` on its right is
+   still the first one — which is how the second is written here. *)
+fun f (n) = n + 1
+val f = fn (n) => f (n) * 2
+val shadowedFunction = f (10)
+
+(* A parameter shadows a top-level name, and the shadowed one is still reachable
+   from a function that was defined before. *)
+val k = 5
+fun useK (n) = n + k
+fun shadowsK (k) = (k, useK (k))
+val shadowed = shadowsK (50)
+
+(* A `let` binding shadows a parameter, and a nested one shadows that. *)
+fun layers (n) =
+  let val n = n * 2
+      val result = let val n = n * 3 in n + 1 end
+  in (n, result) end
+val layered = layers (1)
+
+(* The same name bound in both arms of an `if`. *)
+fun branchy (b) =
+  if b then let val v = 1 in v end else let val v = 2 in v end
+val branched = (branchy (true), branchy (false))

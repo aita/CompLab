@@ -1,0 +1,21 @@
+(* The longest Collatz chain that starts below a limit.
+
+   Every recursion here is in tail position, so the whole search runs in two
+   frames: the one the program starts in, and the one being reused.  `polecat
+   run --stats examples/collatz.pol` says so. *)
+
+fun step (n) = if n mod 2 = 0 then n / 2 else 3 * n + 1
+
+fun chain (n, sofar) = if n = 1 then sofar else chain (step (n), sofar + 1)
+
+fun search (n, limit, bestStart, bestLength) =
+  if n = limit then (bestStart, bestLength)
+  else
+    let val here = chain (n, 0)
+    in
+      if here > bestLength then search (n + 1, limit, n, here)
+      else search (n + 1, limit, bestStart, bestLength)
+    end
+
+val below1000 = search (1, 1000, 1, 0)
+val below10000 = search (1, 10000, 1, 0)

@@ -1,0 +1,38 @@
+(* The edges of a 64-bit integer, and of the operators on it. *)
+
+val maximum = 9223372036854775807
+val minimum = ~9223372036854775807 - 1
+
+(* Arithmetic wraps around, as two's complement does. *)
+val wrapUp = maximum + 1
+val wrapDown = minimum - 1
+val wrapMul = maximum * 2
+
+(* Division truncates towards zero; the remainder takes the sign of the left
+   operand.  Both are what the host's 64-bit division does. *)
+val positives = (7 / 2, 7 mod 2)
+val negativeLeft = (~7 / 2, ~7 mod 2)
+val negativeRight = (7 / ~2, 7 mod ~2)
+val bothNegative = (~7 / ~2, ~7 mod ~2)
+val exact = (6 / 3, 6 mod 3)
+
+(* Negation of the smallest integer has no positive answer and wraps. *)
+val negatedMinimum = ~minimum
+
+(* Comparison is signed. *)
+val signed = (minimum < 0, maximum > 0, minimum < maximum)
+
+(* Nesting deeply enough to need a few operand stack slots at once. *)
+val deep = ((1 + 2) * (3 + 4)) - ((5 + 6) * (7 - 8))
+val deeper = (1 + (2 + (3 + (4 + (5 + (6 + (7 + (8 + (9 + 10)))))))))
+
+(* A call whose arguments are themselves calls, so the operand stack holds a
+   callee and a half-built argument list at once. *)
+fun three (a, b, c) = a * 100 + b * 10 + c
+val nestedCalls = three (three (1, 2, 3), three (4, 5, 6), three (7, 8, 9))
+
+(* Zero arguments, and a function that returns unit. *)
+fun nothing () = ()
+val nothingHappened = nothing ()
+fun constantly () = 7
+val seven = constantly ()

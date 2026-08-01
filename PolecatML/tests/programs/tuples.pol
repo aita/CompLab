@@ -1,0 +1,35 @@
+(* Tuples: building them, projecting from them, taking them apart. *)
+
+val pair = (1, 2)
+val triple = (1, true, ())
+val nested = ((1, 2), (3, (4, 5)))
+
+val first = #1 pair
+val second = #2 pair
+val deep = #1 (#2 (#2 nested))
+
+val (a, b) = pair
+val (x, y, z) = triple
+val ((p, q), rest) = nested
+val (_, ignored) = pair
+val () = ()
+
+fun swap ((l, r)) = (r, l)
+val swapped = swap (pair)
+
+fun fst ((l, _)) = l
+fun snd ((_, r)) = r
+val takenApart = (fst (pair), snd (pair))
+
+(* A tuple of functions is a tuple like any other. *)
+val operations = (fn (n) => n + 1, fn (n) => n * 2)
+val applied = (#1 operations) (10)
+
+(* Tuples go in and out of functions whole. *)
+fun addPair ((l, r)) = l + r
+val summed = addPair ((3, 4))
+
+fun both (f, arg) = (f (arg), f (arg))
+val twice = both (fn (n) => n - 1, 10)
+
+val empty = ((), ())

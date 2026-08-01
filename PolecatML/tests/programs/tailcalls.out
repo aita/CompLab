@@ -1,0 +1,13 @@
+val count : (int, int) -> int = fn
+val million : int = 1000000
+val sum : (int, int) -> int = fn
+val triangular : int = 500000500000
+val even : int -> bool = fn
+val odd : int -> bool = fn
+val parity : bool * bool = (true, true)
+val alternate : (int, int) -> int = fn
+val alternated : int = 50000
+val loopWith : ('a -> 'a, int, 'a) -> 'a = fn
+val throughAClosure : int = 200000
+val scaledSum : (int, int) -> int = fn
+val scaled : int = 15000150000

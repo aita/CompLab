@@ -1,0 +1,40 @@
+(* Constants, arithmetic, comparison, and the shape of an expression. *)
+
+val zero = 0
+val one = 1
+val big = 9223372036854775807
+val unitValue = ()
+val yes = true
+val no = false
+
+val sum = 1 + 2 + 3
+val difference = 10 - 4 - 3
+val product = 2 * 3 * 4
+val quotient = 100 / 7
+val remainder = 100 mod 7
+val negated = ~42
+val mixed = 2 + 3 * 4 - 6 / 2
+
+val lt = 1 < 2
+val le = 2 <= 2
+val gt = 3 > 4
+val ge = 4 >= 4
+val eq = 5 = 5
+val ne = 5 <> 5
+
+val both = true andalso false
+val either = true orelse false
+val negation = not true
+
+(* `andalso` and `orelse` do not evaluate the right side unless they have to,
+   which is visible here only because the right side would divide by zero. *)
+val shortAnd = false andalso 1 / 0 = 0
+val shortOr = true orelse 1 / 0 = 0
+
+val branch = if 2 * 2 = 4 then 10 else 20
+val nested = if false then 1 else if true then 2 else 3
+
+val scoped =
+  let val a = 5
+      val b = a * a
+  in a + b end

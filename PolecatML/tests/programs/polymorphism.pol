@@ -1,0 +1,36 @@
+(* Let-polymorphism.  The values are one word each and the machine never asks
+   what is in them, so a polymorphic function is one function, not several. *)
+
+fun identity (x) = x
+val anInt = identity (1)
+val aBool = identity (true)
+val aTuple = identity ((1, true))
+val aFunction = identity (identity) (7)
+
+fun constant (x) = fn (_) => x
+val alwaysThree = constant (3)
+val stillThree = (alwaysThree (1), alwaysThree (true))
+
+fun compose (f, g) = fn (x) => f (g (x))
+val composed = compose (fn (b) => if b then 1 else 0, fn (n) => n > 5) (10)
+
+fun swap ((a, b)) = (b, a)
+val swappedInts = swap ((1, 2))
+val swappedMixed = swap ((true, ()))
+
+fun apply (f, x) = f (x)
+val appliedInt = apply (fn (n) => n + 1, 1)
+val appliedBool = apply (fn (b) => not b, true)
+
+fun pair (a, b) = (a, b)
+val pairs = (pair (1, true), pair ((), (1, 2)))
+
+(* A local binding generalises too. *)
+val inner =
+  let fun twice (f) = fn (x) => f (f (x))
+  in (twice (fn (n) => n + 1) (0), twice (fn (b) => not b) (true)) end
+
+(* The type of a recursive function is generalised once the group is finished,
+   not while it is being checked. *)
+fun length (n, acc) = if n = 0 then acc else length (n - 1, acc + 1)
+val lengths = (length (3, 0), length (0, 100))

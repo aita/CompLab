@@ -1,0 +1,14 @@
+val countdown : int -> int = fn
+val counted : int = 0
+val repeat : (int, int) -> int = fn
+val repeated : int = 35
+val alternating : int -> int * int * int = fn
+val alternated : int * int * int = (100, 100, 101)
+val indirect : 'a -> 'a = fn
+val indirectly : int = 33
+val indirectPair : int -> int * int * int = fn
+val pinged : int * int * int = (4, -4, -4)
+val nested : int -> int * int = fn
+val nestedResult : int * int = (1003, 1000)
+val asValue : int -> int * int = fn
+val valued : int * int = (11, 12)

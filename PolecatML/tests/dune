@@ -1,0 +1,13 @@
+; The tests, as one executable: `dune test` runs the lot and says how many
+; passed.  Everything is in process — there is nothing to install and nothing to
+; shell out to — so a failing test can be debugged in the same way the compiler
+; is.
+
+(test
+ (name run_tests)
+ (libraries polecat)
+ (deps
+  (source_tree programs)
+  (source_tree ../examples))
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))

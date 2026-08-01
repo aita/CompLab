@@ -1,0 +1,56 @@
+(* Everything the language has, once each. *)
+
+(* The values are integers, booleans, unit, tuples and functions. *)
+val answer = 6 * 7
+val yes = true
+val nothing = ()
+val point = (3, 4)
+
+(* `~` negates, and the comparisons are on integers. *)
+val negative = ~answer
+val ordered = 1 < 2 andalso not (3 = 4)
+
+(* Division truncates towards zero, and `mod` takes the sign of the left. *)
+val quotient = ~7 / 2
+val remainder = ~7 mod 2
+
+(* A function takes a parenthesised list of arguments, and so does a call:
+   `f (a, b)` passes two arguments and `f ((a, b))` passes one pair. *)
+fun distance (x, y) = x * x + y * y
+val squared = distance (3, 4)
+val fromPair = distance (#1 point, #2 point)
+
+(* Patterns take a tuple apart, in a `val` and in a parameter list. *)
+val (px, py) = point
+fun swap ((a, b)) = (b, a)
+val swapped = swap (point)
+
+(* Functions are values, and one that returns another captures what it needs.
+   Nothing is mutable, so a capture is a copy. *)
+fun adder (n) = fn (m) => n + m
+val addTen = adder (10)
+val eleven = addTen (1)
+
+(* `let` binds inside an expression, and a `fun` inside a `let` may recurse.
+   This one recurses in tail position, so it runs in one frame. *)
+fun triangle (n) =
+  let fun go (i, acc) = if i = 0 then acc else go (i - 1, acc + i)
+  in go (n, 0) end
+val tenth = triangle (10)
+
+(* Recursion, and mutual recursion with `and`. *)
+fun fact (n) = if n <= 1 then 1 else n * fact (n - 1)
+fun even (n) = if n = 0 then true else odd (n - 1)
+and odd (n) = if n = 0 then false else even (n - 1)
+val twentyFactorial = fact (20)
+val oddMillion = odd (1000001)
+
+(* Types are inferred, and they can be polymorphic. *)
+fun identity (x) = x
+fun compose (f, g) = fn (x) => f (g (x))
+val doubleThenAdd = compose (adder (1), fn (n) => n * 2)
+val seven = doubleThenAdd (3)
+
+(* An annotation constrains; it is never required. *)
+fun square (n : int) : int = n * n
+val nine = square (3)

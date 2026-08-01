@@ -1,0 +1,74 @@
+entry 0
+
+function 0 <entry>: arity 0, locals 3, captures 0, stack 6
+  constant 0 = 3
+  constant 1 = 10
+  constant 2 = 5
+  constant 3 = 4
+  constant 4 = 0
+  constant 5 = fn
+  constant 6 = fn
+  constant 7 = fn
+     0  Const 0                      ; 3
+     1  NegI64
+     2  CallStatic 1 1               ; choose
+     3  Const 0                      ; 3
+     4  CallStatic 1 1               ; choose
+     5  MakeTuple 2
+     6  InitLocal 0
+     7  Const 1                      ; 10
+     8  CallStatic 2 1               ; adder
+     9  Const 2                      ; 5
+    10  Call 1
+    11  InitLocal 1
+    12  Const 3                      ; 4
+    13  Const 4                      ; 0
+    14  CallStatic 4 2               ; countdown
+    15  InitLocal 2
+    16  Const 5                      ; fn choose
+    17  Const 6                      ; fn adder
+    18  Const 7                      ; fn countdown
+    19  LoadLocal 0
+    20  LoadLocal 1
+    21  LoadLocal 2
+    22  MakeTuple 6
+    23  Return
+
+function 1 choose: arity 1, locals 1, captures 0, stack 2
+  constant 0 = 0
+     0  LoadLocal 0
+     1  Const 0                      ; 0
+     2  LtI64
+     3  JumpIfFalse 7
+     4  LoadLocal 0
+     5  NegI64
+     6  Return
+     7  LoadLocal 0
+     8  Return
+
+function 2 adder: arity 1, locals 1, captures 0, stack 1
+     0  MakeClosure 3 [local 0]      ; anonymous
+     1  Return
+
+function 3 anonymous: arity 1, locals 1, captures 1, stack 2
+     0  LoadLocal 0
+     1  LoadCapture 0
+     2  AddI64
+     3  Return
+
+function 4 countdown: arity 2, locals 2, captures 0, stack 3
+  constant 0 = 0
+  constant 1 = 1
+     0  LoadLocal 0
+     1  Const 0                      ; 0
+     2  EqI64
+     3  JumpIfFalse 6
+     4  LoadLocal 1
+     5  Return
+     6  LoadLocal 0
+     7  Const 1                      ; 1
+     8  SubI64
+     9  LoadLocal 1
+    10  Const 1                      ; 1
+    11  AddI64
+    12  ReturnCallStatic 4 2         ; countdown

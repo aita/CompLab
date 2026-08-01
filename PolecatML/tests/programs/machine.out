@@ -1,0 +1,6 @@
+val choose : int -> int = fn
+val adder : int -> int -> int = fn
+val countdown : (int, int) -> int = fn
+val chosen : int * int = (3, 3)
+val added : int = 15
+val counted : int = 4
