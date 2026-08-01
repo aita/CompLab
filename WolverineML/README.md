@@ -44,20 +44,35 @@ every dump in it taken from an actual run. Two to start with:
 [`python/`](python) holds the one this file describes, and the one the book is
 written about: both allocators are here, and so is everything the chapters dump.
 
-[`kotlin/`](kotlin), [`go/`](go), [`ocaml/`](ocaml), [`typescript/`](typescript)
-and [`haxe/`](haxe) hold the same compiler written again, each described in a
+[`kotlin/`](kotlin), [`go/`](go), [`ocaml/`](ocaml), [`typescript/`](typescript),
+[`haxe/`](haxe), [`racket/`](racket), [`ruby/`](ruby) and
+[`haskell/`](haskell) hold the same compiler written again, each described in a
 README of its own. They carry one allocator — the graph — because the comparison
 the other one exists for is made in the Python tree. Every other stage is the
 same pass over the same shapes, and for every example and test program in every
-configuration, every stage dumps the same bytes out of any of the six, the
+configuration, every stage dumps the same bytes out of any of the nine, the
 assembly included.
 
-None of the five is a transliteration. Each says the same thing the way its own
+None of the eight is a transliteration. Each says the same thing the way its own
 language says things — a sealed hierarchy and one exhaustive `when` per question
 in Kotlin, variants with mutable inline records in OCaml, a flat package and a
 type switch in Go, a discriminated union in TypeScript, an immutable `enum` and
-pure rewriting in Haxe — and the READMEs are largely about where those choices
-led.
+pure rewriting in Haxe, immutable structs and prefixed modules in Racket, `Data`
+for an instruction and `Struct` for the tree in Ruby, and in Haskell a checker
+that answers with a second tree because it cannot write on the first — and the
+READMEs are largely about where those choices led.
+
+| | allocators | how it is built |
+| --- | --- | --- |
+| [`python/`](python) | both | `uv run pytest` |
+| [`kotlin/`](kotlin) | graph | `./gradlew test` |
+| [`go/`](go) | graph | `go test ./...` |
+| [`ocaml/`](ocaml) | graph | `dune test` |
+| [`typescript/`](typescript) | graph | `npm test` |
+| [`haxe/`](haxe) | graph | `haxe test.hxml && neko bin/test.n` |
+| [`racket/`](racket) | graph | `raco test test/` |
+| [`ruby/`](ruby) | graph | `rake` |
+| [`haskell/`](haskell) | graph | `cabal test` |
 
 ## Build and run
 

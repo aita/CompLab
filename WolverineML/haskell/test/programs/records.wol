@@ -1,0 +1,49 @@
+type point = { x : int, y : int }
+type list = { head : int, tail : list }
+type points = point array
+
+fun show (label : string, n : int) =
+  print (label ^ " = " ^ intToString (n) ^ "\n")
+
+val p = point { x = 3, y = 4 }
+val () = show ("p.x", p.x)
+val () = p.y := p.y * 2
+val () = show ("p.y", p.y)
+
+val q : point = nil
+val () = print (if q = nil then "q is nil\n" else "q is not\n")
+val () = print (if p <> nil then "p is not nil\n" else "p is nil\n")
+
+fun cons (head : int, tail : list) : list = list { head = head, tail = tail }
+
+fun sum (l : list) : int = if l = nil then 0 else l.head + sum (l.tail)
+
+fun len (l : list) : int =
+  let var n = 0
+      var cur = l
+  in
+    while cur <> nil do (n := n + 1; cur := cur.tail);
+    n
+  end
+
+val xs = cons (1, cons (2, cons (3, cons (4, nil))))
+val () = show ("sum", sum (xs))
+val () = show ("len", len (xs))
+
+val grid = array (4, 0)
+val () = for i = 0 to 3 do grid[i] := i * i
+val () = show ("grid", grid[3])
+val () = show ("length", length (grid))
+
+val ps : points = array (3, p)
+val () = ps[1] := point { x = 10, y = 20 }
+val () = show ("ps1", ps[1].x + ps[1].y)
+val () = show ("ps0", ps[0].x)
+
+(* Records in a record, and an array of arrays. *)
+type box = { inner : points, count : int }
+val b = box { inner = ps, count = 3 }
+val () = show ("box", b.inner[1].y + b.count)
+
+val matrix = array (3, grid)
+val () = show ("matrix", matrix[2][2])

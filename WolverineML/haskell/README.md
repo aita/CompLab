@@ -1,0 +1,143 @@
+# WolverineML, in Haskell
+
+The same compiler as [`../python`](../python): Tiger's language in SML's syntax,
+compiled to ARMv8. Same passes, same order, same shapes — a hand-written scanner
+and a Pratt parser, monomorphic checking with escape analysis on the side, a
+three-address IR, SSA built with dominance frontiers, five optimisations to a
+fixed point, instructions chosen by covering a DAG of each block, and an ARMv8
+emitter in AAPCS64. The parser is Parsec's, over the token stream; everything
+else is written out.
+
+One thing is deliberately missing. The Python tree allocates registers **two**
+ways over the same IR so that the two can be measured against each other; this
+tree keeps the graph — leave SSA, build the interference graph, colour it with
+Chaitin's algorithm and George and Appel's iterated coalescing.
+
+Everything else agrees to the byte. For every example and test program in the
+tree, every stage of the pipeline — `tokens`, `ast`, `ir`, `ssa`, `opt`, `dag`,
+`mach`, `flat`, `ra` and the assembly itself — dumps exactly what the Python one
+dumps with `--regalloc graph`, in all four configurations.
+
+```sh
+cabal build                      # GHC 9.4 or later
+cabal test                       # 88 tests
+
+cabal run wolv -- run     prog.wol      # compile, link, and run it
+cabal run wolv -- build   prog.wol -o prog
+cabal run wolv -- check   prog.wol      # types only
+cabal run wolv -- emit -s ssa prog.wol  # dump a stage
+```
+
+Nothing outside what GHC ships is needed: `base`, `containers`, `mtl`, `parsec`,
+`directory`, `filepath` and `process` are all boot packages, so `cabal build
+--offline` works on a machine that has never fetched an index. The test harness
+is thirty lines in `test/Check.hs` for the same reason.
+
+Assembling and linking is a cross `gcc` (`aarch64-linux-gnu-gcc`, or `$WOLV_CC`),
+and running is `qemu-aarch64` unless the machine is already an ARM. Without them
+everything up to `emit` still works, and the tests that need a toolchain say so
+and skip.
+
+| flag | what it does |
+| --- | --- |
+| `--no-checks` | leave out the nil, bounds and divide-by-zero checks |
+| `--no-opt` | skip the SSA optimiser |
+| `--max-regs N` | pretend the machine has N registers, to make it spill |
+
+## The tree
+
+One module per pass under `src/Wolv/`, named after the Python module it is a
+port of. The book in [`../doc/`](../doc/index.md) is a chapter per pass and
+describes this compiler as well as the other, chapter 7 aside.
+
+| file | chapter |
+| --- | --- |
+| `Lexer.hs`, `Parser.hs` | [1. 字句と構文解析](../doc/01-syntax.md) |
+| `Types.hs`, `Typecheck.hs` | [2. 型検査とエスケープ解析](../doc/02-types.md) |
+| `Ir.hs`, `Lower.hs` | [3. CFG へ下げる](../doc/03-lower.md) |
+| `Ssa.hs` | [4. SSA 構築](../doc/04-ssa.md) |
+| `Opt.hs`, `Liveness.hs` | [5. SSA 上の最適化](../doc/05-opt.md) |
+| `Dag.hs`, `Select.hs`, `Mach.hs` | [6. 命令選択](../doc/06-select.md) |
+| `OutOfSsa.hs`, `Graph.hs`, `Spill.hs`, `Hints.hs`, `Allocator.hs` | [8. レジスタ割り当て(2) グラフ彩色](../doc/08-graph.md) |
+| `Emit.hs`, `Copies.hs`, `Registers.hs` | [9. コード生成](../doc/09-emit.md) |
+| `test/` | [10. 検証](../doc/10-verify.md) |
+
+## What Haskell made different
+
+**The checker cannot write on the tree, so it builds another one.** Every other
+port parses a tree with three holes in each node — the type, what a name
+resolved to, which word of a record a field access reads — and the checker fills
+them in. Nothing here can be filled in, so `check` returns a second tree with
+the answers already in it, and every pass after it reads that one. The parser's
+tree is still around and still empty; nothing looks at it again.
+
+**Identity is a number, because a value has none.** Whether a variable escapes
+is settled long after the node that mentions it was made, and where it ended up
+living is settled later still. So a `VarSym` carries an `Int` that is only ever
+compared, `check` answers with the set of numbers that escaped beside the tree,
+and lowering keeps a map from the number to the frame slot or register. A record
+type is the same trick: nominal equality is `==` on its number, and the fields
+live in a table the checker keeps and nothing after it asks for.
+
+```haskell
+data Checked = Checked {ckProgram :: Program, ckEscapes :: Set.Set Int}
+```
+
+**`Int64` is the machine's word, exactly.** It wraps on overflow, `quot` and
+`rem` truncate towards zero the way `sdiv` does, and the bit operations are the
+bit operations. `I64.hs` is thirty lines and says only the three things GHC and
+ARM disagree about: the two shifts past 63, and `minBound `quot` (-1)`, which
+the machine wraps back to `minBound` and which GHC raises an overflow for.
+
+**A `Set` is ordered, so nothing is sorted.** "The least node in the worklist" is
+`Set.findMin` and "walk the neighbours in order" is `Set.toAscList`, because
+`Data.Set` is a search tree and not a hash table. Go, Ruby and Racket have to
+sort at each of those places to keep the colouring the same twice; here the order
+is the container's, and the allocator has no `sort` in it at all.
+
+**Parsec, and only for what it is good at.** The parser is a
+`ParsecT [Token] () (Either WolvError)` over the tokens the scanner made. Parsec
+carries the stream and the position and gives `between`, `sepBy1` and `option`
+their ordinary meanings — but it chooses nothing, because this grammar never
+needs it to: every decision is one token of lookahead, and every rejection is a
+`lift (Left …)` carrying the message the other implementations print, which no
+backtracking can undo. The scanner stayed hand-written, because Parsec's
+`SourcePos` advances a tab to the next multiple of eight and the column in a
+`tokens` dump has to be the character count.
+
+**Every pass is `Func -> Func`, and the stateful ones say so.** Lowering, SSA
+renaming and the colouring are imperative algorithms; each is a `State` over a
+record that holds the function being built. What that buys is that the seams are
+honest, and that nothing else can see a half-rewritten function is a fact about
+the types rather than a convention.
+
+**A fixed point asks `==`, so no pass reports whether it did anything.** Three
+places here are "run it again until it stops moving" — dominance, liveness and
+the optimiser — and every other port threads a `changed` flag out of every step
+to drive them. A pass here answers with a value, so the question is already
+answerable:
+
+```haskell
+converge :: (Eq a) => (a -> a) -> a -> a
+converge step = go where go x = let y = step x in if x == y then x else go y
+
+optimiseFunc :: Func -> Func
+optimiseFunc = converge (\f -> foldl' (flip ($)) f passes)
+```
+
+The flag is gone from all three, and `Pass` is `Func -> Func` rather than
+`Func -> (Func, Bool)`.
+
+**The pipeline is a list, and a dump is that list cut short.** The stages are
+`[(String, Carried -> Either Failure Carried)]` named after what each leaves
+behind, and stopping early is `break` on the name — so the order the passes run
+in is written down exactly once, and `emit -s opt` cannot drift from `build`.
+
+## Verification
+
+- **400/400 dumps match `python --regalloc graph`** (10 stages × 10 programs × 4
+  configurations)
+- **88 tests, none skipped** — including the end-to-end runs under qemu and the
+  random-program oracle
+- **no warnings** at `-Wall`
+- 5164 lines in 26 modules (3962 of them code), and 1166 in the tests

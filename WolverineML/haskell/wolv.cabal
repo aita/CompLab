@@ -1,0 +1,62 @@
+cabal-version:      2.4
+name:               wolv
+version:            1.0.0
+synopsis:           WolverineML, compiled to ARMv8
+build-type:         Simple
+
+common warnings
+    ghc-options: -Wall -Wno-name-shadowing -Wno-incomplete-record-updates
+
+library
+    import:           warnings
+    hs-source-dirs:   src
+    exposed-modules:  Wolv.Allocator
+                      Wolv.Ast
+                      Wolv.AstShow
+                      Wolv.Copies
+                      Wolv.Dag
+                      Wolv.Diag
+                      Wolv.Driver
+                      Wolv.Emit
+                      Wolv.Graph
+                      Wolv.Hints
+                      Wolv.I64
+                      Wolv.Ir
+                      Wolv.Lexer
+                      Wolv.Liveness
+                      Wolv.Lower
+                      Wolv.Mach
+                      Wolv.Opt
+                      Wolv.OutOfSsa
+                      Wolv.Parser
+                      Wolv.Registers
+                      Wolv.Select
+                      Wolv.Spill
+                      Wolv.Ssa
+                      Wolv.Typecheck
+                      Wolv.Types
+    build-depends:    base >=4.16 && <5,
+                      containers,
+                      parsec,
+                      mtl,
+                      directory,
+                      filepath,
+                      process
+    default-language: Haskell2010
+
+executable wolv
+    import:           warnings
+    hs-source-dirs:   app
+    main-is:          Main.hs
+    build-depends:    base, wolv, directory, filepath
+    default-language: Haskell2010
+
+test-suite spec
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    hs-source-dirs:   test
+    main-is:          Spec.hs
+    other-modules:    Check
+                      Oracle
+    build-depends:    base, wolv, containers, directory, filepath
+    default-language: Haskell2010

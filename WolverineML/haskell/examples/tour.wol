@@ -1,0 +1,100 @@
+(* Everything the language has, once each. *)
+
+(* Types are declared by name.  A record type is nominal, an array type is not:
+   `int array` is `int array` wherever it is written. *)
+type point = { x : int, y : int }
+type ints = int array
+type tree = { key : int, left : tree, right : tree }
+
+(* `val` binds, `var` binds something assignable, and `~` negates. *)
+val greeting = "hello"
+val answer = 6 * 7
+val negative = ~3
+var counter = 0
+
+(* A `fun` with a result type returns it; a `fun` without one is a procedure
+   and returns unit.  Parameters are always annotated. *)
+fun square (n : int) : int = n * n
+
+fun greet (name : string) = print ("hello, " ^ name ^ "\n")
+
+(* Recursion, and mutual recursion with `and`. *)
+fun fact (n : int) : int = if n <= 1 then 1 else n * fact (n - 1)
+
+fun even (n : int) : bool = if n = 0 then true else odd (n - 1)
+and odd (n : int) : bool = if n = 0 then false else even (n - 1)
+
+(* Records are allocated by naming the type; fields are assignable; `nil` is a
+   record of any type, and only records can be compared with it. *)
+val origin = point { x = 0, y = 0 }
+val moved = point { x = origin.x + 3, y = origin.y }
+val () = moved.y := 4
+val empty : tree = nil
+
+(* Arrays: a length and an initial value, and `length` reads the length back.
+   Indexing is checked. *)
+val squares = array (10, 0)
+val () = for i = 0 to length (squares) - 1 do squares[i] := square (i)
+
+(* Loops, `break`, and the three ways to write a condition. *)
+fun firstOver (limit : int) : int =
+  let var i = 0
+      var found = ~1
+  in
+    while true do (
+      if i >= length (squares) then break else ();
+      if squares[i] > limit then (found := i; break) else ();
+      i := i + 1
+    );
+    found
+  end
+
+val () = print ("first square over 30 is at " ^ intToString (firstOver (30)) ^ "\n")
+val () = print (if even (10) andalso not (odd (10)) then "10 is even\n" else "?\n")
+val () = while counter < 3 do counter := counter + 1
+
+(* `let` declares inside an expression, and a sequence is parenthesised. *)
+val total =
+  let
+    var sum = 0
+  in
+    for i = 0 to 9 do sum := sum + squares[i];
+    sum
+  end
+
+(* A nested function reads the variables around it.  `sum` escapes, so it lives
+   in the frame of `sumTree` instead of a register, and `visit` reaches it
+   through its static link. *)
+fun sumTree (t : tree) : int =
+  let
+    var sum = 0
+    fun visit (node : tree) =
+      if node = nil then ()
+      else (sum := sum + node.key; visit (node.left); visit (node.right))
+  in
+    visit (t);
+    sum
+  end
+
+fun insert (t : tree, key : int) : tree =
+  if t = nil then tree { key = key, left = nil, right = nil }
+  else if key < t.key then (t.left := insert (t.left, key); t)
+  else (t.right := insert (t.right, key); t)
+
+var t : tree = nil
+val () = for i = 0 to 6 do t := insert (t, (i * 5) mod 7)
+
+(* Strings, and the rest of the standard library. *)
+val () = print (greeting ^ ", " ^ substring ("world!", 0, 5) ^ "\n")
+val () = print (chr (ord ("A") + 2) ^ " is at " ^ intToString (ord ("C")) ^ "\n")
+val () = greet ("wolverine")
+
+val () = print ("answer     " ^ intToString (answer) ^ "\n")
+val () = print ("negative   " ^ intToString (negative) ^ "\n")
+val () = print ("fact 10    " ^ intToString (fact (10)) ^ "\n")
+val () = print ("moved      " ^ intToString (moved.x) ^ "," ^ intToString (moved.y) ^ "\n")
+val () = print ("empty      " ^ (if empty = nil then "nil" else "a tree") ^ "\n")
+val () = print ("squares    " ^ intToString (squares[9]) ^ "\n")
+val () = print ("total      " ^ intToString (total) ^ "\n")
+val () = print ("tree sum   " ^ intToString (sumTree (t)) ^ "\n")
+val () = print ("counter    " ^ intToString (counter) ^ "\n")
