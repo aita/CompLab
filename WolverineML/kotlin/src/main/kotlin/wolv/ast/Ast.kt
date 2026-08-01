@@ -55,7 +55,8 @@ class RecordLit(span: Span, val tyname: String, var fields: List<FieldInit>) : E
 class Index(span: Span, val array: Exp, val index: Exp) : Exp(span)
 
 class Field(span: Span, val record: Exp, val name: String) : Exp(span) {
-    var offset: Int = -1
+    /** Which word of the record this reads.  Null until the checker knows. */
+    var offset: Int? = null
 }
 
 class Neg(span: Span, val operand: Exp) : Exp(span)

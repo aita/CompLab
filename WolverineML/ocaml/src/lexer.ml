@@ -51,6 +51,7 @@ type tok =
   | SLASH
   | CARET
   | TILDE
+[@@deriving show { with_path = false }]
 
 let text = function
   | INT -> "an integer"
@@ -104,56 +105,9 @@ let text = function
   | TILDE -> "~"
 
 (* [name] is what a token dump calls it, which is the constructor's own name. *)
-let name = function
-  | INT -> "INT"
-  | STRING -> "STRING"
-  | IDENT -> "IDENT"
-  | EOF -> "EOF"
-  | AND -> "AND"
-  | ANDALSO -> "ANDALSO"
-  | BREAK -> "BREAK"
-  | DO -> "DO"
-  | ELSE -> "ELSE"
-  | END -> "END"
-  | FALSE -> "FALSE"
-  | FOR -> "FOR"
-  | FUN -> "FUN"
-  | IF -> "IF"
-  | IN -> "IN"
-  | LET -> "LET"
-  | MOD -> "MOD"
-  | NIL -> "NIL"
-  | ORELSE -> "ORELSE"
-  | THEN -> "THEN"
-  | TO -> "TO"
-  | TRUE -> "TRUE"
-  | TYPE -> "TYPE"
-  | VAL -> "VAL"
-  | VAR -> "VAR"
-  | WHILE -> "WHILE"
-  | LPAREN -> "LPAREN"
-  | RPAREN -> "RPAREN"
-  | LBRACK -> "LBRACK"
-  | RBRACK -> "RBRACK"
-  | LBRACE -> "LBRACE"
-  | RBRACE -> "RBRACE"
-  | COMMA -> "COMMA"
-  | COLON -> "COLON"
-  | SEMI -> "SEMI"
-  | DOT -> "DOT"
-  | ASSIGN -> "ASSIGN"
-  | EQ -> "EQ"
-  | NE -> "NE"
-  | LE -> "LE"
-  | LT -> "LT"
-  | GE -> "GE"
-  | GT -> "GT"
-  | PLUS -> "PLUS"
-  | MINUS -> "MINUS"
-  | STAR -> "STAR"
-  | SLASH -> "SLASH"
-  | CARET -> "CARET"
-  | TILDE -> "TILDE"
+(* What a token dump calls a kind, which is the constructor's own name.  The
+   enum above is the table; there is no second one to keep in step with it. *)
+let name = show_tok
 
 let keywords =
   [ AND; ANDALSO; BREAK; DO; ELSE; END; FALSE; FOR; FUN; IF; IN; LET; MOD; NIL;

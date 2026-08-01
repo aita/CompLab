@@ -37,7 +37,7 @@ let prologue_temp = 9
 
 type frame = { slots : int; saved : int list; size : int }
 
-let frame_of f =
+let frame_of f saved =
   let stack_args =
     List.fold_left
       (fun most b ->
@@ -50,8 +50,8 @@ let frame_of f =
       0 (walk f)
   in
   let stack_args = max stack_args 0 in
-  let raw = word * (f.nslots + List.length f.saved + stack_args) in
-  { slots = f.nslots; saved = f.saved; size = (raw + 15) land lnot 15 }
+  let raw = word * (f.nslots + List.length saved + stack_args) in
+  { slots = f.nslots; saved; size = (raw + 15) land lnot 15 }
 
 let saved_offset fr index = -word * (fr.slots + index + 1)
 
@@ -70,6 +70,7 @@ let escape text =
 
 type emitter = {
   fn : func;
+  alloc : allocation;
   fr : frame;
   epilogue : string;
   read : IntSet.t;
@@ -87,13 +88,14 @@ let registers_read f =
         (instrs b))
     IntSet.empty (walk f)
 
-let make ?(no_borrow = false) f =
+let make ?(no_borrow = false) alloc f =
   {
     fn = f;
-    fr = frame_of f;
+    alloc;
+    fr = frame_of f alloc.saved;
     epilogue = ".Lepi_" ^ f.flabel;
     read = registers_read f;
-    taken = IntMap.fold (fun _ colour acc -> IntSet.add colour acc) f.colours IntSet.empty;
+    taken = IntMap.fold (fun _ colour acc -> IntSet.add colour acc) alloc.colours IntSet.empty;
     no_borrow;
     out = [];
   }
@@ -105,7 +107,7 @@ let label e text = e.out <- (text ^ ":") :: e.out
 let raw e text = e.out <- text :: e.out
 
 let colour e r =
-  match IntMap.find_opt r e.fn.colours with
+  match IntMap.find_opt r e.alloc.colours with
   | Some c -> c
   | None -> failwith (Printf.sprintf "%%%d was never coloured" r)
 
@@ -176,19 +178,26 @@ let copies e moves =
 
 let machine e (m : mach) =
   let srcs = List.map (colour e) m.srcs in
+  (* The four forms that write are the four the emitter expands, and every one of
+     them has a destination; [written] is where that is said once. *)
+  let written () =
+    match m.m_dst with
+    | Some d -> colour e d
+    | None -> failwith (m.form ^ " writes nothing to expand into")
+  in
   match m.form with
-  | "const" -> immediate e (colour e m.m_dst) m.imm
+  | "const" -> immediate e (written ()) m.imm
   | "adr" ->
-      let d = colour e m.m_dst in
+      let d = written () in
       line e (Printf.sprintf "adrp x%d, %s" d m.symbol);
       line e (Printf.sprintf "add x%d, x%d, :lo12:%s" d d m.symbol)
-  | "ldr" -> access e "ldr" (colour e m.m_dst) (List.nth srcs 0) m.imm
+  | "ldr" -> access e "ldr" (written ()) (List.nth srcs 0) m.imm
   | "str" -> access e "str" (List.nth srcs 1) (List.nth srcs 0) m.imm
   | form ->
       let written = ref (Mach.form_of form) in
       let replace sub by = written := CCString.replace ~which:`All ~sub ~by !written in
       List.iteri (fun at c -> replace (Printf.sprintf "{s%d}" at) (Printf.sprintf "x%d" c)) srcs;
-      if m.m_dst <> no_reg then replace "{d}" (Printf.sprintf "x%d" (colour e m.m_dst));
+      Option.iter (fun d -> replace "{d}" (Printf.sprintf "x%d" (colour e d))) m.m_dst;
       replace "{imm}" (Int64.to_string m.imm);
       replace "{sym}" m.symbol;
       line e !written
@@ -203,7 +212,7 @@ let emit_call e dst callee args =
     (CCList.drop (List.length Registers.argument_regs) args);
   copies e in_registers;
   line e ("bl " ^ callee);
-  if dst <> no_reg then mov e (colour e dst) (List.hd Registers.argument_regs)
+  Option.iter (fun d -> mov e (colour e d) (List.hd Registers.argument_regs)) dst
 
 let instruction e instr =
   match instr with
@@ -237,7 +246,7 @@ let terminator e b next =
         if Some c.else_ <> next then line e ("b " ^ else_label)
       end
   | Ret r ->
-      if r.value <> no_reg then mov e (List.hd Registers.argument_regs) (colour e r.value);
+      Option.iter (fun v -> mov e (List.hd Registers.argument_regs) (colour e v)) r.value;
       (* The epilogue follows the last block. *)
       if next <> None then line e ("b " ^ e.epilogue)
   | _ -> ()
@@ -284,14 +293,15 @@ let emit e =
   raw e (Printf.sprintf "\t.size %s, .-%s" e.fn.flabel e.fn.flabel);
   List.rev e.out
 
-let emit_module ?(no_borrow = false) m =
+let emit_module ?(no_borrow = false) allocs m =
   (* Prepended and reversed once at the end, rather than appended to. *)
   let out = ref [] in
   let put line = out := line :: !out in
   put "\t.text";
   List.iter
     (fun f ->
-      List.iter put (emit (make ~no_borrow f));
+      let alloc = Option.value (StrMap.find_opt f.flabel allocs) ~default:unallocated in
+      List.iter put (emit (make ~no_borrow alloc f));
       put "")
     m.funcs;
   if m.strings <> [] then begin

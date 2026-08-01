@@ -117,8 +117,7 @@ let definitions f =
   let d = { sites = IntMap.empty; count = IntMap.empty } in
   iter_blocks f (fun b ->
       iter_instrs b (fun instr ->
-          let r = defs instr in
-          if r <> no_reg then record d r b.label));
+          Option.iter (fun r -> record d r b.label) (defs instr)));
   Dynarray.iter (fun r -> record d r f.entry) f.params;
   d
 
@@ -194,27 +193,29 @@ let use r reg = if IntSet.mem reg r.vars then top r reg else reg
 let rename_block r label =
   let b = block r.fn label in
   let mine = ref [] in
-  List.iteri
-    (fun at phi ->
-      let v = Dynarray.get (Hashtbl.find r.phi_vars label) at in
-      phi.phi_dst <- rename r v;
-      mine := v :: !mine)
-    b.phis;
-  List.iter
-    (fun instr ->
-      map_uses (use r) instr;
-      let d = defs instr in
-      if d <> no_reg && IntSet.mem d r.vars then begin
-        set_def instr (rename r d);
-        mine := d :: !mine
-      end)
-    (instrs b);
+  let here = Hashtbl.find r.phi_vars label in
+  b.phis <-
+    Util.mapi_in_order
+      (fun at phi ->
+        let v = Dynarray.get here at in
+        mine := v :: !mine;
+        { phi with phi_dst = rename r v })
+      b.phis;
+  map_instrs b (fun instr ->
+      let instr = map_uses (use r) instr in
+      match defs instr with
+      | Some d when IntSet.mem d r.vars ->
+          mine := d :: !mine;
+          with_def (rename r d) instr
+      | _ -> instr);
   List.iter
     (fun succ ->
       let target = block r.fn succ in
-      List.iteri
-        (fun at phi -> set_arg phi label (top r (Dynarray.get (Hashtbl.find r.phi_vars succ) at)))
-        target.phis)
+      let theirs = Hashtbl.find r.phi_vars succ in
+      target.phis <-
+        Util.mapi_in_order
+          (fun at phi -> set_arg label (top r (Dynarray.get theirs at)) phi)
+          target.phis)
     (succs b);
   (* Prepended and reversed once; every name here is popped exactly once, so the
      order only has to be a permutation, but keeping it the walk's order is what
@@ -270,13 +271,13 @@ let split_critical_edges f =
             if List.length target.preds >= 2 || target.phis <> [] then begin
               let split = add_block f (label ^ "." ^ succ) in
               emit split (Jmp { target = succ });
-              rename_target (terminator b) succ split.label;
-              List.iter
-                (fun phi ->
-                  match remove_arg phi label with
-                  | Some arg -> set_arg phi split.label arg
-                  | None -> ())
-                target.phis
+              (* The terminator is the last instruction, and it is a value. *)
+              let last = count b - 1 in
+              Dynarray.set b.instrs last (rename_target succ split.label (nth b last));
+              map_phis target (fun phi ->
+                  match remove_arg label phi with
+                  | Some (arg, without) -> set_arg split.label arg without
+                  | None -> phi)
             end)
           (succs b))
     (order_list f);
@@ -296,8 +297,7 @@ let verify f =
       List.iter (fun phi -> claim phi.phi_dst b.label) b.phis;
       List.iter
         (fun instr ->
-          let d = defs instr in
-          if d <> no_reg then claim d b.label)
+          Option.iter (fun d -> claim d b.label) (defs instr))
         (instrs b))
     (walk f);
   Dynarray.iter (fun p -> if not (Hashtbl.mem definition p) then Hashtbl.replace definition p f.entry) f.params;

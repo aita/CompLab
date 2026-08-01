@@ -35,18 +35,26 @@ import wolv.ir.*
 import wolv.*
 
 
-/** Colour `func`, rewriting and starting again for as long as it spills. */
-fun allocate(func: Func, machine: Registers) {
+/**
+ * Colour `func`, rewriting and starting again for as long as it spills.
+ *
+ * `func` is rewritten — spilling puts loads and stores into it — but the
+ * colouring comes back as a value, because it is not part of the program.
+ */
+fun allocate(func: Func, machine: Registers): Allocation {
     val protected = mutableSetOf<Reg>()
+    val spilledTo = mutableMapOf<Reg, Int>()
     while (true) {
         func.recomputePreds()
         val colouring = Colouring(func, machine, protected)
         val spilled = colouring.run()
         if (spilled.isEmpty()) {
-            func.colours = colouring.colour
-            func.saved = func.colours.values.toSet()
-                .intersect(Registers.CALLEE_SAVED.toSet()).sorted()
-            return
+            return Allocation(
+                colours = colouring.colour,
+                saved = colouring.colour.values.toSet()
+                    .intersect(Registers.CALLEE_SAVED.toSet()).sorted(),
+                spilled = spilledTo,
+            )
         }
         for (victim in spilled.sorted()) {
             if (victim in protected) {
@@ -54,7 +62,9 @@ fun allocate(func: Func, machine: Registers) {
                     "`${func.name}` needs more registers at once than the machine has",
                 )
             }
-            protected += spill(func, victim)
+            val (slot, reloads) = spill(func, victim)
+            spilledTo[victim] = slot
+            protected += reloads
         }
     }
 }

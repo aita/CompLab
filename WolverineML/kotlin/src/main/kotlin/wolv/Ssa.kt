@@ -179,22 +179,27 @@ private class Renamer(
     fun block(label: String): List<Reg> {
         val block = func.blocks.getValue(label)
         val mine = mutableListOf<Reg>()
-        for ((phi, v) in block.phis.zip(phiVars.getValue(label))) {
-            phi.dst = rename(v)
+        val here = phiVars.getValue(label)
+        for (at in block.phis.indices) {
+            val v = here[at]
+            block.phis[at] = block.phis[at].copy(dst = rename(v))
             mine.add(v)
         }
-        for (instr in block.instrs) {
-            instr.rewriteUses(::use)
-            val d = instr.def
+        block.instrs.replaceAll { instr ->
+            val renamed = instr.mapUses(::use)
+            val d = renamed.def
             if (d != null && d in variables) {
-                instr.redefine(rename(d))
                 mine.add(d)
+                renamed.withDef(rename(d))
+            } else {
+                renamed
             }
         }
         for (succ in block.succs) {
             val target = func.blocks.getValue(succ)
-            for ((phi, v) in target.phis.zip(phiVars.getValue(succ))) {
-                phi.args[label] = top(v)
+            val theirs = phiVars.getValue(succ)
+            for (at in target.phis.indices) {
+                target.phis[at] = target.phis[at].let { it.copy(args = it.args + (label to top(theirs[at]))) }
             }
         }
         return mine
@@ -238,9 +243,11 @@ fun splitCriticalEdges(func: Func) {
             if (target.preds.size < 2 && target.phis.isEmpty()) continue
             val split = func.addBlock("$label.$succ")
             split.instrs.add(Jmp(succ))
-            block.terminator.renameTarget(succ, split.label)
-            for (phi in target.phis) {
-                phi.args.remove(label)?.let { phi.args[split.label] = it }
+            val last = block.instrs.size - 1
+            block.instrs[last] = block.instrs[last].renameTarget(succ, split.label)
+            target.phis.replaceAll { phi ->
+                val arg = phi.args[label] ?: return@replaceAll phi
+                phi.copy(args = phi.args.filterKeys { it != label } + (split.label to arg))
             }
         }
     }

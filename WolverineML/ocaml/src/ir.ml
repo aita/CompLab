@@ -28,11 +28,11 @@ module IntMap = Map.Make (Int)
 module StrSet = Set.Make (String)
 module StrMap = Map.Make (String)
 
-(* A virtual register.  Registers are numbered from zero, so [no_reg] is a value
-   no real one ever has, and "does it write anything" is answered with it. *)
+(* A virtual register.  "Does it write anything" is a [reg option] and not a
+   register no real one ever has: the type is what says an instruction may write
+   nothing, so the places that have to think about it are the places that fail to
+   compile without thinking about it. *)
 type reg = int
-
-let no_reg = -1
 
 let word = 8
 
@@ -54,60 +54,60 @@ let slot_offset slot =
    [mach.ml] is where the forms are listed and checked. *)
 type mach = {
   form : string;
-  mutable m_dst : reg;
-  mutable srcs : reg list;
+  m_dst : reg option;
+  srcs : reg list;
   imm : int64;
   symbol : string;
   effectful : bool;
 }
 
 type instr =
-  | Const of { mutable dst : reg; value : int64 }
-  | Str_const of { mutable dst : reg; str_symbol : string }
-  | Move of { mutable dst : reg; mutable src : reg }
-  | Bin of { mutable dst : reg; op : string; mutable lhs : reg; mutable rhs : reg }
-  | Cmp of { mutable dst : reg; op : string; mutable lhs : reg; mutable rhs : reg }
-  | Load of { mutable dst : reg; mutable base : reg; offset : int }
-  | Store of { mutable base : reg; offset : int; mutable src : reg }
+  | Const of { dst : reg; value : int64 }
+  | Str_const of { dst : reg; str_symbol : string }
+  | Move of { dst : reg; src : reg }
+  | Bin of { dst : reg; op : string; lhs : reg; rhs : reg }
+  | Cmp of { dst : reg; op : string; lhs : reg; rhs : reg }
+  | Load of { dst : reg; base : reg; offset : int }
+  | Store of { base : reg; offset : int; src : reg }
   (* Read a frame slot of this function — an escaping variable, or a spill. *)
-  | Load_slot of { mutable dst : reg; mutable slot : int }
-  | Store_slot of { mutable slot : int; mutable src : reg }
+  | Load_slot of { dst : reg; slot : int }
+  | Store_slot of { slot : int; src : reg }
   (* The frame pointer itself, which is what a static link points at. *)
-  | Frame_addr of { mutable dst : reg }
-  | Call of { mutable dst : reg; callee : string; mutable args : reg list }
-  | Jmp of { mutable target : string }
+  | Frame_addr of { dst : reg }
+  | Call of { dst : reg option; callee : string; args : reg list }
+  | Jmp of { target : string }
   | Cbr of {
-      mutable cond : reg;
-      mutable then_ : string;
-      mutable else_ : string;
+      cond : reg;
+      then_ : string;
+      else_ : string;
       (* After selection a branch may read the flags a comparison just set
          instead of testing a register, and then it reads no register at all. *)
-      mutable code : string;
+      code : string;
     }
-  | Ret of { mutable value : reg }
+  | Ret of { value : reg option }
   | Machine of mach
 
 (* One edge of a phi.  They are a list and not a map because the order they were
    placed in is the order a dump has to print them in. *)
-type phi_arg = { pred : string; mutable arg : reg }
+type phi_arg = { pred : string; arg : reg }
 
-type phi = { mutable phi_dst : reg; mutable args : phi_arg list }
+type phi = { phi_dst : reg; args : phi_arg list }
 
 (* -- what every instruction of either set can be asked ---------------------- *)
 
-(* The register it writes, or [no_reg]. *)
+(* The register it writes, if it writes one. *)
 let defs = function
-  | Const c -> c.dst
-  | Str_const c -> c.dst
-  | Move m -> m.dst
-  | Bin b -> b.dst
-  | Cmp c -> c.dst
-  | Load l -> l.dst
-  | Load_slot l -> l.dst
-  | Frame_addr f -> f.dst
+  | Const c -> Some c.dst
+  | Str_const c -> Some c.dst
+  | Move m -> Some m.dst
+  | Bin b -> Some b.dst
+  | Cmp c -> Some c.dst
+  | Load l -> Some l.dst
+  | Load_slot l -> Some l.dst
+  | Frame_addr f -> Some f.dst
   | Call c -> c.dst
   | Machine m -> m.m_dst
-  | Store _ | Store_slot _ | Jmp _ | Cbr _ | Ret _ -> no_reg
+  | Store _ | Store_slot _ | Jmp _ | Cbr _ | Ret _ -> None
 
 (* The registers it reads.  A phi's arguments are read on the edges, not here, so
    they are not among them. *)
@@ -121,41 +121,49 @@ let uses = function
   | Call c -> c.args
   | Machine m -> m.srcs
   | Cbr c -> if c.code <> "" then [] else [ c.cond ]
-  | Ret r -> if r.value = no_reg then [] else [ r.value ]
+  | Ret r -> Option.to_list r.value
   | Const _ | Str_const _ | Load_slot _ | Frame_addr _ | Jmp _ -> []
 
-(* Rewrite the registers it reads, in place. *)
-let map_uses f = function
-  | Move m -> m.src <- f m.src
-  | Bin b ->
-      b.lhs <- f b.lhs;
-      b.rhs <- f b.rhs
-  | Cmp c ->
-      c.lhs <- f c.lhs;
-      c.rhs <- f c.rhs
-  | Load l -> l.base <- f l.base
-  | Store s ->
-      s.base <- f s.base;
-      s.src <- f s.src
-  | Store_slot s -> s.src <- f s.src
-  | Call c -> c.args <- Util.map_in_order f c.args
-  | Machine m -> m.srcs <- Util.map_in_order f m.srcs
-  | Cbr c -> if c.code = "" then c.cond <- f c.cond
-  | Ret r -> if r.value <> no_reg then r.value <- f r.value
-  | Const _ | Str_const _ | Load_slot _ | Frame_addr _ | Jmp _ -> ()
+(* The same instruction with the registers it reads renamed.
 
-let set_def instr r =
-  match instr with
-  | Const c -> c.dst <- r
-  | Str_const c -> c.dst <- r
-  | Move m -> m.dst <- r
-  | Bin b -> b.dst <- r
-  | Cmp c -> c.dst <- r
-  | Load l -> l.dst <- r
-  | Load_slot l -> l.dst <- r
-  | Frame_addr f -> f.dst <- r
-  | Call c -> c.dst <- r
-  | Machine m -> m.m_dst <- r
+   An instruction is a value, so this answers with a new one rather than
+   changing the old, and the caller puts it back where the old one was:
+
+     Dynarray.set b.instrs at (map_uses rename (Dynarray.get b.instrs at))
+
+   Nothing downstream notices, because no pass holds an instruction anywhere but
+   in the block it came out of. *)
+let map_uses f = function
+  | Move m -> Move { m with src = f m.src }
+  | Bin b ->
+      let lhs = f b.lhs in
+      Bin { b with lhs; rhs = f b.rhs }
+  | Cmp c ->
+      let lhs = f c.lhs in
+      Cmp { c with lhs; rhs = f c.rhs }
+  | Load l -> Load { l with base = f l.base }
+  | Store s ->
+      let base = f s.base in
+      Store { s with base; src = f s.src }
+  | Store_slot s -> Store_slot { s with src = f s.src }
+  | Call c -> Call { c with args = Util.map_in_order f c.args }
+  | Machine m -> Machine { m with srcs = Util.map_in_order f m.srcs }
+  | Cbr c -> if c.code = "" then Cbr { c with cond = f c.cond } else Cbr c
+  | Ret r -> Ret { value = Option.map f r.value }
+  | (Const _ | Str_const _ | Load_slot _ | Frame_addr _ | Jmp _) as i -> i
+
+(* The same instruction, writing [r] instead.  Only asked of one that writes. *)
+let with_def r = function
+  | Const c -> Const { c with dst = r }
+  | Str_const c -> Str_const { c with dst = r }
+  | Move m -> Move { m with dst = r }
+  | Bin b -> Bin { b with dst = r }
+  | Cmp c -> Cmp { c with dst = r }
+  | Load l -> Load { l with dst = r }
+  | Load_slot l -> Load_slot { l with dst = r }
+  | Frame_addr _ -> Frame_addr { dst = r }
+  | Call c -> Call { c with dst = Some r }
+  | Machine m -> Machine { m with m_dst = Some r }
   | Store _ | Store_slot _ | Jmp _ | Cbr _ | Ret _ ->
       failwith "this instruction defines nothing"
 
@@ -190,10 +198,23 @@ type func = {
   mutable nregs : int;
   mutable nslots : int;
   mutable link_slot : int;
-  mutable colours : int IntMap.t;
-  mutable spill_slots : int IntMap.t;
-  mutable saved : int list;
 }
+
+(* What the allocator decided.
+
+   Not fields of [func], because none of it is part of the program: a colouring
+   is an assignment from the program's registers to the machine's, and the
+   emitter is the only thing that has to read one.  A pass answers with its
+   result rather than writing it back into what it was given. *)
+type allocation = {
+  colours : int IntMap.t;
+  (* The callee-saved registers this function actually used, in order. *)
+  saved : int list;
+  (* Which frame slot each spilled register went to. *)
+  spilled : int IntMap.t;
+}
+
+let unallocated = { colours = IntMap.empty; saved = []; spilled = IntMap.empty }
 
 (* A literal and the symbol it is emitted under, in the order they were first
    seen. *)
@@ -213,9 +234,6 @@ let new_func label name depth =
     nregs = 0;
     nslots = 0;
     link_slot = -1;
-    colours = IntMap.empty;
-    spill_slots = IntMap.empty;
-    saved = [];
   }
 
 let new_reg f =
@@ -255,6 +273,15 @@ let instrs b = Dynarray.to_list b.instrs
 (* The instructions without building the list, for the passes that run to a fixed
    point and would otherwise allocate one per round. *)
 let iter_instrs b g = Dynarray.iter g b.instrs
+
+(* Put every instruction through [g] and keep the answer where it came from,
+   which is what a pass that rewrites instructions does. *)
+let map_instrs b g =
+  for at = 0 to Dynarray.length b.instrs - 1 do
+    Dynarray.set b.instrs at (g (Dynarray.get b.instrs at))
+  done
+
+let map_phis b g = b.phis <- List.map g b.phis
 let set_instrs b list = b.instrs <- Dynarray.of_list list
 let count b = Dynarray.length b.instrs
 let nth b i = Dynarray.get b.instrs i
@@ -276,30 +303,34 @@ let succs b =
 
 let phi_arg phi pred = List.find_opt (fun a -> a.pred = pred) phi.args
 
-(* [set_arg] keeps an argument where it was, and appends a new one at the end. *)
-let set_arg phi pred r =
-  match phi_arg phi pred with
-  | Some a -> a.arg <- r
-  | None -> phi.args <- phi.args @ [ { pred; arg = r } ]
+(* A phi is a value too.  [set_arg] keeps an argument where it was and appends a
+   new one at the end; [remove_arg] answers with the argument and the phi without
+   it, so the caller cannot forget one of the two. *)
+let set_arg pred r phi =
+  if List.exists (fun a -> a.pred = pred) phi.args then
+    { phi with
+      args = List.map (fun a -> if a.pred = pred then { a with arg = r } else a) phi.args }
+  else { phi with args = phi.args @ [ { pred; arg = r } ] }
 
-let remove_arg phi pred =
+let remove_arg pred phi =
   match phi_arg phi pred with
   | None -> None
   | Some a ->
-      phi.args <- List.filter (fun other -> other.pred <> pred) phi.args;
-      Some a.arg
+      Some (a.arg, { phi with args = List.filter (fun o -> o.pred <> pred) phi.args })
 
 let phi_preds phi = List.map (fun a -> a.pred) phi.args
 
 (* -- rewiring --------------------------------------------------------------- *)
 
-let rename_target instr old fresh =
-  match instr with
-  | Jmp j -> if j.target = old then j.target <- fresh
+let rename_target old fresh = function
+  | Jmp j -> Jmp { target = (if j.target = old then fresh else j.target) }
   | Cbr c ->
-      if c.then_ = old then c.then_ <- fresh;
-      if c.else_ = old then c.else_ <- fresh
-  | _ -> ()
+      Cbr
+        { c with
+          then_ = (if c.then_ = old then fresh else c.then_);
+          else_ = (if c.else_ = old then fresh else c.else_)
+        }
+  | i -> i
 
 let recompute_preds f =
   Hashtbl.iter (fun _ b -> b.preds <- []) f.blocks;
@@ -331,9 +362,10 @@ let drop_unreachable f =
   Dynarray.clear f.order;
   Dynarray.append f.order kept;
   iter_blocks f (fun b ->
-      List.iter
-        (fun phi -> phi.args <- List.filter (fun a -> StrSet.mem a.pred live) phi.args)
-        b.phis);
+      b.phis <-
+        List.map
+          (fun phi -> { phi with args = List.filter (fun a -> StrSet.mem a.pred live) phi.args })
+          b.phis);
   recompute_preds f
 
 (* Reverse post-order, which is the order every dataflow pass walks in. *)
@@ -352,8 +384,8 @@ let rpo f =
 
 (* -- printing --------------------------------------------------------------- *)
 
-let reg_name f r =
-  match IntMap.find_opt r f.colours with
+let reg_name colours r =
+  match IntMap.find_opt r colours with
   | Some colour -> Printf.sprintf "%%%d:%d" r colour
   | None -> Printf.sprintf "%%%d" r
 
@@ -372,12 +404,12 @@ let show_instr name instr =
   | Frame_addr fa -> Printf.sprintf "%s = frame" (name fa.dst)
   | Call c ->
       let call = Printf.sprintf "%s(%s)" c.callee (joined c.args) in
-      if c.dst = no_reg then call else name c.dst ^ " = " ^ call
+      (match c.dst with None -> call | Some d -> name d ^ " = " ^ call)
   | Jmp j -> "jmp " ^ j.target
   | Cbr c ->
       let test = if c.code <> "" then c.code ^ "?" else name c.cond ^ " ?" in
       Printf.sprintf "br %s %s : %s" test c.then_ c.else_
-  | Ret r -> if r.value = no_reg then "ret" else "ret " ^ name r.value
+  | Ret r -> (match r.value with None -> "ret" | Some v -> "ret " ^ name v)
   | Machine m ->
       let operands = List.map name m.srcs in
       let operands =
@@ -389,7 +421,7 @@ let show_instr name instr =
       let written =
         String.trim (m.form ^ " " ^ String.concat ", " operands)
       in
-      if m.m_dst = no_reg then written else name m.m_dst ^ " = " ^ written
+      (match m.m_dst with None -> written | Some d -> name d ^ " = " ^ written)
 
 let show_phi name phi =
   let parts =
@@ -397,8 +429,8 @@ let show_phi name phi =
   in
   Printf.sprintf "%s = phi [%s]" (name phi.phi_dst) (String.concat ", " parts)
 
-let show_func f =
-  let name = reg_name f in
+let show_func ?(alloc = unallocated) f =
+  let name = reg_name alloc.colours in
   let out = ref [] in
   let put line = out := line :: !out in
   put
@@ -424,8 +456,13 @@ let as_text literal =
   String.iter (fun ch -> Buffer.add_utf_8_uchar b (Uchar.of_int (Char.code ch))) literal;
   Buffer.contents b
 
-let show_module m =
-  let parts = List.map show_func m.funcs in
+let show_module ?(allocs = StrMap.empty) m =
+  let parts =
+    List.map
+      (fun f ->
+        show_func ~alloc:(Option.value (StrMap.find_opt f.flabel allocs) ~default:unallocated) f)
+      m.funcs
+  in
   let parts =
     if m.strings = [] then parts
     else

@@ -31,36 +31,35 @@ let to_ir source opts =
    description of it that has to be kept in step. *)
 let compile_module source opts upto =
   let _, m = to_ir source opts in
-  if upto = "ir" then m
-  else begin
-    Ssa.construct_module m;
-    if upto = "ssa" then m
-    else begin
-      if opts.optimise then Opt.optimise m;
-      if upto = "opt" then m
-      else begin
-        List.iter Ssa.split_critical_edges m.Ir.funcs;
-        (* The DAGs are a view of this, taken without changing it. *)
-        if upto = "dag" then m
-        else begin
+  let allocs = ref Ir.StrMap.empty in
+  (* Each pass is named by what it leaves behind, so "as far as [upto]" is a walk
+     down this list that stops after the pass of that name has run.  [ir] runs
+     nothing: lowering has already left it. *)
+  let passes =
+    [ ("ir", fun () -> ());
+      ("ssa", fun () -> Ssa.construct_module m);
+      ("opt", fun () -> if opts.optimise then Opt.optimise m);
+      ("dag", fun () -> List.iter Ssa.split_critical_edges m.Ir.funcs);
+      ( "mach",
+        fun () ->
           Select.select_module m;
-          Mach.verify_module m;
-          if upto = "mach" then m
-          else begin
-            Outofssa.destruct_module m;
-            if upto = "flat" then m
-            else begin
-              Allocator.allocate_module m (registers opts);
-              m
-            end
-          end
-        end
-      end
-    end
-  end
+          Mach.verify_module m );
+      ("flat", fun () -> Outofssa.destruct_module m);
+      ("asm", fun () -> allocs := Allocator.allocate_module m (registers opts))
+    ]
+  in
+  let rec run = function
+    | [] -> ()
+    | (name, pass) :: rest ->
+        pass ();
+        if name <> upto then run rest
+  in
+  run passes;
+  (m, !allocs)
 
 let compile_to_asm ?(no_borrow = false) source opts =
-  Emit.emit_module ~no_borrow (compile_module source opts "asm")
+  let m, allocs = compile_module source opts "asm" in
+  Emit.emit_module ~no_borrow allocs m
 
 let show_dags m =
   String.concat "\n\n"
@@ -87,11 +86,11 @@ let stage source name opts =
       Typecheck.check prog;
       Astshow.show_program prog
   | _ -> (
-      let m = compile_module source opts name in
+      let m, allocs = compile_module source opts name in
       match name with
       | "dag" -> show_dags m
-      | "asm" -> Emit.emit_module m
-      | _ -> Ir.show_module m)
+      | "asm" -> Emit.emit_module allocs m
+      | _ -> Ir.show_module ~allocs m)
 
 (* -- the toolchain ---------------------------------------------------------- *)
 

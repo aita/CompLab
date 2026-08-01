@@ -79,11 +79,30 @@ class VarSym(
     val mutable: Boolean,
     val depth: Int,
 ) : Sym {
+    /** Read from deeper than it was bound, so it cannot live in a register. */
     var escapes: Boolean = false
-    var slot: Int = -1
-    var reg: Int = -1
+
+    /** Null until lowering has decided.  Which of the two follows [escapes]. */
+    var home: Home? = null
+
+    /** The home lowering gave it, which by then it must have. */
+    val where: Home get() = checkNotNull(home) { "`$name` was never given a home" }
 
     override fun toString(): String = name
+}
+
+/**
+ * Where a variable lives.
+ *
+ * One value and not the three fields it replaces: a register number, a slot
+ * number, and a flag saying which of the two to believe.  A frame slot may be
+ * negative — that is an argument the caller left on the stack — so a slot of -1
+ * is a real place, and cannot also mean "not decided yet".
+ */
+sealed interface Home {
+    data class InRegister(val reg: Reg) : Home
+
+    data class InFrame(val slot: Int) : Home
 }
 
 /** A function.  Functions are not values, so there is no function type. */

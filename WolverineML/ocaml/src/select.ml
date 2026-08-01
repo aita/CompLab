@@ -34,11 +34,13 @@ type selector = {
   mutable out : instr list; (* reversed while it is built *)
   mutable done_ : IntSet.t;
   mutable absorbed : IntSet.t;
+  (* Set when a comparison was fused into the branch below it. *)
+  mutable fused : string;
 }
 
 let put s m = s.out <- Machine m :: s.out
 
-let mach ?(dst = no_reg) ?(srcs = []) ?(imm = 0L) ?(symbol = "") ?(effectful = false) form =
+let mach ?dst ?(srcs = []) ?(imm = 0L) ?(symbol = "") ?(effectful = false) form =
   { form; m_dst = dst; srcs; imm; symbol; effectful }
 
 (* Where the one set bit of a power of two is. *)
@@ -143,9 +145,13 @@ let rec tile s (n : Dag.node) =
          anything, so every operand that was left to be folded has to be computed
          here instead. *)
       List.iter (fun operand -> force s operand) n.operands;
+      let other =
+        match other with
+        | Cbr c when s.fused <> "" -> Cbr { c with code = s.fused }
+        | i -> i
+      in
       s.out <- other :: s.out;
-      let d = defs other in
-      if d <> no_reg then d else 0
+      Option.value (defs other) ~default:0
 
 (* [at] is the register holding an operand, computing it here if it was deferred.
 
@@ -173,8 +179,7 @@ and force s index =
   match Dag.of_index s.graph index with
   | None -> ()
   | Some n ->
-      let v = defs n.instr in
-      ignore (at s index (if v <> no_reg then v else 0))
+      ignore (at s index (Option.value (defs n.instr) ~default:0))
 
 (* Both operands in registers, which is what the plain forms want. *)
 and both s n lhs rhs =
@@ -289,7 +294,9 @@ let fuse_comparison s index =
       match nodes.(Array.length nodes - 1).instr with
       | Cbr branch when branch.cond = c.dst && n.users = 1 && not n.escapes ->
           compare_ s n c.lhs c.rhs;
-          branch.code <- Mach.code_of c.op;
+          (* The branch is a value, and it is emitted later by [tile]; the code
+             the comparison set is remembered until then. *)
+          s.fused <- Mach.code_of c.op;
           true
       | _ -> false)
   | _ -> false
@@ -314,7 +321,7 @@ let select f =
   List.iter
     (fun b ->
       let s =
-        { graph = Dag.build b (Liveness.live_out live b.label); out = [];
+        { graph = Dag.build b (Liveness.live_out live b.label); out = []; fused = "";
           done_ = IntSet.empty; absorbed = IntSet.empty }
       in
       set_instrs b (run s))

@@ -53,18 +53,25 @@ class AllocatorTest {
         return mod
     }
 
-    private fun allocated(machine: Registers = Registers(), source: String = SOURCE): Module =
-        prepared(source).also { allocateModule(it, machine) }
+    /** Every function with the colouring the allocator gave it. */
+    private fun allocated(
+        machine: Registers = Registers(),
+        source: String = SOURCE,
+    ): List<Pair<Func, Allocation>> {
+        val mod = prepared(source)
+        val allocs = allocateModule(mod, machine)
+        return mod.funcs.map { it to allocs.getValue(it.label) }
+    }
 
     // -- what it promises -----------------------------------------------------
 
     @Test
     fun `every value gets a colour`() {
-        for (func in allocated().funcs) {
+        for ((func, alloc) in allocated()) {
             for (block in func.walk()) {
                 for (instr in block.instrs) {
-                    for (r in instr.uses) assertContains(func.colours, r)
-                    instr.def?.let { assertContains(func.colours, it) }
+                    for (r in instr.uses) assertContains(alloc.colours, r)
+                    instr.def?.let { assertContains(alloc.colours, it) }
                 }
             }
         }
@@ -72,7 +79,7 @@ class AllocatorTest {
 
     @Test
     fun `values live together differ`() {
-        for (func in allocated().funcs) verifyColouring(func)
+        for ((func, alloc) in allocated()) verifyColouring(alloc, func)
     }
 
     /**
@@ -89,8 +96,8 @@ class AllocatorTest {
         for (func in mod.funcs) splitCriticalEdges(func)
         selectModule(mod)
         destructModule(mod)
-        allocateModule(mod, Registers())
-        for (func in mod.funcs) verifyColouring(func)
+        val allocs = allocateModule(mod, Registers())
+        for (func in mod.funcs) verifyColouring(allocs.getValue(func.label), func)
     }
 
     /** Both ends of a copy hold the same value, so one register for the two is right. */
@@ -104,35 +111,34 @@ class AllocatorTest {
         entry.instrs.add(Move(b, a))
         entry.instrs.add(Call(null, "wol_print_int", listOf(a)))
         entry.instrs.add(Ret(b))
-        func.colours = mutableMapOf(a to 9, b to 9)
-        verifyColouring(func)
+        verifyColouring(Allocation(colours = mapOf(a to 9, b to 9)), func)
     }
 
     /** So the case above did not simply stop the verifier saying anything. */
     @Test
     fun `one colour for everything is rejected`() {
-        val func = allocated().funcs.first { it.colours.values.toSet().size > 1 }
-        func.colours = func.colours.keys.associateWith { 0 }.toMutableMap()
-        val thrown = assertFailsWith<IllegalStateException> { verifyColouring(func) }
+        val (func, alloc) = allocated().first { it.second.colours.values.toSet().size > 1 }
+        val flat = alloc.copy(colours = alloc.colours.keys.associateWith { 0 })
+        val thrown = assertFailsWith<IllegalStateException> { verifyColouring(flat, func) }
         assertContains(thrown.message ?: "", "at once")
     }
 
     @Test
     fun `a value live across a call is callee-saved`() {
-        for (func in allocated().funcs) {
+        for ((func, alloc) in allocated()) {
             val live = func.liveness()
             for (reg in func.acrossCalls(live)) {
-                assertContains(Registers.CALLEE_SAVED, func.colours.getValue(reg))
+                assertContains(Registers.CALLEE_SAVED, alloc.colours.getValue(reg))
             }
         }
     }
 
     @Test
     fun `only the callee-saved it used are saved`() {
-        for (func in allocated().funcs) {
+        for ((func, alloc) in allocated()) {
             assertEquals(
-                func.colours.values.toSet().intersect(Registers.CALLEE_SAVED.toSet()),
-                func.saved.toSet(),
+                alloc.colours.values.toSet().intersect(Registers.CALLEE_SAVED.toSet()),
+                alloc.saved.toSet(),
             )
         }
     }
@@ -141,25 +147,25 @@ class AllocatorTest {
     @ValueSource(ints = [5, 6, 8, 12, 16, 26])
     fun `a smaller machine still works`(size: Int) {
         val machine = Registers.limited(size)
-        for (func in allocated(machine).funcs) {
-            verifyColouring(func)
-            for (colour in func.colours.values) assertContains(machine.anywhere, colour)
+        for ((func, alloc) in allocated(machine)) {
+            verifyColouring(alloc, func)
+            for (colour in alloc.colours.values) assertContains(machine.anywhere, colour)
         }
     }
 
     @Test
     fun `a small machine spills`() {
-        val mod = allocated(Registers.limited(6))
-        assertTrue(mod.funcs.any { it.spillSlots.isNotEmpty() }, "nothing spilled")
-        for (func in mod.funcs) {
-            for (slot in func.spillSlots.values) assertTrue(slot < func.nslots)
+        val small = allocated(Registers.limited(6))
+        assertTrue(small.any { it.second.spilled.isNotEmpty() }, "nothing spilled")
+        for ((func, alloc) in small) {
+            for (slot in alloc.spilled.values) assertTrue(slot < func.nslots)
         }
     }
 
     @Test
     fun `pressure falls to what the machine has`() {
         val machine = Registers.limited(5)
-        for (func in allocated(machine).funcs) {
+        for ((func, _) in allocated(machine)) {
             assertTrue(func.pressure(func.liveness()) <= machine.count())
         }
     }
@@ -192,11 +198,12 @@ class AllocatorTest {
             func.walk().sumOf { block -> block.instrs.count { it is Move } }
         }
         assertTrue(before > 0, "leaving SSA should have made copies")
-        allocateModule(mod)
+        val allocs = allocateModule(mod)
         val left = mod.funcs.sumOf { func ->
+            val colours = allocs.getValue(func.label).colours
             func.walk().sumOf { block ->
                 block.instrs.count {
-                    it is Move && func.colours.getValue(it.dst) != func.colours.getValue(it.src)
+                    it is Move && colours.getValue(it.dst) != colours.getValue(it.src)
                 }
             }
         }

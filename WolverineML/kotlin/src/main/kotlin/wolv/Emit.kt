@@ -47,7 +47,7 @@ class Frame(val slots: Int, val saved: List<Int>, val stackArgs: Int) {
     fun savedOffset(index: Int): Int = -WORD * (slots + index + 1)
 }
 
-fun frameOf(func: Func): Frame {
+fun frameOf(func: Func, saved: List<Int>): Frame {
     var stackArgs = 0
     for (block in func.walk()) {
         for (instr in block.instrs) {
@@ -56,7 +56,7 @@ fun frameOf(func: Func): Frame {
             }
         }
     }
-    return Frame(func.nslots, func.saved, maxOf(stackArgs, 0))
+    return Frame(func.nslots, saved, maxOf(stackArgs, 0))
 }
 
 /** One character of a literal is one byte; write the ones `.ascii` cannot. */
@@ -73,10 +73,14 @@ fun escape(text: String): String {
     return out.toString()
 }
 
-fun emitModule(mod: Module, newEmitter: (Func) -> FuncEmitter = ::FuncEmitter): String {
+fun emitModule(
+    allocs: Map<String, Allocation>,
+    mod: Module,
+    newEmitter: (Func, Allocation) -> FuncEmitter = ::FuncEmitter,
+): String {
     val out = mutableListOf("\t.text")
     for (func in mod.funcs) {
-        out.addAll(newEmitter(func).emit())
+        out.addAll(newEmitter(func, allocs[func.label] ?: Allocation()).emit())
         out.add("")
     }
     if (mod.strings.isNotEmpty()) {
@@ -101,12 +105,12 @@ private fun registersRead(func: Func): Set<Reg> {
     return read
 }
 
-open class FuncEmitter(val func: Func) {
-    val frame = frameOf(func)
+open class FuncEmitter(val func: Func, val alloc: Allocation = Allocation()) {
+    val frame = frameOf(func, alloc.saved)
     val out = mutableListOf<String>()
     val epilogue = ".Lepi_${func.label}"
     val readSomewhere = registersRead(func)
-    val taken = func.colours.values.toSet()
+    val taken = alloc.colours.values.toSet()
 
     // -- helpers ----------------------------------------------------------
 
@@ -119,7 +123,7 @@ open class FuncEmitter(val func: Func) {
     }
 
     fun colour(reg: Reg): Int =
-        func.colours[reg] ?: throw AssertionError("%$reg was never coloured")
+        alloc.colours[reg] ?: throw AssertionError("%$reg was never coloured")
 
     fun mov(dst: Int, src: Int) {
         if (dst != src) line("mov x$dst, x$src")

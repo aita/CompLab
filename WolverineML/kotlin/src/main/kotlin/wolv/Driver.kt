@@ -46,29 +46,32 @@ fun toIr(source: String, opts: Options): Module {
  * There is one of these and not two: a dump is the pipeline halted, not a
  * second description of it that has to be kept in step.
  */
-fun compileModule(source: String, opts: Options, upto: String = "asm"): Module {
+/** The module the pipeline left, and what the allocator decided about it. */
+data class Compiled(val mod: Module, val allocs: Map<String, Allocation> = emptyMap())
+
+fun compileModule(source: String, opts: Options, upto: String = "asm"): Compiled {
     val mod = toIr(source, opts)
-    if (upto == "ir") return mod
+    if (upto == "ir") return Compiled(mod)
     constructModule(mod)
-    if (upto == "ssa") return mod
+    if (upto == "ssa") return Compiled(mod)
     if (opts.optimise) optimise(mod)
-    if (upto == "opt") return mod
+    if (upto == "opt") return Compiled(mod)
     for (func in mod.funcs) splitCriticalEdges(func)
-    if (upto == "dag") return mod // the DAGs are a view of this, taken without changing it
+    // the DAGs are a view of this, taken without changing it
+    if (upto == "dag") return Compiled(mod)
     selectModule(mod)
     mod.verifySelected()
-    if (upto == "mach") return mod
+    if (upto == "mach") return Compiled(mod)
     destructModule(mod)
-    if (upto == "flat") return mod
-    allocateModule(mod, opts.registers())
-    return mod
+    if (upto == "flat") return Compiled(mod)
+    return Compiled(mod, allocateModule(mod, opts.registers()))
 }
 
 fun compileToAsm(
     source: String,
     opts: Options,
-    newEmitter: (Func) -> FuncEmitter = ::FuncEmitter,
-): String = emitModule(compileModule(source, opts), newEmitter)
+    newEmitter: (Func, Allocation) -> FuncEmitter = ::FuncEmitter,
+): String = compileModule(source, opts).let { emitModule(it.allocs, it.mod, newEmitter) }
 
 /** Run the pipeline as far as `name`, and show what it has by then. */
 fun stage(source: String, name: String, opts: Options): String {
@@ -80,10 +83,10 @@ fun stage(source: String, name: String, opts: Options): String {
         check(program)
         return showProgram(program)
     }
-    val mod = compileModule(source, opts, upto = name)
+    val (mod, allocs) = compileModule(source, opts, upto = name)
     if (name == "dag") return showDags(mod)
-    if (name == "asm") return emitModule(mod)
-    return mod.show()
+    if (name == "asm") return emitModule(allocs, mod)
+    return mod.show(allocs)
 }
 
 fun showDags(mod: Module): String = mod.funcs.joinToString("\n\n") { func ->
@@ -139,7 +142,7 @@ fun build(
     source: String,
     out: Path,
     opts: Options,
-    newEmitter: (Func) -> FuncEmitter = ::FuncEmitter,
+    newEmitter: (Func, Allocation) -> FuncEmitter = ::FuncEmitter,
 ) {
     val asm = compileToAsm(source, opts, newEmitter)
     val tmp = createTempDirectory("wolv")
@@ -165,7 +168,7 @@ fun runSource(
     source: String,
     opts: Options,
     stdin: String? = null,
-    newEmitter: (Func) -> FuncEmitter = ::FuncEmitter,
+    newEmitter: (Func, Allocation) -> FuncEmitter = ::FuncEmitter,
 ): Completed {
     val tmp = createTempDirectory("wolv")
     try {

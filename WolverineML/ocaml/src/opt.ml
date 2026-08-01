@@ -34,8 +34,9 @@ let rewrite f mapping =
       !at
     in
     iter_blocks f (fun b ->
-        List.iter (fun phi -> List.iter (fun a -> a.arg <- resolve a.arg) phi.args) b.phis;
-        iter_instrs b (map_uses resolve))
+        map_phis b (fun phi ->
+            { phi with args = List.map (fun a -> { a with arg = resolve a.arg }) phi.args });
+        map_instrs b (map_uses resolve))
   end
 
 let constants f =
@@ -206,12 +207,11 @@ let dead_code f =
         let kept =
           List.filter
             (fun instr ->
-              let d = defs instr in
-              if d <> no_reg && (not (IntSet.mem d !used)) && not (has_effect instr) then begin
-                round_changed := true;
-                false
-              end
-              else true)
+              match defs instr with
+              | Some d when (not (IntSet.mem d !used)) && not (has_effect instr) ->
+                  round_changed := true;
+                  false
+              | _ -> true)
             (instrs b)
         in
         set_instrs b kept)

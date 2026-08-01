@@ -102,26 +102,28 @@ fun topLevel(decls: List<Decl>) {
 }
 
 fun functionBody(bind: FunBind, sym: FunSym) {
-    if (func.depth > 0) {
+    func.staticLinkSlot?.let { slot ->
         val link = reg()
         func.params.add(link)
-        emit(StoreSlot(func.staticLinkSlot, link))
+        emit(StoreSlot(slot, link))
     }
     val first = func.params.size
     for ((offset, psym) in sym.params.withIndex()) {
         val index = first + offset
         if (index >= ARGUMENT_REGISTERS) {
             psym.escapes = true
-            psym.slot = -(index - ARGUMENT_REGISTERS + 1)
+            // Already in the frame, above the saved frame record: nothing to copy.
+            psym.home = Home.InFrame(-(index - ARGUMENT_REGISTERS + 1))
             continue
         }
         val r = reg()
         func.params.add(r)
         if (psym.escapes) {
-            psym.slot = func.newSlot()
-            emit(StoreSlot(psym.slot, r))
+            val slot = func.newSlot()
+            psym.home = Home.InFrame(slot)
+            emit(StoreSlot(slot, r))
         } else {
-            psym.reg = r
+            psym.home = Home.InRegister(r)
         }
     }
     val value = exp(bind.body)
@@ -140,26 +142,25 @@ fun finish() {
  * static link: the slot goes, and every later slot moves down one.
  */
 fun dropUnusedStaticLink() {
-    val slot = func.staticLinkSlot
-    if (slot < 0 || hasChildren) return
+    val slot = func.staticLinkSlot ?: return
+    if (hasChildren) return
     val reads = func.walk().any { block ->
         block.instrs.any { it is LoadSlot && it.slot == slot }
     }
     if (reads) return
     for (block in func.walk()) {
-        val kept = mutableListOf<Instr>()
-        for (instr in block.instrs) {
+        fun below(at: Int) = if (at > slot) at - 1 else at
+        block.instrs = block.instrs.mapNotNullTo(mutableListOf()) { instr ->
             when {
-                instr is StoreSlot && instr.slot == slot -> continue
-                instr is StoreSlot && instr.slot > slot -> instr.slot -= 1
-                instr is LoadSlot && instr.slot > slot -> instr.slot -= 1
+                instr is StoreSlot && instr.slot == slot -> null
+                instr is StoreSlot -> instr.copy(slot = below(instr.slot))
+                instr is LoadSlot -> instr.copy(slot = below(instr.slot))
+                else -> instr
             }
-            kept.add(instr)
         }
-        block.instrs = kept
     }
     func.nslots -= 1
-    func.staticLinkSlot = -1
+    func.staticLinkSlot = null
 }
 
 // -- declarations -----------------------------------------------------
@@ -186,12 +187,11 @@ fun valDecl(decl: ValDecl) {
 
 /** Give a variable its home, and put the initial value in it. */
 fun bind(sym: VarSym, value: Reg) {
-    if (sym.escapes) {
-        sym.slot = func.newSlot()
-        emit(StoreSlot(sym.slot, value))
-    } else {
-        sym.reg = reg()
-        emit(Move(sym.reg, value))
+    val home = if (sym.escapes) Home.InFrame(func.newSlot()) else Home.InRegister(reg())
+    sym.home = home
+    when (home) {
+        is Home.InFrame -> emit(StoreSlot(home.slot, value))
+        is Home.InRegister -> emit(Move(home.reg, value))
     }
 }
 
@@ -204,7 +204,7 @@ fun frameAt(depth: Int): Reg {
         emit(FrameAddr(r))
         return r
     }
-    emit(LoadSlot(r, func.staticLinkSlot))
+    emit(LoadSlot(r, checkNotNull(func.staticLinkSlot) { "${func.name} has no static link" }))
     var here = func.depth - 1
     while (here > depth) {
         val next = reg()
@@ -215,27 +215,28 @@ fun frameAt(depth: Int): Reg {
     return r
 }
 
-fun readVar(sym: VarSym): Reg {
-    if (!sym.escapes) return sym.reg
-    if (sym.depth == func.depth) {
-        val r = reg()
-        emit(LoadSlot(r, sym.slot))
-        return r
-    }
-    val base = frameAt(sym.depth)
-    val r = reg()
-    emit(Load(r, base, slotOffset(sym.slot)))
-    return r
+fun readVar(sym: VarSym): Reg = when (val home = sym.where) {
+    is Home.InRegister -> home.reg
+    is Home.InFrame ->
+        if (sym.depth == func.depth) {
+            reg().also { emit(LoadSlot(it, home.slot)) }
+        } else {
+            // The frame is walked before the register is taken, because the order
+            // registers are handed out in is the order a dump prints them in.
+            val base = frameAt(sym.depth)
+            reg().also { emit(Load(it, base, slotOffset(home.slot))) }
+        }
 }
 
 fun writeVar(sym: VarSym, value: Reg) {
-    if (!sym.escapes) {
-        emit(Move(sym.reg, value))
-    } else if (sym.depth == func.depth) {
-        emit(StoreSlot(sym.slot, value))
-    } else {
-        val base = frameAt(sym.depth)
-        emit(Store(base, slotOffset(sym.slot), value))
+    when (val home = sym.where) {
+        is Home.InRegister -> emit(Move(home.reg, value))
+        is Home.InFrame ->
+            if (sym.depth == func.depth) {
+                emit(StoreSlot(home.slot, value))
+            } else {
+                emit(Store(frameAt(sym.depth), slotOffset(home.slot), value))
+            }
     }
 }
 
@@ -408,7 +409,7 @@ fun field(e: Field): Reg {
     val base = value(e.record)
     checkNotNil(base)
     val r = reg()
-    emit(Load(r, base, WORD * e.offset))
+    emit(Load(r, base, WORD * checkNotNull(e.offset)))
     return r
 }
 
@@ -422,7 +423,7 @@ fun assign(e: Assign) {
         is Field -> {
             val base = value(target.record)
             checkNotNil(base)
-            emit(Store(base, WORD * target.offset, value(e.value)))
+            emit(Store(base, WORD * checkNotNull(target.offset), value(e.value)))
         }
         else -> throw AssertionError("assignment to something that is not a place")
     }

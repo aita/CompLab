@@ -58,7 +58,7 @@ class OracleTest {
     }
 
     /** Force the swap: the borrowed register is what usually hides this path. */
-    private class NoBorrow(func: Func) : FuncEmitter(func) {
+    private class NoBorrow(func: Func, alloc: Allocation) : FuncEmitter(func, alloc) {
         override fun borrowed(moves: List<Pair<Int, Int>>): Int? = null
     }
 

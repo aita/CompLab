@@ -2,6 +2,7 @@
    passed; a failure prints what it wanted and what it got, and the run exits
    non-zero. *)
 
+open Wolv
 open Ir
 
 let passed = ref 0
@@ -311,9 +312,11 @@ let ssa_tests () =
     (fun b ->
       List.iter
         (fun instr ->
-          let d = defs instr in
-          if d <> no_reg then
-            Hashtbl.replace written d (1 + Option.value (Hashtbl.find_opt written d) ~default:0))
+          Option.iter
+            (fun d ->
+              Hashtbl.replace written d
+                (1 + Option.value (Hashtbl.find_opt written d) ~default:0))
+            (defs instr))
         (instrs b))
     (walk f);
   check "lowering writes a variable more than once"
@@ -522,40 +525,42 @@ let prepared source =
   Outofssa.destruct_module m;
   m
 
+(* Every function with the colouring the allocator gave it. *)
 let allocated machine source =
   let m = prepared source in
-  Allocator.allocate_module m machine;
-  m
+  let allocs = Allocator.allocate_module m machine in
+  List.map (fun f -> (f, StrMap.find f.flabel allocs)) m.funcs
 
-let moves_left f =
+let moves_left (f, alloc) =
   List.fold_left
     (fun n b ->
       n
       + List.length
           (List.filter
              (function
-               | Move m -> IntMap.find m.dst f.colours <> IntMap.find m.src f.colours
+               | Move m -> IntMap.find m.dst alloc.colours <> IntMap.find m.src alloc.colours
                | _ -> false)
              (instrs b)))
     0 (walk f)
 
 let allocator_tests () =
   List.iter
-    (fun f ->
+    (fun (f, alloc) ->
       List.iter
         (fun b ->
           List.iter
             (fun instr ->
               List.iter
-                (fun r -> check "every value gets a colour" (IntMap.mem r f.colours))
+                (fun r -> check "every value gets a colour" (IntMap.mem r alloc.colours))
                 (uses instr);
-              let d = defs instr in
-              if d <> no_reg then check "every definition too" (IntMap.mem d f.colours))
+              Option.iter
+                (fun d -> check "every definition too" (IntMap.mem d alloc.colours))
+                (defs instr))
             (instrs b))
         (walk f))
-    (allocated Registers.all busy_source).funcs;
+    (allocated Registers.all busy_source);
 
-  List.iter Allocator.verify (allocated Registers.all busy_source).funcs;
+  List.iter (fun (f, alloc) -> Allocator.verify alloc f) (allocated Registers.all busy_source);
   incr passed;
 
   (* Without the optimiser the copies survive to the allocator, and coalescing
@@ -566,10 +571,10 @@ let allocator_tests () =
     List.iter Ssa.split_critical_edges m.funcs;
     Select.select_module m;
     Outofssa.destruct_module m;
-    Allocator.allocate_module m Registers.all;
-    m
+    let allocs = Allocator.allocate_module m Registers.all in
+    List.map (fun f -> (f, StrMap.find f.flabel allocs)) m.funcs
   in
-  List.iter Allocator.verify unoptimised.funcs;
+  List.iter (fun (f, alloc) -> Allocator.verify alloc f) unoptimised;
   incr passed;
 
   (* Both ends of a copy hold the same value, so one register for the two is
@@ -580,69 +585,72 @@ let allocator_tests () =
   let b = new_reg copied in
   emit entry (Const { dst = a; value = 1L });
   emit entry (Move { dst = b; src = a });
-  emit entry (Call { dst = no_reg; callee = "wol_print_int"; args = [ a ] });
-  emit entry (Ret { value = b });
-  copied.colours <- IntMap.add a 9 (IntMap.add b 9 IntMap.empty);
+  emit entry (Call { dst = None; callee = "wol_print_int"; args = [ a ] });
+  emit entry (Ret { value = Some b });
+  let one_register =
+    { unallocated with colours = IntMap.add a 9 (IntMap.add b 9 IntMap.empty) }
+  in
   check "a coalesced copy is not a clash"
-    (match Allocator.verify copied with () -> true | exception _ -> false);
+    (match Allocator.verify one_register copied with () -> true | exception _ -> false);
 
   (* And one colour for everything is a clash, so the case above did not simply
      stop the verifier saying anything. *)
   check "one colour for everything is rejected"
     (List.exists
-       (fun f ->
-         f.colours <- IntMap.map (fun _ -> 0) f.colours;
-         match Allocator.verify f with () -> false | exception _ -> true)
-       (allocated Registers.all busy_source).funcs);
+       (fun (f, alloc) ->
+         let flat = { alloc with colours = IntMap.map (fun _ -> 0) alloc.colours } in
+         match Allocator.verify flat f with () -> false | exception _ -> true)
+       (allocated Registers.all busy_source));
 
   List.iter
-    (fun f ->
+    (fun (f, alloc) ->
       IntSet.iter
         (fun r ->
           check "a value live across a call is callee-saved"
-            (Registers.is_callee_saved (IntMap.find r f.colours)))
+            (Registers.is_callee_saved (IntMap.find r alloc.colours)))
         (Liveness.across_calls f (Liveness.analyse f)))
-    (allocated Registers.all busy_source).funcs;
+    (allocated Registers.all busy_source);
 
   List.iter
-    (fun f ->
+    (fun (_, alloc) ->
       let used =
         IntMap.fold
           (fun _ colour acc ->
             if Registers.is_callee_saved colour then IntSet.add colour acc else acc)
-          f.colours IntSet.empty
+          alloc.colours IntSet.empty
       in
-      check "only the callee-saved it used are saved" (IntSet.elements used = f.saved))
-    (allocated Registers.all busy_source).funcs;
+      check "only the callee-saved it used are saved" (IntSet.elements used = alloc.saved))
+    (allocated Registers.all busy_source);
 
   List.iter
     (fun size ->
       let machine = Registers.limited size in
       List.iter
-        (fun f ->
-          Allocator.verify f;
+        (fun (f, alloc) ->
+          Allocator.verify alloc f;
           IntMap.iter
             (fun _ colour ->
               check "a smaller machine still works"
                 (List.mem colour (Registers.anywhere machine)))
-            f.colours)
-        (allocated machine busy_source).funcs)
+            alloc.colours)
+        (allocated machine busy_source))
     [ 5; 6; 8; 12; 16; 26 ];
   incr passed;
 
-  let m = allocated (Registers.limited 6) busy_source in
+  let small = allocated (Registers.limited 6) busy_source in
   check "a small machine spills"
-    (List.exists (fun f -> not (IntMap.is_empty f.spill_slots)) m.funcs);
+    (List.exists (fun (_, alloc) -> not (IntMap.is_empty alloc.spilled)) small);
   List.iter
-    (fun f -> IntMap.iter (fun _ slot -> check "into a slot it has" (slot < f.nslots)) f.spill_slots)
-    m.funcs;
+    (fun (f, alloc) ->
+      IntMap.iter (fun _ slot -> check "into a slot it has" (slot < f.nslots)) alloc.spilled)
+    small;
 
   let machine = Registers.limited 5 in
   List.iter
-    (fun f ->
+    (fun (f, _) ->
       check "pressure falls to what the machine has"
         (Liveness.pressure f (Liveness.analyse f) <= Registers.count machine))
-    (allocated machine busy_source).funcs;
+    (allocated machine busy_source);
 
   let source =
     "fun ten (a : int, b : int, c : int, d : int, e : int,\n\
@@ -669,8 +677,10 @@ let allocator_tests () =
       0 m.funcs
   in
   check "leaving SSA makes copies" (before > 0);
-  Allocator.allocate_module m Registers.all;
-  let left = List.fold_left (fun n f -> n + moves_left f) 0 m.funcs in
+  let allocs = Allocator.allocate_module m Registers.all in
+  let left =
+    List.fold_left (fun n f -> n + moves_left (f, StrMap.find f.flabel allocs)) 0 m.funcs
+  in
   check
     (Printf.sprintf "and coalescing eats them (%d of %d survived)" left before)
     (left <= before / 10)

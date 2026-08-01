@@ -14,9 +14,12 @@ import wolv.ir.*
 import wolv.*
 
 
-fun allocateModule(mod: Module, machine: Registers = Registers()) {
-    for (func in mod.funcs) allocate(func, machine)
-}
+/**
+ * The colouring of each function, by label.  Spilling rewrites the functions on
+ * the way, which is why the module is taken and not given back.
+ */
+fun allocateModule(mod: Module, machine: Registers = Registers()): Map<String, Allocation> =
+    mod.funcs.associate { it.label to allocate(it, machine) }
 
 /**
  * No two values that hold different things at once may share a colour.
@@ -32,17 +35,17 @@ fun allocateModule(mod: Module, machine: Registers = Registers()) {
  * Nothing that interferes escapes this, because the later of the two
  * definitions that put the values there happens while the other is live.
  */
-fun verifyColouring(func: Func) {
+fun verifyColouring(alloc: Allocation, func: Func) {
     val live = func.liveness()
     for (block in func.walk()) {
         val alive = live.liveOut.getValue(block.label).toMutableSet()
         for (instr in block.instrs.asReversed()) {
             if (instr is Move) alive.remove(instr.src)
-            for (r in instr.uses) func.coloured(r)
+            for (r in instr.uses) alloc.coloured(r)
             instr.def?.let { d ->
-                func.coloured(d)
+                alloc.coloured(d)
                 alive.add(d)
-                func.noClash(alive, d, block.label)
+                alloc.noClash(alive, d, block.label)
                 alive.remove(d)
             }
             alive.addAll(instr.uses)
@@ -50,23 +53,23 @@ fun verifyColouring(func: Func) {
 
         val entering = live.liveIn.getValue(block.label).toMutableSet()
         for (phi in block.phis) {
-            func.coloured(phi.dst)
+            alloc.coloured(phi.dst)
             entering.add(phi.dst)
-            func.noClash(entering, phi.dst, block.label)
+            alloc.noClash(entering, phi.dst, block.label)
         }
         if (block.label == func.entry) {
             for (param in func.params) {
                 entering.add(param)
-                func.noClash(entering, param, block.label)
+                alloc.noClash(entering, param, block.label)
             }
         }
     }
 }
 
-private fun Func.coloured(r: Reg) = check(r in colours) { "%$r has no colour" }
+private fun Allocation.coloured(r: Reg) = check(r in colours) { "%$r has no colour" }
 
 /** Nothing else live here may hold the colour [written] was just given. */
-private fun Func.noClash(alive: Set<Reg>, written: Reg, where: String) {
+private fun Allocation.noClash(alive: Set<Reg>, written: Reg, where: String) {
     val colour = colours[written] ?: return
     val other = alive.sorted().firstOrNull { it != written && colours[it] == colour } ?: return
     error("x$colour holds %$written and %$other at once in $where")

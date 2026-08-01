@@ -1,11 +1,13 @@
 ; The compiler is a library so that a test can drive one pass on its own, and
-; `bin/` wraps it in an executable.  `wrapped false` keeps the module names
-; flat: `Ir` is `Ir` from anywhere, the way the Python modules are.
+; `bin/` wraps it in an executable.  The library is wrapped, so a module of it is
+; `Wolv.Ir` from outside and `Ir` from within: one name to open, and nothing of
+; ours in the way of anything else's.
 
 (library
  (name wolv)
- (wrapped false)
  (libraries unix uucp containers)
+ (preprocess
+  (pps ppx_deriving.show))
  (flags
   (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
 

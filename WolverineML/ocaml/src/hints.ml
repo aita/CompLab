@@ -26,11 +26,13 @@ let preferences f =
                   if at < List.length Registers.argument_regs then
                     wanted := IntMap.add arg (List.nth Registers.argument_regs at) !wanted)
                 c.args;
-              if c.dst <> no_reg then
-                wanted := IntMap.add c.dst (List.hd Registers.argument_regs) !wanted
+              Option.iter
+                (fun d -> wanted := IntMap.add d (List.hd Registers.argument_regs) !wanted)
+                c.dst
           | Ret r ->
-              if r.value <> no_reg then
-                wanted := IntMap.add r.value (List.hd Registers.argument_regs) !wanted
+              Option.iter
+                (fun v -> wanted := IntMap.add v (List.hd Registers.argument_regs) !wanted)
+                r.value
           | _ -> ())
         (instrs b))
     (walk f);

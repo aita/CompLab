@@ -10,7 +10,7 @@
  * What they share is everything else — the registers, the blocks, the graph, the
  * frame — so the passes that only care about the shape of a function (liveness,
  * dominance, both register allocators, the verifiers) work on either.  They ask
- * through [def], [uses], [rewriteUses] and [hasEffect]: an instruction says which
+ * through [def], [uses], [mapUses] and [hasEffect]: an instruction says which
  * register it writes and which it reads, and nothing outside this file matches on
  * what it is.
  *
@@ -27,7 +27,26 @@
 
 package wolv.ir
 
-typealias Reg = Int
+/**
+ * A virtual register.
+ *
+ * A value class and not `Int`, because three different numbers run through this
+ * compiler — a virtual register, a machine register (a colour), and a frame slot
+ * — and as plain `Int`s any of them typechecks where another was meant.  The
+ * emitter is where the first two meet, and it is the one place that turns one
+ * into the other.
+ *
+ * `toString` is the number alone, so `"%$reg"` still reads as a dump does.
+ * Measured against the `Int` it replaced, on a function with 720 live values and
+ * a machine of twelve registers, it costs nothing: the boxing it was avoided for
+ * happens only at a `Map<Reg, _>` key, and that is not where the time goes.
+ */
+@JvmInline
+value class Reg(val index: Int) : Comparable<Reg> {
+    override fun compareTo(other: Reg): Int = index.compareTo(other.index)
+
+    override fun toString(): String = index.toString()
+}
 
 /** How a register is written in a dump. */
 typealias Name = (Reg) -> String
@@ -59,55 +78,55 @@ fun slotOffset(slot: Int): Int =
 
 sealed interface Instr
 
-class Const(var dst: Reg, val value: Long) : Instr
+data class Const(val dst: Reg, val value: Long) : Instr
 
-class StrConst(var dst: Reg, val symbol: String) : Instr
+data class StrConst(val dst: Reg, val symbol: String) : Instr
 
-class Move(var dst: Reg, var src: Reg) : Instr
+data class Move(val dst: Reg, val src: Reg) : Instr
 
-class Bin(var dst: Reg, val op: String, var lhs: Reg, var rhs: Reg) : Instr
+data class Bin(val dst: Reg, val op: String, val lhs: Reg, val rhs: Reg) : Instr
 
-class Cmp(var dst: Reg, val op: String, var lhs: Reg, var rhs: Reg) : Instr
+data class Cmp(val dst: Reg, val op: String, val lhs: Reg, val rhs: Reg) : Instr
 
-class Load(var dst: Reg, var base: Reg, val offset: Int) : Instr
+data class Load(val dst: Reg, val base: Reg, val offset: Int) : Instr
 
-class Store(var base: Reg, val offset: Int, var src: Reg) : Instr
+data class Store(val base: Reg, val offset: Int, val src: Reg) : Instr
 
 // -- the frame, calls and joins, which both instruction sets keep -------------
 
 /** Read a frame slot of this function — an escaping variable, or a spill. */
-class LoadSlot(var dst: Reg, var slot: Int) : Instr
+data class LoadSlot(val dst: Reg, val slot: Int) : Instr
 
-class StoreSlot(var slot: Int, var src: Reg) : Instr
+data class StoreSlot(val slot: Int, val src: Reg) : Instr
 
 /** The frame pointer itself, which is what a static link points at. */
-class FrameAddr(var dst: Reg) : Instr
+data class FrameAddr(val dst: Reg) : Instr
 
-class Call(var dst: Reg?, val callee: String, var args: List<Reg>) : Instr
+data class Call(val dst: Reg?, val callee: String, val args: List<Reg>) : Instr
 
 /**
  * A phi reads its arguments on the edges and not where it stands, which is why
  * [uses] does not report them and liveness has to add them to the predecessor.
  */
-class Phi(var dst: Reg, var args: MutableMap<String, Reg>) : Instr
+data class Phi(val dst: Reg, val args: Map<String, Reg>) : Instr
 
 // -- control flow -------------------------------------------------------------
 
 /** Sealed in its own right, so [Block.succs] needs no `else`. */
 sealed interface Terminator : Instr
 
-class Jmp(var target: String) : Terminator
+data class Jmp(val target: String) : Terminator
 
-class CBr(
-    var cond: Reg,
-    var then: String,
-    var els: String,
+data class CBr(
+    val cond: Reg,
+    val then: String,
+    val els: String,
     // After selection a branch may read the flags a comparison just set instead
     // of testing a register, and then it reads no register at all.
-    var code: String = "",
+    val code: String = "",
 ) : Terminator
 
-class Ret(var value: Reg?) : Terminator
+data class Ret(val value: Reg?) : Terminator
 
 // -- what every instruction of either set can be asked ------------------------
 
@@ -128,23 +147,28 @@ val Instr.def: Reg?
         is Store, is StoreSlot, is Jmp, is CBr, is Ret -> null
     }
 
-/** Rewrite the register it writes.  Only ever asked of one that writes. */
-fun Instr.redefine(r: Reg) {
-    when (this) {
-        is Const -> dst = r
-        is StrConst -> dst = r
-        is Move -> dst = r
-        is Bin -> dst = r
-        is Cmp -> dst = r
-        is Load -> dst = r
-        is LoadSlot -> dst = r
-        is FrameAddr -> dst = r
-        is Call -> dst = r
-        is Phi -> dst = r
-        is Machine -> dst = r
-        is Store, is StoreSlot, is Jmp, is CBr, is Ret ->
-            throw AssertionError("${this::class.simpleName} defines nothing")
-    }
+/**
+ * The same instruction, writing [r] instead.  Only ever asked of one that writes.
+ *
+ * An instruction is a value, so this answers with a new one rather than changing
+ * the old, and the caller puts it back where the old one was.  Nothing
+ * downstream notices, because no pass holds an instruction anywhere but in the
+ * block it came out of.
+ */
+fun Instr.withDef(r: Reg): Instr = when (this) {
+    is Const -> copy(dst = r)
+    is StrConst -> copy(dst = r)
+    is Move -> copy(dst = r)
+    is Bin -> copy(dst = r)
+    is Cmp -> copy(dst = r)
+    is Load -> copy(dst = r)
+    is LoadSlot -> copy(dst = r)
+    is FrameAddr -> copy(dst = r)
+    is Call -> copy(dst = r)
+    is Phi -> copy(dst = r)
+    is Machine -> copy(dst = r)
+    is Store, is StoreSlot, is Jmp, is CBr, is Ret ->
+        throw AssertionError("${this::class.simpleName} defines nothing")
 }
 
 /**
@@ -166,30 +190,19 @@ val Instr.uses: List<Reg>
         is Const, is StrConst, is LoadSlot, is FrameAddr, is Phi, is Jmp -> emptyList()
     }
 
-/** Rewrite the registers it reads, in place. */
-fun Instr.rewriteUses(rename: Rewrite) {
-    when (this) {
-        is Move -> src = rename(src)
-        is Bin -> {
-            lhs = rename(lhs)
-            rhs = rename(rhs)
-        }
-        is Cmp -> {
-            lhs = rename(lhs)
-            rhs = rename(rhs)
-        }
-        is Load -> base = rename(base)
-        is Store -> {
-            base = rename(base)
-            src = rename(src)
-        }
-        is StoreSlot -> src = rename(src)
-        is Call -> args = args.map(rename)
-        is Machine -> srcs = srcs.map(rename)
-        is CBr -> if (code.isEmpty()) cond = rename(cond)
-        is Ret -> value = value?.let(rename)
-        is Const, is StrConst, is LoadSlot, is FrameAddr, is Phi, is Jmp -> {}
-    }
+/** The same instruction with the registers it reads renamed. */
+fun Instr.mapUses(rename: Rewrite): Instr = when (this) {
+    is Move -> copy(src = rename(src))
+    is Bin -> copy(lhs = rename(lhs), rhs = rename(rhs))
+    is Cmp -> copy(lhs = rename(lhs), rhs = rename(rhs))
+    is Load -> copy(base = rename(base))
+    is Store -> copy(base = rename(base), src = rename(src))
+    is StoreSlot -> copy(src = rename(src))
+    is Call -> copy(args = args.map(rename))
+    is Machine -> copy(srcs = srcs.map(rename))
+    is CBr -> if (code.isEmpty()) copy(cond = rename(cond)) else this
+    is Ret -> copy(value = value?.let(rename))
+    is Const, is StrConst, is LoadSlot, is FrameAddr, is Phi, is Jmp -> this
 }
 
 /** True when it has to be kept even if its result is dead. */
@@ -233,12 +246,10 @@ class Func(
     var order: MutableList<String> = mutableListOf()
     var nregs: Int = 0
     var nslots: Int = 0
-    var staticLinkSlot: Int = -1
-    var colours: MutableMap<Reg, Int> = mutableMapOf()
-    val spillSlots: MutableMap<Reg, Int> = mutableMapOf()
-    var saved: List<Int> = emptyList()
+    /** The slot the static link arrived in, or null for a function that keeps none. */
+    var staticLinkSlot: Int? = null
 
-    fun newReg(): Reg = nregs++
+    fun newReg(): Reg = Reg(nregs++)
 
     fun newSlot(): Int = nslots++
 
@@ -256,6 +267,22 @@ class Func(
     fun walk(): List<Block> = order.map { this[it] }
 }
 
+/**
+ * What the allocator decided.
+ *
+ * Not fields of [Func], because none of it is part of the program: a colouring is
+ * an assignment from the program's registers to the machine's, and the emitter is
+ * the only thing that has to read one.  A pass answers with its result rather
+ * than writing it back into what it was given.
+ */
+data class Allocation(
+    val colours: Map<Reg, Int> = emptyMap(),
+    /** The callee-saved registers this function actually used, in order. */
+    val saved: List<Int> = emptyList(),
+    /** Which frame slot each spilled register went to. */
+    val spilled: Map<Reg, Int> = emptyMap(),
+)
+
 class Module {
     val funcs: MutableList<Func> = mutableListOf()
 
@@ -265,15 +292,11 @@ class Module {
 
 // -- rewiring -----------------------------------------------------------------
 
-fun Instr.renameTarget(old: String, new: String) {
-    when (this) {
-        is Jmp -> if (target == old) target = new
-        is CBr -> {
-            if (then == old) then = new
-            if (els == old) els = new
-        }
-        else -> {}
-    }
+/** The same terminator, with one of its targets renamed. */
+fun Instr.renameTarget(old: String, new: String): Instr = when (this) {
+    is Jmp -> if (target == old) copy(target = new) else this
+    is CBr -> copy(then = if (then == old) new else then, els = if (els == old) new else els)
+    else -> this
 }
 
 fun Func.recomputePreds() {
@@ -295,7 +318,7 @@ fun Func.dropUnreachable() {
     blocks.keys.retainAll(live)
     order.retainAll(live)
     for (b in walk()) {
-        for (phi in b.phis) phi.args.keys.retainAll(live)
+        b.phis.replaceAll { phi -> phi.copy(args = phi.args.filterKeys { it in live }) }
     }
     recomputePreds()
 }
@@ -315,9 +338,9 @@ fun Func.rpo(): List<String> {
 
 // -- printing -----------------------------------------------------------------
 
-fun Func.nameOf(r: Reg): String = colours[r]?.let { "%$r:$it" } ?: "%$r"
+fun Allocation.nameOf(r: Reg): String = colours[r]?.let { "%$r:$it" } ?: "%$r"
 
-val Func.naming: Name get() = { r -> nameOf(r) }
+val Allocation.naming: Name get() = { r -> nameOf(r) }
 
 fun Instr.show(name: Name): String {
     fun joined(rs: List<Reg>) = rs.joinToString(", ", transform = name)
@@ -341,8 +364,12 @@ fun Instr.show(name: Name): String {
     }
 }
 
-fun Func.show(): String = buildString {
-    appendLine("fun $label(${params.joinToString(", ") { nameOf(it) }})  ; depth $depth, $nslots slots")
+fun Func.show(alloc: Allocation = Allocation()): String = buildString {
+    val naming = alloc.naming
+    appendLine(
+        "fun $label(${params.joinToString(", ") { alloc.nameOf(it) }})" +
+            "  ; depth $depth, $nslots slots",
+    )
     for (b in walk()) {
         append(b.label).append(":")
         if (b.preds.isNotEmpty()) append("  ; preds: ${b.preds.joinToString(", ")}")
@@ -352,8 +379,8 @@ fun Func.show(): String = buildString {
     }
 }.trimEnd('\n')
 
-fun Module.show(): String {
-    val parts = funcs.map { it.show() } +
+fun Module.show(allocs: Map<String, Allocation> = emptyMap()): String {
+    val parts = funcs.map { it.show(allocs[it.label] ?: Allocation()) } +
         if (strings.isEmpty()) emptyList()
         else listOf(strings.entries.joinToString("\n") { "${it.key}: \"${it.value}\"" })
     return parts.joinToString("\n\n") + "\n"

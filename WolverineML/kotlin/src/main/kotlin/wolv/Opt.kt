@@ -50,10 +50,8 @@ fun rewrite(func: Func, mapping: Map<Reg, Reg>) {
     }
 
     for (block in func.walk()) {
-        for (phi in block.phis) {
-            phi.args = phi.args.mapValuesTo(LinkedHashMap()) { resolve(it.value) }
-        }
-        for (instr in block.instrs) instr.rewriteUses(::resolve)
+        block.phis.replaceAll { phi -> phi.copy(args = phi.args.mapValues { resolve(it.value) }) }
+        block.instrs.replaceAll { it.mapUses(::resolve) }
     }
 }
 
@@ -155,17 +153,16 @@ fun simplifyPhis(func: Func): Boolean {
     val mapping = mutableMapOf<Reg, Reg>()
     var changed = false
     for (block in func.walk()) {
-        val keep = mutableListOf<Phi>()
-        for (phi in block.phis) {
-            val others = phi.args.values.filter { it != phi.dst }.toSet()
-            if (others.size == 1) {
-                mapping[phi.dst] = others.first()
-                changed = true
-            } else {
-                keep.add(phi)
+        // A phi that names only itself and one other value is that other value.
+        block.phis = block.phis.filterNotTo(mutableListOf()) { phi ->
+            val others = phi.args.values.filterTo(mutableSetOf()) { it != phi.dst }
+            (others.size == 1).also { only ->
+                if (only) {
+                    mapping[phi.dst] = others.first()
+                    changed = true
+                }
             }
         }
-        block.phis = keep
     }
     if (changed) rewrite(func, mapping)
     return changed
@@ -202,16 +199,11 @@ fun deadCode(func: Func): Boolean {
                 block.phis = phis
                 roundChanged = true
             }
-            val kept = mutableListOf<Instr>()
-            for (instr in block.instrs) {
-                val d = instr.def
-                if (d != null && d !in used && !instr.hasEffect) {
-                    roundChanged = true
-                    continue
-                }
-                kept.add(instr)
+            block.instrs = block.instrs.filterNotTo(mutableListOf()) { instr ->
+                val dead = instr.def.let { it != null && it !in used } && !instr.hasEffect
+                if (dead) roundChanged = true
+                dead
             }
-            block.instrs = kept
         }
         if (!roundChanged) return changed
         changed = true

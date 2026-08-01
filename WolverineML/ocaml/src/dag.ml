@@ -30,11 +30,11 @@ type node = {
   index : int;
   instr : instr;
   operands : int list;
-  mutable users : int;
+  users : int;
   (* The only node that reads it, when there is one; else [no_node]. *)
-  mutable reader : int;
+  reader : int;
   (* Read after the block ends, or by a phi in a successor. *)
-  mutable escapes : bool;
+  escapes : bool;
 }
 
 type t = { nodes : node array }
@@ -62,41 +62,54 @@ let constant d index =
   | Some { instr = Const c; _ } -> Some c.value
   | _ -> None
 
-(* Read a block into a graph.  [live_out] includes what the phis will read. *)
+(* Read a block into a graph.  [live_out] includes what the phis will read.
+
+   A node's facts are settled while the graph is built and never change after, so
+   they are fields of a value and not something to be filled in later: the
+   operands first, because they are what tells the rest apart, then who reads
+   each node, then what leaves the block. *)
 let build b live_out =
-  let all = instrs b in
+  let all = Array.of_list (instrs b) in
+  let count = Array.length all in
+
+  (* Which node made each value, as far as we have read.  The loop is a [for] and
+     not a map because the answer depends on how far it has got. *)
   let by_value = Hashtbl.create 32 in
-  let nodes =
-    List.mapi
-      (fun at instr ->
-        let operands =
-          List.map
-            (fun r -> match Hashtbl.find_opt by_value r with Some i -> i | None -> no_node)
-            (uses instr)
-        in
-        let d = defs instr in
-        if d <> no_reg then Hashtbl.replace by_value d at;
-        { index = at; instr; operands; users = 0; reader = no_node; escapes = false })
-      all
-  in
-  let nodes = Array.of_list nodes in
-  Array.iter
-    (fun n ->
+  let operands = Array.make count [] in
+  for at = 0 to count - 1 do
+    operands.(at) <-
+      List.map
+        (fun r -> Option.value (Hashtbl.find_opt by_value r) ~default:no_node)
+        (uses all.(at));
+    Option.iter (fun d -> Hashtbl.replace by_value d at) (defs all.(at))
+  done;
+
+  let users = Array.make count 0 in
+  let reader = Array.make count no_node in
+  Array.iteri
+    (fun at ops ->
       List.iter
         (fun operand ->
           if operand <> no_node then begin
-            let read = nodes.(operand) in
-            read.users <- read.users + 1;
-            read.reader <- (if read.users = 1 then n.index else no_node)
+            users.(operand) <- users.(operand) + 1;
+            reader.(operand) <- (if users.(operand) = 1 then at else no_node)
           end)
-        n.operands)
-    nodes;
-  Array.iter
-    (fun n ->
-      let v = defs n.instr in
-      if v <> no_reg && IntSet.mem v live_out then n.escapes <- true)
-    nodes;
-  { nodes }
+        ops)
+    operands;
+
+  let escapes at =
+    match defs all.(at) with Some v -> IntSet.mem v live_out | None -> false
+  in
+  { nodes =
+      Array.init count (fun at ->
+          { index = at;
+            instr = all.(at);
+            operands = operands.(at);
+            users = users.(at);
+            reader = reader.(at);
+            escapes = escapes at
+          })
+  }
 
 let plain r = Printf.sprintf "%%%d" r
 

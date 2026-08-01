@@ -23,8 +23,7 @@ let analyse f =
       iter_instrs b (fun instr ->
           List.iter (fun r -> if not (IntSet.mem r !kill) then use := IntSet.add r !use)
             (uses instr);
-          let d = defs instr in
-          if d <> no_reg then kill := IntSet.add d !kill);
+          Option.iter (fun d -> kill := IntSet.add d !kill) (defs instr));
       upward := StrMap.add b.label !use !upward;
       killed := StrMap.add b.label !kill !killed);
 
@@ -78,8 +77,7 @@ let across_calls f live =
       let after = ref (live_out live b.label) in
       List.iter
         (fun instr ->
-          let d = defs instr in
-          if d <> no_reg then after := IntSet.remove d !after;
+          Option.iter (fun d -> after := IntSet.remove d !after) (defs instr);
           (match instr with Call _ -> out := IntSet.union !out !after | _ -> ());
           after := IntSet.union !after (of_list (uses instr)))
         (List.rev (instrs b)))
@@ -95,8 +93,7 @@ let pressure f live =
       most := max !most (IntSet.cardinal !after);
       List.iter
         (fun instr ->
-          let d = defs instr in
-          if d <> no_reg then after := IntSet.remove d !after;
+          Option.iter (fun d -> after := IntSet.remove d !after) (defs instr);
           after := IntSet.union !after (of_list (uses instr));
           most := max !most (IntSet.cardinal !after))
         (List.rev (instrs b));

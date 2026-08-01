@@ -8,23 +8,29 @@
 
 open Ir
 
-let allocate_module m machine = List.iter (fun f -> Graph.allocate f machine) m.funcs
+(* The colouring of each function, by label.  Spilling rewrites the functions on
+   the way, which is why the module is taken and not given back. *)
+let allocate_module m machine =
+  List.fold_left
+    (fun allocs f -> StrMap.add f.flabel (Graph.allocate f machine) allocs)
+    StrMap.empty m.funcs
 
 (* Nothing else live here may hold the colour [written] was just given. *)
-let no_clash f alive written where =
-  match IntMap.find_opt written f.colours with
+let no_clash alloc alive written where =
+  match IntMap.find_opt written alloc.colours with
   | None -> ()
   | Some colour ->
       IntSet.iter
         (fun other ->
-          if other <> written && IntMap.find_opt other f.colours = Some colour then
+          if other <> written && IntMap.find_opt other alloc.colours = Some colour then
             failwith
               (Printf.sprintf "x%d holds %%%d and %%%d at once in %s" colour written other
                  where))
         alive
 
-let coloured f r =
-  if not (IntMap.mem r f.colours) then failwith (Printf.sprintf "%%%d has no colour" r)
+let coloured alloc r =
+  if not (IntMap.mem r alloc.colours) then
+    failwith (Printf.sprintf "%%%d has no colour" r)
 
 (* No two values that hold different things at once may share a colour.
 
@@ -38,7 +44,7 @@ let coloured f r =
 
    Nothing that interferes escapes this, because the later of the two
    definitions that put the values there happens while the other is live. *)
-let verify f =
+let verify alloc f =
   let live = Liveness.analyse f in
   List.iter
     (fun b ->
@@ -46,28 +52,28 @@ let verify f =
       List.iter
         (fun instr ->
           (match instr with Move m -> alive := IntSet.remove m.src !alive | _ -> ());
-          List.iter (coloured f) (uses instr);
-          let d = defs instr in
-          if d <> no_reg then begin
-            coloured f d;
-            alive := IntSet.add d !alive;
-            no_clash f !alive d b.label;
-            alive := IntSet.remove d !alive
-          end;
+          List.iter (coloured alloc) (uses instr);
+          (match defs instr with
+          | Some d ->
+              coloured alloc d;
+              alive := IntSet.add d !alive;
+              no_clash alloc !alive d b.label;
+              alive := IntSet.remove d !alive
+          | None -> ());
           alive := IntSet.union !alive (Liveness.of_list (uses instr)))
         (List.rev (instrs b));
 
       let entering = ref (Liveness.live_in live b.label) in
       List.iter
         (fun phi ->
-          coloured f phi.phi_dst;
+          coloured alloc phi.phi_dst;
           entering := IntSet.add phi.phi_dst !entering;
-          no_clash f !entering phi.phi_dst b.label)
+          no_clash alloc !entering phi.phi_dst b.label)
         b.phis;
       if b.label = f.entry then
         Dynarray.iter
           (fun p ->
             entering := IntSet.add p !entering;
-            no_clash f !entering p b.label)
+            no_clash alloc !entering p b.label)
           f.params)
     (walk f)

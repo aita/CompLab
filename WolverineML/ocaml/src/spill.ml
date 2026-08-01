@@ -62,8 +62,7 @@ let costs f =
       List.iter
         (fun instr ->
           List.iter (fun r -> add r scale) (uses instr);
-          let d = defs instr in
-          if d <> no_reg then add d scale)
+          Option.iter (fun d -> add d scale) (defs instr))
         (instrs b))
     (walk f);
   !weight
@@ -73,10 +72,11 @@ let insert_before_last b instr =
   let at = List.length all - 1 in
   set_instrs b (CCList.take at all @ (instr :: CCList.drop at all))
 
-(* Give [victim] a frame slot, and return the reloads that replaced it. *)
+(* Give [victim] a frame slot, and answer with the slot and the reloads that
+   replaced it.  Where it went is the caller's to remember, because it is part of
+   the allocation and not of the program. *)
 let spill f victim =
   let slot = new_slot f in
-  f.spill_slots <- IntMap.add victim slot f.spill_slots;
   let is_param = Dynarray.exists (fun p -> p = victim) f.params in
   let reloads = ref IntSet.empty in
 
@@ -94,16 +94,18 @@ let spill f victim =
               match instr with Store_slot s -> s.slot = slot | _ -> false
             in
             let reads = List.mem victim (uses instr) in
-            let before =
+            let before, instr =
               if reads && not spill_store then begin
                 let fresh = new_reg f in
                 reloads := IntSet.add fresh !reloads;
-                map_uses (fun r -> if r = victim then fresh else r) instr;
-                [ Load_slot { dst = fresh; slot } ]
+                ( [ Load_slot { dst = fresh; slot } ],
+                  map_uses (fun r -> if r = victim then fresh else r) instr )
               end
-              else []
+              else ([], instr)
             in
-            let after = if defs instr = victim then [ Store_slot { slot; src = victim } ] else [] in
+            let after =
+              if defs instr = Some victim then [ Store_slot { slot; src = victim } ] else []
+            in
             before @ [ instr ] @ after)
           (instrs b)
       in
@@ -112,18 +114,20 @@ let spill f victim =
 
   List.iter
     (fun b ->
-      List.iter
-        (fun phi ->
-          List.iter
-            (fun a ->
-              if a.arg = victim then begin
-                let source = block f a.pred in
-                let fresh = new_reg f in
-                reloads := IntSet.add fresh !reloads;
-                insert_before_last source (Load_slot { dst = fresh; slot });
-                a.arg <- fresh
-              end)
-            phi.args)
-        b.phis)
+      map_phis b (fun phi ->
+          { phi with
+            args =
+              Util.map_in_order
+                (fun a ->
+                  if a.arg <> victim then a
+                  else begin
+                    let source = block f a.pred in
+                    let fresh = new_reg f in
+                    reloads := IntSet.add fresh !reloads;
+                    insert_before_last source (Load_slot { dst = fresh; slot });
+                    { a with arg = fresh }
+                  end)
+                phi.args
+          }))
     (walk f);
-  !reloads
+  (slot, !reloads)

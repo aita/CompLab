@@ -56,6 +56,9 @@ val out = mutableListOf<Instr>()
 val done = mutableSetOf<Int>()
 val absorbed = mutableSetOf<Int>()
 
+/** Set when a comparison was fused into the branch below it. */
+var fused = ""
+
 fun run(): MutableList<Instr> {
     plan()
     for ((i, node) in graph.nodes.withIndex()) {
@@ -173,8 +176,8 @@ fun tile(node: Dag.Node): Reg {
             // None of them folds anything, so every operand that was left to
             // be folded has to be computed here instead.
             for (index in node.operands) force(index)
-            out.add(instr)
-            return instr.def ?: 0
+            out.add(if (instr is CBr && fused.isNotEmpty()) instr.copy(code = fused) else instr)
+            return instr.def ?: Reg(0)
         }
     }
 }
@@ -344,7 +347,9 @@ fun fuseComparison(index: Int): Boolean {
     if (terminator !is CBr || terminator.cond != instr.dst) return false
     if (node.users != 1 || node.escapes) return false
     compare(node, instr.op, instr.lhs, instr.rhs)
-    terminator.code = CONDITION.getValue(instr.op)
+    // The branch is a value, and it is emitted later by `tile`; the code the
+    // comparison set is remembered until then.
+    fused = CONDITION.getValue(instr.op)
     return true
 }
 
@@ -353,7 +358,7 @@ fun fuseComparison(index: Int): Boolean {
 /** Compute a deferred operand for a reader that has no tile to take it. */
 fun force(index: Int?) {
     val node = graph.of(index) ?: return
-    at(index, node.value ?: 0)
+    at(index, node.value ?: Reg(0))
 }
 
 fun constant(index: Int?): Long? = graph.constant(index)

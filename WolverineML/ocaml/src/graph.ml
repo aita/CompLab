@@ -103,8 +103,7 @@ let build c =
   iter_blocks c.fn (fun b ->
       iter_instrs b (fun instr ->
           List.iter (node c) (uses instr);
-          let d = defs instr in
-          if d <> no_reg then node c d));
+          Option.iter (node c) (defs instr)));
   Dynarray.iter (node c) c.fn.params;
 
   let all_moves = Dynarray.create () in
@@ -123,19 +122,20 @@ let build c =
               c.worklist_moves <- IntSet.add index c.worklist_moves
           | _ -> ());
           let defined = defs instr in
-          if defined <> no_reg then begin
-            alive := IntSet.add defined !alive;
-            IntSet.iter (fun other -> add_edge c defined other) !alive
-          end;
+          Option.iter
+            (fun d ->
+              alive := IntSet.add d !alive;
+              IntSet.iter (fun other -> add_edge c d other) !alive)
+            defined;
           (match instr with
           | Call _ ->
               IntSet.iter
                 (fun r ->
-                  if r <> defined then
+                  if Some r <> defined then
                     c.forbidden <- IntMap.add r (IntSet.union (forbidden c r) caller) c.forbidden)
                 !alive
           | _ -> ());
-          if defined <> no_reg then alive := IntSet.remove defined !alive;
+          Option.iter (fun d -> alive := IntSet.remove d !alive) defined;
           alive := IntSet.union !alive (Liveness.of_list (uses instr)))
         (List.rev (instrs b));
       if b.label = c.fn.entry then entry_edges c !alive)
@@ -360,31 +360,33 @@ let new_colouring f machine protected =
     coalesced = IntSet.empty; alias = IntMap.empty; colour = IntMap.empty;
   }
 
-(* Colour [f], rewriting and starting again for as long as it spills. *)
-let allocate f machine =
-  let protected = ref IntSet.empty in
-  let going = ref true in
-  while !going do
-    recompute_preds f;
-    let c = new_colouring f machine !protected in
-    let spilled = run c in
-    if IntSet.is_empty spilled then begin
-      f.colours <- c.colour;
-      f.saved <-
-        IntSet.elements
-          (IntMap.fold
-             (fun _ colour acc ->
-               if Registers.is_callee_saved colour then IntSet.add colour acc else acc)
-             c.colour IntSet.empty);
-      going := false
-    end
-    else
-      IntSet.iter
-        (fun victim ->
-          if IntSet.mem victim !protected then
-            raise
-              (Spill.Out_of_registers
-                 (Printf.sprintf "`%s` needs more registers at once than the machine has" f.fname));
-          protected := IntSet.union !protected (Spill.spill f victim))
-        spilled
-  done
+(* Colour [f], rewriting and starting again for as long as it spills.
+
+   [f] is rewritten — spilling puts loads and stores into it — but the colouring
+   comes back as a value, because it is not part of the program. *)
+let rec allocate ?(protected = IntSet.empty) ?(spilled_to = IntMap.empty) f machine =
+  recompute_preds f;
+  let c = new_colouring f machine protected in
+  match run c with
+  | spilled when IntSet.is_empty spilled ->
+      let saved =
+        IntMap.fold
+          (fun _ colour acc ->
+            if Registers.is_callee_saved colour then IntSet.add colour acc else acc)
+          c.colour IntSet.empty
+      in
+      { colours = c.colour; saved = IntSet.elements saved; spilled = spilled_to }
+  | spilled ->
+      let protected, spilled_to =
+        IntSet.fold
+          (fun victim (protected, spilled_to) ->
+            if IntSet.mem victim protected then
+              raise
+                (Spill.Out_of_registers
+                   (Printf.sprintf "`%s` needs more registers at once than the machine has"
+                      f.fname));
+            let slot, reloads = Spill.spill f victim in
+            (IntSet.union protected reloads, IntMap.add victim slot spilled_to))
+          spilled (protected, spilled_to)
+      in
+      allocate ~protected ~spilled_to f machine

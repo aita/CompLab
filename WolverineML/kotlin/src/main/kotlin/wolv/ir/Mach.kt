@@ -78,10 +78,10 @@ val OPPOSITE: Map<String, String> = mapOf(
 /** The ones the emitter writes itself, because they are not one instruction. */
 val EXPANDED: Set<String> = setOf("const", "adr", "ldr", "str")
 
-class Machine(
+data class Machine(
     val form: String,
-    var dst: Reg?,
-    var srcs: List<Reg>,
+    val dst: Reg?,
+    val srcs: List<Reg>,
     val imm: Long = 0,
     val symbol: String = "",
     val effect: Boolean = false,

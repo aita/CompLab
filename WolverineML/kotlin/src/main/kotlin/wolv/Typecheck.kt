@@ -126,13 +126,10 @@ private class Checker {
     }
 
     fun typeDecl(decl: TypeDecl) {
-        val records = mutableListOf<Pair<RecordT, TyRecord>>()
-        for (bind in decl.binds) {
-            if (bind.ty is TyRecord) {
-                val rec = RecordT(bind.name)
-                bindType(bind.name, rec)
-                records.add(rec to bind.ty)
-            }
+        // Records are bound before any field is resolved, so a group of `type`s
+        // may name each other and itself.
+        val records = decl.binds.mapNotNull { bind ->
+            (bind.ty as? TyRecord)?.let { RecordT(bind.name).also { r -> bindType(bind.name, r) } to it }
         }
         for (bind in decl.binds) {
             if (bind.ty !is TyRecord) bindType(bind.name, resolve(bind.ty))
@@ -174,15 +171,12 @@ private class Checker {
 
     fun funDecl(decl: FunDecl) {
         for (bind in decl.binds) {
-            val params = mutableListOf<VarSym>()
             val seen = mutableSetOf<String>()
-            for (p in bind.params) {
+            val params = bind.params.map { p ->
                 if (!seen.add(p.name)) {
                     throw TypeCheckError(p.span, "duplicate parameter `${p.name}`")
                 }
-                val sym = VarSym(p.name, resolve(p.ty), false, depth + 1)
-                p.sym = sym
-                params.add(sym)
+                VarSym(p.name, resolve(p.ty), false, depth + 1).also { p.sym = it }
             }
             val result = bind.result?.let { resolve(it) } ?: UnitT
             bind.sym = FunSym(

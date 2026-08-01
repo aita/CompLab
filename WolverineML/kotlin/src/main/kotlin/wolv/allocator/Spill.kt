@@ -70,10 +70,13 @@ fun costs(func: Func): Map<Reg, Double> {
     return weight
 }
 
-/** Give `victim` a frame slot, and return the reloads that replaced it. */
-fun spill(func: Func, victim: Reg): Set<Reg> {
+/**
+ * Give `victim` a frame slot, and answer with the slot and the reloads that
+ * replaced it.  Where it went is the caller's to remember, because it is part of
+ * the allocation and not of the program.
+ */
+fun spill(func: Func, victim: Reg): Pair<Int, Set<Reg>> {
     val slot = func.newSlot()
-    func.spillSlots[victim] = slot
     val isParam = victim in func.params
     val reloads = mutableSetOf<Reg>()
 
@@ -88,29 +91,35 @@ fun spill(func: Func, victim: Reg): Set<Reg> {
         val rebuilt = mutableListOf<Instr>()
         for (instr in block.instrs) {
             val spillStore = instr is StoreSlot && instr.slot == slot
+            var here = instr
             if (victim in instr.uses && !spillStore) {
                 val fresh = func.newReg()
                 reloads.add(fresh)
                 rebuilt.add(LoadSlot(fresh, slot))
-                instr.rewriteUses { r -> if (r == victim) fresh else r }
+                here = instr.mapUses { r -> if (r == victim) fresh else r }
             }
-            rebuilt.add(instr)
+            rebuilt.add(here)
             if (instr.def == victim) rebuilt.add(StoreSlot(slot, victim))
         }
         block.instrs = rebuilt
     }
 
     for (block in func.walk()) {
-        for (phi in block.phis) {
-            for ((pred, arg) in phi.args.entries.toList()) {
-                if (arg != victim) continue
-                val source = func.blocks.getValue(pred)
-                val fresh = func.newReg()
-                reloads.add(fresh)
-                source.instrs.add(source.instrs.size - 1, LoadSlot(fresh, slot))
-                phi.args[pred] = fresh
-            }
+        block.phis.replaceAll { phi ->
+            phi.copy(
+                args = phi.args.mapValues { (pred, arg) ->
+                    if (arg != victim) {
+                        arg
+                    } else {
+                        val source = func.blocks.getValue(pred)
+                        val fresh = func.newReg()
+                        reloads.add(fresh)
+                        source.instrs.add(source.instrs.size - 1, LoadSlot(fresh, slot))
+                        fresh
+                    }
+                },
+            )
         }
     }
-    return reloads
+    return slot to reloads
 }

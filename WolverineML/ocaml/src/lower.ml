@@ -89,7 +89,7 @@ let compare_ l op lhs rhs =
 
 let call_runtime l name args =
   let r = reg l in
-  put l (Call { dst = r; callee = name; args });
+  put l (Call { dst = Some r; callee = name; args });
   r
 
 (* -- run-time checks ------------------------------------------------------- *)
@@ -100,7 +100,7 @@ let check_not_nil l base =
     let ok = fresh l "ok" in
     branch l (compare_ l "=" base (constant l 0L)) bad ok;
     l.cur <- bad;
-    put l (Call { dst = no_reg; callee = "wol_nil_error"; args = [] });
+    put l (Call { dst = None; callee = "wol_nil_error"; args = [] });
     jump l ok;
     l.cur <- ok
   end
@@ -113,7 +113,7 @@ let check_bounds l base idx =
     let ok = fresh l "ok" in
     branch l (compare_ l "u<" idx length) ok bad;
     l.cur <- bad;
-    put l (Call { dst = no_reg; callee = "wol_bounds_error"; args = [ idx; length ] });
+    put l (Call { dst = None; callee = "wol_bounds_error"; args = [ idx; length ] });
     jump l ok;
     l.cur <- ok
   end
@@ -124,7 +124,7 @@ let check_nonzero l rhs =
     let ok = fresh l "ok" in
     branch l (compare_ l "=" rhs (constant l 0L)) bad ok;
     l.cur <- bad;
-    put l (Call { dst = no_reg; callee = "wol_div_error"; args = [] });
+    put l (Call { dst = None; callee = "wol_div_error"; args = [] });
     jump l ok;
     l.cur <- ok
   end
@@ -184,57 +184,58 @@ let bind l (sym : Types.var_sym) value =
 
 (* -- expressions ----------------------------------------------------------- *)
 
+(* [exp] answers with the register the value came out in, and with [None] for the
+   expressions that have no value: a unit literal, an assignment, a loop, a
+   [break].  [value] is the same question asked where a value is required. *)
 let rec exp l (e : Ast.exp) =
   match e.node with
-  | Ast.Int_lit v -> constant l v
-  | Ast.Bool_lit b -> constant l (if b then 1L else 0L)
-  | Ast.Nil_lit -> constant l 0L
-  | Ast.Unit_lit -> no_reg
+  | Ast.Int_lit v -> Some (constant l v)
+  | Ast.Bool_lit b -> Some (constant l (if b then 1L else 0L))
+  | Ast.Nil_lit -> Some (constant l 0L)
+  | Ast.Unit_lit -> None
   | Ast.Str_lit text ->
       let r = reg l in
       put l (Str_const { dst = r; str_symbol = literal l.up text });
-      r
-  | Ast.Var v -> read_var l (Option.get v.var_sym)
+      Some r
+  | Ast.Var v -> Some (read_var l (Option.get v.var_sym))
   | Ast.Call c -> call l c
-  | Ast.Record_lit r -> record l e r
+  | Ast.Record_lit r -> Some (record l e r)
   | Ast.Index (array, index) ->
       let addr = element_address l array index in
       let r = reg l in
       put l (Load { dst = r; base = addr; offset = word });
-      r
+      Some r
   | Ast.Field f ->
       let base = value l f.record in
       check_not_nil l base;
       let r = reg l in
       put l (Load { dst = r; base; offset = word * f.offset });
-      r
+      Some r
   | Ast.Neg operand ->
       let zero = constant l 0L in
-      binop l "-" zero (value l operand)
-  | Ast.Bin (op, lhs, rhs) -> bin l op lhs rhs
-  | Ast.Logic (op, lhs, rhs) -> logic l op lhs rhs
+      Some (binop l "-" zero (value l operand))
+  | Ast.Bin (op, lhs, rhs) -> Some (bin l op lhs rhs)
+  | Ast.Logic (op, lhs, rhs) -> Some (logic l op lhs rhs)
   | Ast.Assign (target, v) ->
       assign l target v;
-      no_reg
+      None
   | Ast.If (cond, then_, else_) -> if_exp l e cond then_ else_
   | Ast.While (cond, body) ->
       while_exp l cond body;
-      no_reg
+      None
   | Ast.For f ->
       for_exp l f;
-      no_reg
+      None
   | Ast.Break ->
       terminate l (Jmp { target = List.hd l.breaks });
-      no_reg
-  | Ast.Seq items -> List.fold_left (fun _ item -> exp l item) no_reg items
+      None
+  | Ast.Seq items -> List.fold_left (fun _ item -> exp l item) None items
   | Ast.Let (ds, body) ->
       decls l ds;
       exp l body
 
 and value l e =
-  let r = exp l e in
-  if r = no_reg then failwith "expected a value";
-  r
+  match exp l e with Some r -> r | None -> failwith "expected a value"
 
 and bin l op lhs rhs =
   let a = value l lhs in
@@ -282,17 +283,17 @@ and call l (c : Ast.call) =
          register numbers are the order the instructions came out in. *)
       let operand = value l (List.hd c.args) in
       let one = constant l 1L in
-      binop l "xor" operand one
+      Some (binop l "xor" operand one)
   | Some "array" ->
       let n = value l (List.nth c.args 0) in
       let init = value l (List.nth c.args 1) in
-      call_runtime l "wol_array" [ n; init ]
+      Some (call_runtime l "wol_array" [ n; init ])
   | Some "length" ->
       let arr = value l (List.hd c.args) in
       check_not_nil l arr;
       let r = reg l in
       put l (Load { dst = r; base = arr; offset = 0 });
-      r
+      Some r
   | _ ->
       (* The arguments are lowered first, and only then the static link, which is
          the order the register numbers come out in. *)
@@ -301,10 +302,10 @@ and call l (c : Ast.call) =
         if sym.builtin = None then frame_at l (sym.fun_depth - 1) :: args else args
       in
       if sym.result = Types.Unit_t then begin
-        put l (Call { dst = no_reg; callee = sym.label; args });
-        no_reg
+        put l (Call { dst = None; callee = sym.label; args });
+        None
       end
-      else call_runtime l sym.label args
+      else Some (call_runtime l sym.label args)
 
 and record l (e : Ast.exp) (r : Ast.record_lit) =
   let rec_ = match Option.get e.ty with Types.Record_t r -> r | _ -> assert false in
@@ -341,24 +342,27 @@ and assign l (target : Ast.exp) v =
       put l (Store { base; offset = word * f.offset; src = value l v })
   | _ -> failwith "assignment to something that is not a place"
 
+(* An [if] with a value copies each branch's answer into the one register the
+   whole expression came out in.  Either half may be absent: a unit [if] has no
+   register to copy into, and a branch that ends in a [break] leaves no value. *)
+and copy_into l result taken =
+  match (result, taken) with
+  | Some dst, Some src -> put l (Move { dst; src })
+  | _ -> ()
+
 and if_exp l (e : Ast.exp) cond then_ else_ =
-  let result = if Option.get e.ty = Types.Unit_t then no_reg else reg l in
+  let result = if Option.get e.ty = Types.Unit_t then None else Some (reg l) in
   let yes = fresh l "then" in
   let no = fresh l "else" in
   let join = fresh l "join" in
   branch l (value l cond) yes no;
 
   l.cur <- yes;
-  let taken = exp l then_ in
-  if result <> no_reg && taken <> no_reg then put l (Move { dst = result; src = taken });
+  copy_into l result (exp l then_);
   jump l join;
 
   l.cur <- no;
-  (match else_ with
-  | Some els ->
-      let taken = exp l els in
-      if result <> no_reg && taken <> no_reg then put l (Move { dst = result; src = taken })
-  | None -> ());
+  (match else_ with Some els -> copy_into l result (exp l els) | None -> ());
   jump l join;
 
   l.cur <- join;
@@ -414,9 +418,9 @@ and decl l = function
   | Ast.Type_decl _ -> ()
   | Ast.Val_decl d -> (
       let v = exp l d.init in
-      match d.decl_sym with
-      | None -> ()
-      | Some sym -> if sym.var_ty <> Types.Unit_t then bind l sym v)
+      match (d.decl_sym, v) with
+      | Some sym, Some r when sym.var_ty <> Types.Unit_t -> bind l sym r
+      | _ -> ())
   | Ast.Fun_decl binds ->
       l.has_children <- true;
       List.iter (fun b -> function_ l.up b) binds
@@ -436,18 +440,14 @@ and drop_unused_static_link l =
   if slot >= 0 && (not l.has_children) && not reads then begin
     List.iter
       (fun b ->
+        let below at = if at > slot then at - 1 else at in
         let kept =
-          List.filter
-            (fun instr ->
-              match instr with
-              | Store_slot s when s.slot = slot -> false
-              | Store_slot s ->
-                  if s.slot > slot then s.slot <- s.slot - 1;
-                  true
-              | Load_slot ls ->
-                  if ls.slot > slot then ls.slot <- ls.slot - 1;
-                  true
-              | _ -> true)
+          List.filter_map
+            (function
+              | Store_slot s when s.slot = slot -> None
+              | Store_slot s -> Some (Store_slot { s with slot = below s.slot })
+              | Load_slot l -> Some (Load_slot { l with slot = below l.slot })
+              | i -> Some i)
             (instrs b)
         in
         set_instrs b kept)
@@ -487,7 +487,7 @@ and function_ up (b : Ast.fun_bind) =
       end)
     sym.params;
   let v = exp l b.fun_body in
-  let v = if sym.result = Types.Unit_t then no_reg else v in
+  let v = if sym.result = Types.Unit_t then None else v in
   terminate l (Ret { value = v });
   finish l
 
@@ -498,7 +498,7 @@ let lower (prog : Ast.program) opts =
   in
   let main = new_lowerer up "wol_main" "main" 0 in
   decls main prog;
-  terminate main (Ret { value = no_reg });
+  terminate main (Ret { value = None });
   finish main;
   up.modul.funcs <- List.rev up.funcs;
   up.modul.strings <- List.rev up.strings;
