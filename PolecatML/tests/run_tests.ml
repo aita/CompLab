@@ -4,9 +4,10 @@
 
    The golden ones run every program in `programs/` and every example, and
    compare what it prints with the `.out` beside it — and then run the same
-   program again through the reference evaluator and demand the same text.  That
-   second run is the point: a golden file only says the answer has not changed,
-   but two independent implementations agreeing says the answer is right.
+   program twice more, through the evaluator over the core tree and through the
+   one over A-normal form, and demand the same text.  Those runs are the point: a
+   golden file only says the answer has not changed, but three independent
+   implementations agreeing says the answer is right.
 
    The unit ones exercise the two stacks, and hand-write machine programs that
    the compiler would never produce — a [Trap], a [Dup], a jump to nowhere, a
@@ -72,12 +73,21 @@ let golden path =
   | actual -> check_text (name ^ " (evaluator)") ~expected ~actual
   | exception Polecat.Diag.Error (_, message) ->
       check (name ^ " (evaluator): " ^ message) false);
-  let code_path = Filename.remove_extension path ^ ".code" in
-  if Sys.file_exists code_path then
-    match Polecat.Driver.emit Polecat.Driver.Code source with
-    | actual -> check_text (name ^ " (code)") ~expected:(read code_path) ~actual
-    | exception Polecat.Diag.Error (_, message) ->
-        check (name ^ " (code): " ^ message) false
+  (match Polecat.Driver.interpret_anf source with
+  | actual -> check_text (name ^ " (anf)") ~expected ~actual
+  | exception Polecat.Diag.Error (_, message) ->
+      check (name ^ " (anf): " ^ message) false);
+  let dumped stage suffix =
+    let dump_path = Filename.remove_extension path ^ suffix in
+    if Sys.file_exists dump_path then
+      match Polecat.Driver.emit stage source with
+      | actual ->
+          check_text (name ^ " (" ^ suffix ^ ")") ~expected:(read dump_path) ~actual
+      | exception Polecat.Diag.Error (_, message) ->
+          check (name ^ " (" ^ suffix ^ "): " ^ message) false
+  in
+  dumped Polecat.Driver.Code ".code";
+  dumped Polecat.Driver.Anf ".anf"
 
 (* ---------------------------------------------------------- the front end *)
 
@@ -319,6 +329,68 @@ let handwritten () =
       };
     |]
 
+(* --------------------------------------------------------- A-normal form *)
+
+let normalize source =
+  let decls = Polecat.Parser.program source in
+  ignore (Polecat.Typecheck.program decls);
+  let core, _ = Polecat.Desugar.program decls in
+  Polecat.Anf.program core
+
+let rec count_joins expr =
+  let open Polecat.Anf in
+  match expr with
+  | Ret c -> in_comp c
+  | Let (_, c, rest) -> in_comp c + count_joins rest
+  | If (_, t, f) -> count_joins t + count_joins f
+  | Letrec (group, rest) ->
+      List.fold_left (fun n (_, l) -> n + count_joins l.body) 0 group
+      + count_joins rest
+  | Join (_, _, body, rest) -> 1 + count_joins body + count_joins rest
+  | Jump _ -> 0
+
+and in_comp c =
+  let open Polecat.Anf in
+  match c with Fn l -> count_joins l.body | _ -> 0
+
+let anf () =
+  (* A branch in tail position needs no join point: both arms end the function,
+     so there is nothing after them to share. *)
+  check "a tail branch makes no join point"
+    (count_joins (normalize "fun f (n) = if n = 0 then 1 else 2\n") = 0);
+  (* A branch whose value is bound does: the rest of the program is what both
+     arms have to reach, and it is named rather than written twice. *)
+  check "a bound branch makes one join point"
+    (count_joins (normalize "val x = if true then 1 else 2\nval y = x + 1\n") = 1);
+  (* `andalso` and `not` are branches too, so this is three of them, and each
+     one binds its value: three join points where a duplicating normaliser
+     would have written the rest of the program out eight times. *)
+  check "each boolean operator is a branch"
+    (count_joins
+       (normalize "val a = true andalso false andalso true\nval b = not a\n")
+    = 3);
+  (* And the reason the join point is there at all.  Twenty bound branches in
+     sequence: a normaliser that pushed the continuation into both arms would
+     write the rest of the program out 2^20 times, and this would not finish.  *)
+  let chain =
+    let buf = Buffer.create 1024 in
+    Buffer.add_string buf "val x0 = 1\n";
+    for i = 1 to 20 do
+      Buffer.add_string buf
+        (Printf.sprintf "val x%d = if x%d > 0 then x%d + 1 else x%d - 1\n" i (i - 1)
+           (i - 1) (i - 1))
+    done;
+    Buffer.contents buf
+  in
+  let size = Polecat.Anf.size (normalize chain) in
+  check
+    (Printf.sprintf "twenty bound branches stay small (%d nodes)" size)
+    (size < 500);
+  check "and the program still runs"
+    (let text = Polecat.Driver.interpret_anf chain in
+     let last = List.nth (String.split_on_char '\n' text) 20 in
+     last = "val x20 : int = 21")
+
 (* ------------------------------------------------------------ tail calls *)
 
 let tail_calls () =
@@ -371,6 +443,8 @@ let () =
   frame_stack ();
   print_endline "hand-written machine code";
   handwritten ();
+  print_endline "A-normal form";
+  anf ();
   print_endline "tail calls";
   tail_calls ();
   Printf.printf "\n%d checks, %d failed\n" !checks !failures;

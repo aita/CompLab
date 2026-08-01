@@ -1,7 +1,7 @@
 (* The command line. *)
 
 let usage =
-  "polecat run  [--interp] [--trace] [--stats] [--no-verify] [file]\n\
+  "polecat run  [--interp] [--anf] [--trace] [--stats] [--no-verify] [file]\n\
    polecat emit -s <stage> [file]\n\
   \  stages: " ^ String.concat " " Driver.stage_names
   ^ "\n\nWith no file, the program is read from standard input."
@@ -42,6 +42,7 @@ let main argv =
         match command with
         | "run" ->
             if has "--interp" then print_string (Driver.interpret source)
+            else if has "--anf" then print_string (Driver.interpret_anf source)
             else (
               let text, stats =
                 Driver.run_stats ~trace:(has "--trace")

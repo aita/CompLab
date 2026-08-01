@@ -40,25 +40,12 @@ let int_of = function VInt n -> n | v -> die "%s is not an integer" (show v)
 let bool_of = function VBool b -> b | v -> die "%s is not a boolean" (show v)
 
 let prim op args =
-  match (op, args) with
-  | Core.Neg, [ a ] -> VInt (Int64.neg (int_of a))
-  | _, [ a; b ] -> (
-      let a = int_of a and b = int_of b in
-      let cmp f = VBool (f (Int64.compare a b) 0) in
-      match op with
-      | Core.Add -> VInt (Int64.add a b)
-      | Core.Sub -> VInt (Int64.sub a b)
-      | Core.Mul -> VInt (Int64.mul a b)
-      | Core.Div -> if b = 0L then die "division by zero" else VInt (Int64.div a b)
-      | Core.Mod -> if b = 0L then die "division by zero" else VInt (Int64.rem a b)
-      | Core.Eq -> cmp ( = )
-      | Core.Ne -> cmp ( <> )
-      | Core.Lt -> cmp ( < )
-      | Core.Le -> cmp ( <= )
-      | Core.Gt -> cmp ( > )
-      | Core.Ge -> cmp ( >= )
-      | Core.Neg -> die "neg takes one argument")
-  | _ -> die "%s got the wrong number of arguments" (Core.prim_name op)
+  match
+    try Core.apply_prim op (List.map int_of args)
+    with Core.Prim_error message -> die "%s" message
+  with
+  | Core.Prim_int n -> VInt n
+  | Core.Prim_bool b -> VBool b
 
 let bind env names values =
   List.fold_left2

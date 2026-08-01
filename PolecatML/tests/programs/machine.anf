@@ -1,0 +1,23 @@
+letrec choose.1 = fn (n.2) =>
+    let t.19 = (lt n.2 0)
+    in if t.19
+    then (neg n.2)
+    else n.2
+letrec adder.3 = fn (k.4) =>
+    fn (n.5) =>
+      (add n.5 k.4)
+letrec countdown.6 = fn (n.7, acc.8) =>
+    let t.16 = (eq n.7 0)
+    in if t.16
+    then acc.8
+    else let t.17 = (sub n.7 1)
+      let t.18 = (add acc.8 1)
+      in countdown.6 (t.17, t.18)
+let t.15 = (neg 3)
+let t.13 = choose.1 (t.15)
+let t.14 = choose.1 (3)
+let chosen.9 = (t.13, t.14)
+let t.12 = adder.3 (10)
+let added.10 = t.12 (5)
+let counted.11 = countdown.6 (4, 0)
+in (choose.1, adder.3, countdown.6, chosen.9, added.10, counted.11)

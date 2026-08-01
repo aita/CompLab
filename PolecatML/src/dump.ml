@@ -92,6 +92,79 @@ and core_lambda level (l : Core.lambda) =
 
 let core_program e = core 0 e ^ "\n"
 
+(* ---------------------------------------------------------------- anf *)
+
+let anf_atom (a : Anf.atom) =
+  match a with
+  | Anf.Int n -> Int64.to_string n
+  | Anf.Bool b -> string_of_bool b
+  | Anf.Unit -> "()"
+  | Anf.Var n -> Core.show_name n
+
+let rec anf level (e : Anf.expr) =
+  let pad = indent level in
+  match e with
+  | Anf.Ret c -> anf_computation level c
+  | Anf.If (a, t, f) ->
+      Printf.sprintf "if %s\n%sthen %s\n%selse %s" (anf_atom a) pad
+        (anf (level + 1) t) pad (anf (level + 1) f)
+  | Anf.Jump (j, a) ->
+      Printf.sprintf "jump %s (%s)" (Core.show_name j) (anf_atom a)
+  (* Bindings, join points and groups print as a block, like the core dump. *)
+  | Anf.Let _ | Anf.Letrec _ | Anf.Join _ ->
+      let buf = Buffer.create 128 in
+      let rec block e =
+        match e with
+        | Anf.Let (n, c, rest) ->
+            Buffer.add_string buf
+              (Printf.sprintf "let %s = %s\n%s" (Core.show_name n)
+                 (anf_computation (level + 1) c) pad);
+            block rest
+        | Anf.Letrec (group, rest) ->
+            List.iteri
+              (fun i ((n : Core.name), l) ->
+                Buffer.add_string buf
+                  (Printf.sprintf "%s %s = %s\n%s"
+                     (if i = 0 then "letrec" else "and")
+                     (Core.show_name n)
+                     (anf_lambda (level + 1) l)
+                     pad))
+              group;
+            block rest
+        | Anf.Join (j, parameter, body, rest) ->
+            Buffer.add_string buf
+              (Printf.sprintf "join %s (%s) =\n%s%s\n%s" (Core.show_name j)
+                 (Core.show_name parameter)
+                 (indent (level + 1))
+                 (anf (level + 1) body)
+                 pad);
+            block rest
+        | tail -> Buffer.add_string buf ("in " ^ anf level tail)
+      in
+      block e;
+      Buffer.contents buf
+
+and anf_computation level (c : Anf.comp) =
+  match c with
+  | Anf.Atom a -> anf_atom a
+  | Anf.Prim (op, args) ->
+      Printf.sprintf "(%s %s)" (Core.prim_name op)
+        (String.concat " " (List.map anf_atom args))
+  | Anf.Tuple args -> "(" ^ String.concat ", " (List.map anf_atom args) ^ ")"
+  | Anf.Proj (i, a) -> Printf.sprintf "#%d %s" i (anf_atom a)
+  | Anf.Fn l -> anf_lambda level l
+  | Anf.App (callee, args) ->
+      Printf.sprintf "%s (%s)" (anf_atom callee)
+        (String.concat ", " (List.map anf_atom args))
+
+and anf_lambda level (l : Anf.lambda) =
+  Printf.sprintf "fn (%s) =>\n%s%s"
+    (String.concat ", " (List.map Core.show_name l.Anf.params))
+    (indent (level + 1))
+    (anf (level + 1) l.Anf.body)
+
+let anf_program e = anf 0 e ^ "\n"
+
 (* ----------------------------------------------------------- resolved *)
 
 (* Slots print as `l0`, captures as `c0` and capture-free functions as `g0`, so

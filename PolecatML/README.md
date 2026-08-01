@@ -30,18 +30,19 @@ val counted : int = 1000000
 
 ```sh
 dune build
-dune test                                    # 85 checks: goldens, units, and the two back ends against each other
+dune test                                    # 104 checks: goldens, units, and the three back ends against each other
 dune exec bin/main.exe -- run examples/tour.pol
 dune exec bin/main.exe -- run --stats examples/collatz.pol
 dune exec bin/main.exe -- emit -s code tests/programs/machine.pol
 echo 'val x = 6 * 7' | dune exec bin/main.exe -- run
 ```
 
-`run` takes `--interp` to use the reference evaluator instead of the machine,
-`--trace` to print every instruction as it is executed, `--stats` to say how many
-instructions ran and how deep the frame stack got, and `--no-verify` to skip the
-verifier.  `emit -s <stage>` prints one stage: `tokens`, `types`, `core`,
-`resolved` or `code`.
+`run` takes `--interp` to use the evaluator over the core tree instead of the
+machine, `--anf` to use the one over A-normal form, `--trace` to print every
+instruction as it is executed, `--stats` to say how many instructions ran and how
+deep the frame stack got, and `--no-verify` to skip the verifier.
+`emit -s <stage>` prints one stage: `tokens`, `types`, `core`, `anf`, `resolved`
+or `code`.
 
 ## The pipeline
 
@@ -64,7 +65,10 @@ value
 
 There is no A-normal form on the way in, and no basic-block graph: the code
 generator walks the resolved tree once and the operand stack does what an
-intermediate name would have done.
+intermediate name would have done.  There *is* an A-normal form off to the side,
+with an interpreter of its own — `emit -s anf`, `run --anf` — because naming
+those intermediates is the other way of saying what the operand stack says, and
+having both makes the comparison concrete.
 
 ## The machine
 
@@ -166,27 +170,91 @@ for the number rather than counting as it emits.  `dune test` hand-writes
 programs the compiler would never produce — a jump to nowhere, a join whose paths
 disagree, a static call of a function that captures — and checks each is refused.
 
-**There are two back ends, and the tests demand they agree.**  Besides the
-machine there is a tree-walking evaluator over the core tree, small enough to
-read in one sitting.  Every golden test runs both and requires the same text,
-character for character: a golden file on its own only says the answer has not
-changed, but two implementations agreeing says the answer is right.
+**There are three back ends, and the tests demand they agree.**  Besides the
+machine there is a tree-walking evaluator over the core tree, and another over
+A-normal form, each small enough to read in one sitting.  Every golden test runs
+all three and requires the same text, character for character: a golden file on
+its own only says the answer has not changed, but three implementations agreeing
+says the answer is right.
+
+## A-normal form, and the join point
+
+Two rules make a program A-normal: every operand is an atom — a constant or a
+name, never a computation — and every intermediate result is named by a `let`.
+That is the same claim the machine makes about its code, made with names instead
+of stack slots, so the two forms are worth reading side by side.
+
+The interesting case is a branch.  An operand has to be an atom, so
+`let x = if c then a else b in rest` cannot be written in this form at all, and
+A-normalisation's usual answer is to push the continuation into both arms — which
+writes `rest` out twice.  In this language `andalso`, `orelse` and `not` are all
+`if`, so an ordinary line of boolean arithmetic would double the rest of the
+program once per operator.
+
+The answer that does not is a *join point*: `rest` is named, and both arms jump
+to the name.  A jump is not a call — it takes no closure, keeps no return
+address, and cannot be a value — and it is exactly the `JumpIfFalse` the compiler
+emits, with a name where the machine has a number.
+
+```sml
+val a = 1
+val flag = if a = 1 then true else false
+val b = if flag andalso a < 3 then a + 1 else a - 1
+```
+
+```
+let a.1 = 1
+let t.10 = (eq a.1 1)
+join join.11 (flag.2) =
+  join join.8 (t.4) =
+    join join.5 (b.3) =
+      (a.1, flag.2, b.3)
+    in if t.4
+    then let t.7 = (add a.1 1)
+      in jump join.5 (t.7)
+    else let t.6 = (sub a.1 1)
+      in jump join.5 (t.6)
+  in if flag.2
+  then let t.9 = (lt a.1 3)
+    in jump join.8 (t.9)
+  else jump join.8 (false)
+in if t.10
+then jump join.11 (true)
+else jump join.11 (false)
+```
+
+Nothing is written twice, and the size stays proportional: twenty bound branches
+in a row are 62 lines of core dump and 142 of ANF, where pushing the continuation
+into both arms would have written the tail out 2^20 times.  A tail branch gets no
+join point at all — both arms end the function, so there is nothing after them to
+share — and the tests count them: none for a tail branch, one for a bound one,
+three for `a andalso b andalso c` with a `not` after it.
 
 ## How fast it is not
 
-The machine is not faster than the evaluator it is checked against.  On
-`examples/collatz.pol` — 19 million instructions — the machine takes 0.45s and
-the evaluator 0.25s.
+The machine is not faster than the evaluators it is checked against.  On
+`examples/collatz.pol` — 19 million instructions — best of five runs each:
 
-The values are boxed the same way in both, so what differs is dispatch and data
-movement, and the machine loses on both: every intermediate value goes through a
-mutable heap array (a write barrier per push), and every call allocates a locals
-array and a frame, while the evaluator's calls are OCaml tail calls into a
-three-entry map.  A compiled machine wins against an interpreter that walks the
-*surface* tree with string lookups and scope chains; against a walker of a tree
-that has already been alpha-renamed and desugared, on a runtime with a fast
-generational GC, it does not — not until the values are unboxed and the
-dispatch is gone, which is what a native back end would be for.
+| | |
+|---|---|
+| the evaluator over the core tree | 0.26s |
+| the machine | 0.36s |
+| the evaluator over A-normal form | 0.44s |
+
+The values are boxed the same way in all three, so what differs is dispatch and
+where the intermediates live, and that is the whole of the ordering.  The core
+evaluator keeps an intermediate in an OCaml local, which costs nothing at all.
+The machine puts every one of them through a mutable heap array — a write barrier
+per push — and allocates a locals array and a frame per call.  And the ANF
+evaluator has to *name* every intermediate, which in an interpreter means
+inserting it into a map: it pays the most for making explicit exactly what the
+machine's operand stack is for.
+
+So a compiled machine wins against an interpreter that walks the *surface* tree
+with string lookups and scope chains; against a walker of a tree that has already
+been alpha-renamed and desugared, on a runtime with a fast generational GC, it
+does not — not until the values are unboxed and the dispatch is gone, which is
+what a native back end would be for.
 
 What the machine buys instead is that it is a compilation target: a fixed
 instruction set, a stack discipline that can be checked rather than trusted, tail
@@ -266,5 +334,6 @@ and the test suite hand-writes the code that uses them.
 | `src/compile.ml` | resolved core to instructions, and the `tail` flag |
 | `src/verify.ml` | the height walk, the bounds checks, and `max_stack` |
 | `src/vm.ml` `src/value_stack.ml` `src/frame_stack.ml` | fetch, do, repeat |
-| `src/eval.ml` | the other back end, for the tests to disagree with |
+| `src/eval.ml` | the second back end: a walker over the core tree |
+| `src/anf.ml` `src/anf_eval.ml` | A-normal form, its join points, and the third back end |
 | `src/dump.ml` `src/disasm.ml` | every stage, as text |

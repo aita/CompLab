@@ -50,6 +50,41 @@ let prim_name = function
   | Gt -> "gt"
   | Ge -> "ge"
 
+(* What a primitive does, once its arguments are integers.
+
+   Both interpreters carry values of their own, so the arithmetic is written here
+   once and each of them puts the answer back into its own type.  The machine
+   does not use it — an instruction is where its arithmetic lives — but it has to
+   agree with it, and the tests are what say so. *)
+type prim_value = Prim_int of int64 | Prim_bool of bool
+
+exception Prim_error of string
+
+let apply_prim op args =
+  match (op, args) with
+  | Neg, [ a ] -> Prim_int (Int64.neg a)
+  | _, [ a; b ] -> (
+      let cmp f = Prim_bool (f (Int64.compare a b) 0) in
+      let nonzero () = if b = 0L then raise (Prim_error "division by zero") in
+      match op with
+      | Add -> Prim_int (Int64.add a b)
+      | Sub -> Prim_int (Int64.sub a b)
+      | Mul -> Prim_int (Int64.mul a b)
+      | Div ->
+          nonzero ();
+          Prim_int (Int64.div a b)
+      | Mod ->
+          nonzero ();
+          Prim_int (Int64.rem a b)
+      | Eq -> cmp ( = )
+      | Ne -> cmp ( <> )
+      | Lt -> cmp ( < )
+      | Le -> cmp ( <= )
+      | Gt -> cmp ( > )
+      | Ge -> cmp ( >= )
+      | Neg -> raise (Prim_error "neg takes one argument"))
+  | _ -> raise (Prim_error (prim_name op ^ " got the wrong number of arguments"))
+
 type expr =
   | Int of int64
   | Bool of bool

@@ -18,17 +18,18 @@
    bound, and printing that tuple against the types the checker inferred is the
    whole of what running one looks like. *)
 
-type stage = Tokens | Types | Core | Resolved | Code
+type stage = Tokens | Types | Core | Anf | Resolved | Code
 
 let stage_of_string = function
   | "tokens" -> Some Tokens
   | "types" -> Some Types
   | "core" -> Some Core
+  | "anf" -> Some Anf
   | "resolved" -> Some Resolved
   | "code" -> Some Code
   | _ -> None
 
-let stage_names = [ "tokens"; "types"; "core"; "resolved"; "code" ]
+let stage_names = [ "tokens"; "types"; "core"; "anf"; "resolved"; "code" ]
 
 type front = {
   types : (string * Types.t) list; (* every top-level name, in order *)
@@ -82,6 +83,20 @@ let run_stats ?(trace = false) ?(check = true) source =
 let run ?(trace = false) ?(check = true) source =
   fst (run_stats ~trace ~check source)
 
+(* The same program through the A-normal form and its interpreter. *)
+let interpret_anf source =
+  let f = front source in
+  let anf = Anf.program f.core in
+  match
+    try Anf_eval.program anf
+    with Anf_eval.Error message ->
+      Diag.error Diag.nowhere "the ANF interpreter stopped: %s" message
+  with
+  | Anf_eval.VTuple values -> report f.types (fun i -> Anf_eval.show values.(i))
+  | other ->
+      Diag.error Diag.nowhere "internal: the program returned %s"
+        (Anf_eval.show other)
+
 (* The same program through the reference evaluator.  The answer has to be the
    same text, character for character. *)
 let interpret source =
@@ -103,6 +118,7 @@ let emit stage source =
            (fun (name, ty) -> Printf.sprintf "val %s : %s\n" name (Types.show ty))
            f.types)
   | Core -> Dump.core_program (front source).core
+  | Anf -> Dump.anf_program (Anf.program (front source).core)
   | Resolved -> Dump.resolved_program (Resolve.program (front source).core)
   | Code ->
       let _, program = compile source in
