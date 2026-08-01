@@ -98,7 +98,7 @@ let rec call state callee arguments span =
   | _ -> invalid_arg "call"
 
 and call_native definition arguments span =
-  match Builtins.find_native definition.fd_name with
+  match Option.bind definition.fd_host Builtins.find_native with
   | Some native -> native arguments span
   | None ->
       runtime_error span "this implementation has no host function named `%s`"

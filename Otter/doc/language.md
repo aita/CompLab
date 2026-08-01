@@ -454,23 +454,24 @@ capture, but since it never had a body there is nothing for it to capture.
 
 The name is what finds it, and the name has to be one this implementation
 knows, which is settled when the program is checked rather than when the call
-happens. Those names are the ones the built-in modules are written against:
-`otter_io_print`, `otter_io_println`, `otter_io_read_line`,
+happens. Those names are the ones the [built-in modules](#built-in-modules)
+stand for: `otter_io_print`, `otter_io_println`, `otter_io_read_line`,
 `otter_str_from_int`, `otter_str_from_float`, `otter_str_from_bool`,
 `otter_str_from_char`, `otter_str_to_int`, `otter_str_substring`,
 `otter_str_index_of`, `otter_math_sqrt`, `otter_math_pow`, `otter_math_floor`,
-`otter_math_ceil`, `otter_gc_collect`, `otter_gc_live` and
-`otter_gc_collections`.
+`otter_math_ceil`, `otter_math_abs`, `otter_math_min`, `otter_math_max`,
+`otter_gc_collect`, `otter_gc_live` and `otter_gc_collections`.
 
 A body-less declaration is a top-level one: a nested function always has a
 body.
 
 ## Built-in modules
 
-These need no file beside the program. Each is ordinary Otter source, kept in
-`interpreter/modules` and embedded into the interpreter when it is built, that
-declares the host functions it needs and re-exports them; nothing about them is
-a special case.
+These need no file beside the program: the implementation provides them itself.
+Each is a module like any other — its functions are values, and reaching one is
+`module.name` — and each of those functions is a body-less one standing for a
+[host function](#host-functions), so nothing about them is a special case for
+the checker or for the evaluator.
 
 ### io
 

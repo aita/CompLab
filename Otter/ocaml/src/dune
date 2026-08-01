@@ -6,17 +6,3 @@
 (menhir
  (modules parser)
  (flags --explain))
-
-; The built-in modules are ordinary Otter source in `modules/`; this turns them
-; into a table the interpreter carries, so `import io;` needs no file beside the
-; program.
-
-(rule
- (targets builtin_modules.ml)
- (deps
-  (:sources
-   (glob_files %{project_root}/modules/*.otter)))
- (action
-  (with-stdout-to
-   builtin_modules.ml
-   (run %{exe:../tools/embed.exe} %{sources}))))

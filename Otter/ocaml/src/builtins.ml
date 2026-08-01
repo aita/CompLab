@@ -1,4 +1,4 @@
-(* The host functions, and the built-in modules embedded at build time. *)
+(* The host functions, and the modules the implementation provides. *)
 
 open Diagnostics
 open Value
@@ -103,7 +103,8 @@ let float_text value =
 (* The table                                                                    *)
 (*                                                                              *)
 (* The names are prefixed so that they cannot collide with anything a program   *)
-(* declares for itself; the built-in modules wrap them under short names.       *)
+(* declares for itself, since a program may bind to one by writing a function   *)
+(* without a body. The built-in modules stand for them under short names.       *)
 (* -------------------------------------------------------------------------- *)
 
 let natives : (string * (value array -> span -> value)) list =
@@ -176,6 +177,15 @@ let natives : (string * (value array -> span -> value)) list =
       fun arguments _ -> Float64 (Float.floor (float_of arguments.(0))) );
     ( "otter_math_ceil",
       fun arguments _ -> Float64 (Float.ceil (float_of arguments.(0))) );
+    ("otter_math_abs", fun arguments _ -> Int (Int64.abs (int_of arguments.(0))));
+    ( "otter_math_min",
+      fun arguments _ ->
+        let left = int_of arguments.(0) and right = int_of arguments.(1) in
+        Int (if Int64.compare left right <= 0 then left else right) );
+    ( "otter_math_max",
+      fun arguments _ ->
+        let left = int_of arguments.(0) and right = int_of arguments.(1) in
+        Int (if Int64.compare left right >= 0 then left else right) );
     ( "otter_gc_collect",
       fun _ _ ->
         Census.collect ();
@@ -187,8 +197,86 @@ let natives : (string * (value array -> span -> value)) list =
 (* Looks up the host function standing behind a body-less declaration. *)
 let find_native name = List.assoc_opt name natives
 
-(* The modules that need no file beside the program. Each lives in
-   `ocaml/modules` as ordinary Otter source, declaring the host functions it
-   needs and re-exporting them under short names, so none of them is a special
-   case for the checker or the evaluator. *)
-let builtin_module_source name = List.assoc_opt name Builtin_modules.sources
+(* -------------------------------------------------------------------------- *)
+(* The built-in modules                                                         *)
+(* -------------------------------------------------------------------------- *)
+
+(* One function of a built-in module: what it is called there, the host function
+   it stands for, and its signature. *)
+type builtin_function = {
+  bf_name : string;
+  bf_host : string;
+  bf_parameters : Types.t list;
+  bf_result : Types.t;
+}
+
+(* A module the implementation provides itself, so that it needs no file beside
+   the program. `Program` turns one of these into an ordinary module whose
+   functions have no body, which is what every other body-less function is. *)
+type builtin_module = { bm_name : string; bm_functions : builtin_function list }
+
+let entry name host parameters result =
+  {
+    bf_name = name;
+    bf_host = host;
+    bf_parameters = parameters;
+    bf_result = result;
+  }
+
+let builtin_modules =
+  [
+    {
+      bm_name = "io";
+      bm_functions =
+        [
+          entry "print" "otter_io_print" [ Types.String ] Types.Void;
+          entry "println" "otter_io_println" [ Types.String ] Types.Void;
+          entry "read_line" "otter_io_read_line" [] Types.String;
+        ];
+    };
+    {
+      bm_name = "str";
+      bm_functions =
+        [
+          entry "from_int" "otter_str_from_int" [ Types.Int ] Types.String;
+          entry "from_float" "otter_str_from_float" [ Types.Float64 ]
+            Types.String;
+          entry "from_bool" "otter_str_from_bool" [ Types.Bool ] Types.String;
+          entry "from_char" "otter_str_from_char" [ Types.Char ] Types.String;
+          entry "to_int" "otter_str_to_int" [ Types.String ] Types.Int;
+          entry "substring" "otter_str_substring"
+            [ Types.String; Types.Int; Types.Int ]
+            Types.String;
+          entry "index_of" "otter_str_index_of"
+            [ Types.String; Types.String ]
+            Types.Int;
+        ];
+    };
+    {
+      bm_name = "math";
+      bm_functions =
+        [
+          entry "sqrt" "otter_math_sqrt" [ Types.Float64 ] Types.Float64;
+          entry "pow" "otter_math_pow"
+            [ Types.Float64; Types.Float64 ]
+            Types.Float64;
+          entry "floor" "otter_math_floor" [ Types.Float64 ] Types.Float64;
+          entry "ceil" "otter_math_ceil" [ Types.Float64 ] Types.Float64;
+          entry "abs" "otter_math_abs" [ Types.Int ] Types.Int;
+          entry "min" "otter_math_min" [ Types.Int; Types.Int ] Types.Int;
+          entry "max" "otter_math_max" [ Types.Int; Types.Int ] Types.Int;
+        ];
+    };
+    {
+      bm_name = "gc";
+      bm_functions =
+        [
+          entry "collect" "otter_gc_collect" [] Types.Void;
+          entry "live" "otter_gc_live" [] Types.Int;
+          entry "collections" "otter_gc_collections" [] Types.Int;
+        ];
+    };
+  ]
+
+let find_builtin_module name =
+  List.find_opt (fun entry -> entry.bm_name = name) builtin_modules

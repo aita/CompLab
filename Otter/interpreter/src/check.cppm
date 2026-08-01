@@ -284,7 +284,7 @@ private:
                 resolveSignature(definition);
                 // A function without a body is one the host supplies, so the
                 // name has to be one the host knows.
-                if (definition.body == nullptr && findNative(definition.name) == nullptr) {
+                if (definition.body == nullptr && findNative(definition.hostName) == nullptr) {
                     throw CompileError(
                         definition.span,
                         std::format("`{}` has no body, so it has to be a function this "

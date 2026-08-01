@@ -1,7 +1,3 @@
-module;
-
-#include "builtin_modules.h"
-
 export module otter.builtins;
 
 import std;
@@ -33,8 +29,10 @@ std::string toUtf8(char32_t code) {
 
 const std::string& textOf(const Value& value) { return value.as<StringObject*>()->text; }
 
-// The C-level names are prefixed so that they cannot collide with anything a
-// program declares for itself; the modules below wrap them under short names.
+// The names are prefixed so that they cannot collide with anything a program
+// declares for itself, since a program may bind to one of these by writing a
+// function without a body. The built-in modules stand for them under short
+// names.
 const std::vector<NativeEntry>& nativeTable() {
     static const std::vector<NativeEntry> table = [] {
         std::vector<NativeEntry> entries;
@@ -131,6 +129,27 @@ const std::vector<NativeEntry>& nativeTable() {
                            [](Heap&, std::span<Value> arguments, const Span&) {
                                return Value(std::ceil(arguments[0].as<double>()));
                            }});
+        entries.push_back({"otter_math_abs",
+                           [](Heap&, std::span<Value> arguments, const Span&) {
+                               auto value = arguments[0].as<std::int64_t>();
+                               // The smallest int has no positive counterpart,
+                               // so this wraps rather than trapping, the way
+                               // every other whole number does.
+                               return Value(value < 0
+                                                ? static_cast<std::int64_t>(
+                                                      0ull - static_cast<std::uint64_t>(value))
+                                                : value);
+                           }});
+        entries.push_back({"otter_math_min",
+                           [](Heap&, std::span<Value> arguments, const Span&) {
+                               return Value(std::min(arguments[0].as<std::int64_t>(),
+                                                     arguments[1].as<std::int64_t>()));
+                           }});
+        entries.push_back({"otter_math_max",
+                           [](Heap&, std::span<Value> arguments, const Span&) {
+                               return Value(std::max(arguments[0].as<std::int64_t>(),
+                                                     arguments[1].as<std::int64_t>()));
+                           }});
 
         entries.push_back({"otter_gc_collect", [](Heap& heap, std::span<Value>, const Span&) {
                                heap.collect();
@@ -163,17 +182,70 @@ const NativeEntry* findNative(const std::string& name) {
     return nullptr;
 }
 
-// The modules that need no file beside the program. Each lives in
-// `interpreter/modules` as ordinary Otter source, declaring the host functions
-// it needs and re-exporting them under short names, so none of them is a
-// special case for the checker or the evaluator.
-std::optional<std::string> builtinModuleSource(const std::string& name) {
-    for (const detail::BuiltinModuleSource& entry : detail::builtinModuleSources) {
-        if (name == entry.name) {
-            return std::string(entry.source);
+// One function of a built-in module: what it is called there, the host function
+// it stands for, and its signature. Every one of these takes and gives types
+// that need no argument, so naming the kind is enough.
+struct BuiltinFunction {
+    std::string name;
+    std::string hostName;
+    TypeKind result;
+    std::vector<TypeKind> parameters;
+};
+
+// A module the implementation provides itself, so that it needs no file beside
+// the program. `otter.program` turns one of these into an ordinary module whose
+// functions have no body, which is what every other body-less function is.
+struct BuiltinModule {
+    std::string name;
+    std::vector<BuiltinFunction> functions;
+};
+
+const std::vector<BuiltinModule>& builtinModules() {
+    using enum TypeKind;
+    static const std::vector<BuiltinModule> modules = {
+        {"io",
+         {
+             {"print", "otter_io_print", Void, {String}},
+             {"println", "otter_io_println", Void, {String}},
+             {"read_line", "otter_io_read_line", String, {}},
+         }},
+        {"str",
+         {
+             {"from_int", "otter_str_from_int", String, {Int}},
+             {"from_float", "otter_str_from_float", String, {Float64}},
+             {"from_bool", "otter_str_from_bool", String, {Bool}},
+             {"from_char", "otter_str_from_char", String, {Char}},
+             {"to_int", "otter_str_to_int", Int, {String}},
+             {"substring", "otter_str_substring", String, {String, Int, Int}},
+             {"index_of", "otter_str_index_of", Int, {String, String}},
+         }},
+        {"math",
+         {
+             {"sqrt", "otter_math_sqrt", Float64, {Float64}},
+             {"pow", "otter_math_pow", Float64, {Float64, Float64}},
+             {"floor", "otter_math_floor", Float64, {Float64}},
+             {"ceil", "otter_math_ceil", Float64, {Float64}},
+             {"abs", "otter_math_abs", Int, {Int}},
+             {"min", "otter_math_min", Int, {Int, Int}},
+             {"max", "otter_math_max", Int, {Int, Int}},
+         }},
+        {"gc",
+         {
+             {"collect", "otter_gc_collect", Void, {}},
+             {"live", "otter_gc_live", Int, {}},
+             {"collections", "otter_gc_collections", Int, {}},
+         }},
+    };
+    return modules;
+}
+
+const BuiltinModule* findBuiltinModule(const std::string& name) {
+    for (const BuiltinModule& entry : builtinModules()) {
+        if (entry.name == name) {
+            return &entry;
         }
     }
-    return std::nullopt;
+    return nullptr;
 }
 
 }  // namespace otter

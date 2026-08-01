@@ -125,10 +125,14 @@ top_declaration:
           } }
   | exported = boption(EXPORT) FUN name = IDENT parameters = parameter_list
     ARROW result = type_expr body = function_body
-      { Top_function
+      { (* Written without a body, so the host provides it, and the name is
+           what finds it. *)
+        let host = match body with None -> Some name | Some _ -> None in
+        Top_function
           {
             fn_definition =
-              Ast.func_def ~span:(at $symbolstartpos) ~name ~parameters ~result ~body;
+              Ast.func_def ~host ~span:(at $symbolstartpos) ~name ~parameters
+                ~result ~body;
             fn_exported = exported;
             fn_owner = None;
           } }
@@ -214,8 +218,8 @@ statement:
   | FUN name = IDENT parameters = parameter_list ARROW result = type_expr body = block
       { Ast.stmt (at $symbolstartpos)
           (S_fun
-             (Ast.func_def ~span:(at $symbolstartpos) ~name ~parameters ~result
-                ~body:(Some body))) }
+             (Ast.func_def ~host:None ~span:(at $symbolstartpos) ~name
+                ~parameters ~result ~body:(Some body))) }
   | RETURN value = option(expr) SEMICOLON
       { Ast.stmt (at $symbolstartpos) (S_return value) }
   | branch = conditional { Ast.stmt (at $symbolstartpos) (S_if branch) }
@@ -290,8 +294,8 @@ expr:
   | FUN parameters = parameter_list ARROW result = type_expr body = block
       { Ast.expr (at $symbolstartpos)
           (E_fun
-             (Ast.func_def ~span:(at $symbolstartpos) ~name:"" ~parameters ~result
-                ~body:(Some body))) }
+             (Ast.func_def ~host:None ~span:(at $symbolstartpos) ~name:""
+                ~parameters ~result ~body:(Some body))) }
   | branch = conditional { Ast.expr (at $symbolstartpos) (E_if branch) }
   | callee = expr LPAREN arguments = separated_list(COMMA, expr) RPAREN
       { Ast.expr (at $symbolstartpos) (E_call (callee, arguments)) }

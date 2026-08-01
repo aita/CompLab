@@ -87,8 +87,8 @@ private:
         }
 
         std::unique_ptr<ModuleAst> parsed;
-        if (std::optional<std::string> source = builtinModuleSource(name)) {
-            parsed = parseModule(std::format("<{}>", name), *source);
+        if (const BuiltinModule* builtin = findBuiltinModule(name)) {
+            parsed = buildBuiltinModule(*builtin);
         } else {
             std::filesystem::path path = directory_ / (name + std::string(sourceExtension));
             if (!std::filesystem::exists(path)) {
@@ -106,6 +106,53 @@ private:
 
         ModuleAst* module = adopt(std::move(parsed));
         resolveImports(module);
+        return module;
+    }
+
+    // A type that is already known, dressed as something the source could have
+    // said, so that the checker resolves it the way it resolves any other.
+    static TypeExprPtr writtenType(const Type* type, const Span& span) {
+        auto node = std::make_unique<TypeExpr>();
+        node->kind = TypeExprKind::Named;
+        node->span = span;
+        node->path.push_back(describe(type));
+        node->resolved = type;
+        return node;
+    }
+
+    // A module the implementation provides. Its functions have no body and
+    // stand for host functions, which is what a body-less function is anywhere
+    // else, so nothing downstream has to know where the module came from.
+    std::unique_ptr<ModuleAst> buildBuiltinModule(const BuiltinModule& description) {
+        Span span{std::format("<{}>", description.name), Position{}};
+
+        auto module = std::make_unique<ModuleAst>();
+        module->name = description.name;
+        module->file = span.file;
+        module->span = span;
+
+        for (const BuiltinFunction& entry : description.functions) {
+            auto definition = std::make_unique<FunctionDefinition>();
+            definition->name = entry.name;
+            definition->hostName = entry.hostName;
+            definition->span = span;
+            definition->declaredResult =
+                writtenType(types_.primitiveType(entry.result), span);
+            for (std::size_t index = 0; index < entry.parameters.size(); ++index) {
+                Parameter parameter;
+                parameter.name = std::format("argument{}", index + 1);
+                parameter.span = span;
+                parameter.declaredType =
+                    writtenType(types_.primitiveType(entry.parameters[index]), span);
+                definition->parameters.push_back(std::move(parameter));
+            }
+
+            auto declaration = std::make_unique<FunctionDecl>();
+            declaration->exported = true;
+            declaration->definition = std::move(definition);
+            declaration->owner = module.get();
+            module->functions.push_back(std::move(declaration));
+        }
         return module;
     }
 

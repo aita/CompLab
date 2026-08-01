@@ -57,6 +57,52 @@ let read_file path span =
       close_in channel;
       text
 
+(* A module the implementation provides. Its functions have no body and stand
+   for host functions, which is what a body-less function is anywhere else, so
+   nothing downstream has to know where the module came from. *)
+let build_builtin_module (description : Builtins.builtin_module) =
+  let span =
+    {
+      file = Printf.sprintf "<%s>" description.bm_name;
+      start = { line = 0; column = 0 };
+    }
+  in
+  let function_of (entry : Builtins.builtin_function) =
+    let parameter index typ =
+      {
+        Ast.p_name = Printf.sprintf "argument%d" (index + 1);
+        p_declared = Ast.written_type span typ;
+        p_span = span;
+        p_type = None;
+      }
+    in
+    {
+      Ast.fn_definition =
+        Ast.func_def ~host:(Some entry.bf_host) ~span ~name:entry.bf_name
+          ~parameters:(List.mapi parameter entry.bf_parameters)
+          ~result:(Ast.written_type span entry.bf_result)
+          ~body:None;
+      fn_exported = true;
+      fn_owner = None;
+    }
+  in
+  let module_ast =
+    {
+      Ast.m_name = description.bm_name;
+      m_file = span.file;
+      m_span = span;
+      m_imports = [];
+      m_structs = [];
+      m_aliases = [];
+      m_functions = List.map function_of description.bm_functions;
+      m_globals = [];
+    }
+  in
+  List.iter
+    (fun (entry : Ast.func_decl) -> entry.fn_owner <- Some module_ast)
+    module_ast.Ast.m_functions;
+  module_ast
+
 let adopt program module_ast =
   match Hashtbl.find_opt program.modules module_ast.Ast.m_name with
   | Some existing ->
@@ -88,9 +134,8 @@ and require program name span =
   | Some loaded -> loaded
   | None ->
       let parsed =
-        match Builtins.builtin_module_source name with
-        | Some source ->
-            Parse.parse_module ~file:(Printf.sprintf "<%s>" name) ~text:source
+        match Builtins.find_builtin_module name with
+        | Some description -> build_builtin_module description
         | None ->
             let path = beside program.directory (name ^ source_extension) in
             if not (Sys.file_exists path) then

@@ -173,6 +173,20 @@ public:
     const Type* stringType() const { return stringType_; }
     const Type* nullType() const { return nullType_; }
 
+    // The type a kind that takes no argument stands for.
+    const Type* primitiveType(TypeKind kind) const {
+        switch (kind) {
+            case TypeKind::Bool: return boolType_;
+            case TypeKind::Int: return intType_;
+            case TypeKind::Byte: return byteType_;
+            case TypeKind::Char: return charType_;
+            case TypeKind::Float32: return float32Type_;
+            case TypeKind::Float64: return float64Type_;
+            case TypeKind::String: return stringType_;
+            default: return voidType_;
+        }
+    }
+
     const Type* arrayOf(const Type* element) {
         auto [entry, inserted] = arrays_.try_emplace(element, nullptr);
         if (inserted) {

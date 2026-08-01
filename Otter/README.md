@@ -73,7 +73,7 @@ The interpreter is one pass per concern, and each concern is one C++ module:
 | `otter.program` | finds and loads the modules a program reaches |
 | `otter.check` | resolves names and gives every expression a type |
 | `otter.value` | the runtime representation of a value, and the collector |
-| `otter.builtins` | the host functions, and the built-in modules embedded at build time |
+| `otter.builtins` | the host functions, and the modules the implementation provides |
 | `otter.interp` | walks the tree and runs it |
 
 Syntax is handled by ANTLR: `grammar/Otter.g4` is a combined lexer and parser
@@ -82,10 +82,11 @@ generated parse tree is not the tree the interpreter runs; `otter.parse`
 lowers it into a smaller AST that the checker can annotate.
 
 The modules that ship with the interpreter — `io`, `str`, `math` and `gc` —
-are ordinary Otter source in `interpreter/modules`. `cmake/EmbedModules.cmake`
-turns them into a header at build time, so they are read, checked and run
-through exactly the same path as a program's own modules; dropping another
-`.otter` file in that directory is all it takes to add one.
+are described in `otter.builtins`: a name, a signature, and the host function
+each one stands for. `otter.program` turns a description into an ordinary
+module whose functions have no body, which is what a body-less function is
+anywhere else, so from there on they are checked and run through exactly the
+same path as a program's own modules.
 
 The checker runs in phases, so that declarations may appear in any order:
 every struct gets a type before any field is resolved, and every function

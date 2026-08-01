@@ -257,6 +257,10 @@ private:
         definition->declaredResult = typeExpression(context->type());
         if (auto* body = context->functionBody()->block()) {
             definition->body = block(body);
+        } else {
+            // Written without a body, so the host provides it, and the name is
+            // what finds it.
+            definition->hostName = definition->name;
         }
 
         declaration->definition = std::move(definition);

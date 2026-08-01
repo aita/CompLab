@@ -172,6 +172,9 @@ and func_def = {
   fd_declared_result : type_expr;
   (* Absent when the host supplies the function. *)
   fd_body : block option;
+  (* The host function standing behind a body-less one. A declaration written
+     without a body names its own; a built-in module names the one it wraps. *)
+  fd_host : string option;
   fd_span : span;
   mutable fd_result : Types.t option;
   mutable fd_type : Types.t option;
@@ -252,6 +255,16 @@ let fresh_id () =
   !next_id
 
 let type_expr span kind = { te_span = span; te_kind = kind; te_resolved = None }
+
+(* A type that is already known, dressed as something the source could have
+   said, so that the checker resolves it the way it resolves any other. *)
+let written_type span typ =
+  {
+    te_span = span;
+    te_kind = Te_named ([ Types.describe typ ], []);
+    te_resolved = Some typ;
+  }
+
 let expr span kind = { e_span = span; e_kind = kind; e_type = None }
 let stmt span kind = { s_span = span; s_kind = kind }
 let name text = { n_name = text; n_resolution = Unresolved }
@@ -270,13 +283,14 @@ let binary op left right =
 let block span statements value =
   { blk_span = span; blk_statements = statements; blk_value = value }
 
-let func_def ~span ~name ~parameters ~result ~body =
+let func_def ~host ~span ~name ~parameters ~result ~body =
   {
     fd_id = fresh_id ();
     fd_name = name;
     fd_parameters = parameters;
     fd_declared_result = result;
     fd_body = body;
+    fd_host = host;
     fd_span = span;
     fd_result = None;
     fd_type = None;

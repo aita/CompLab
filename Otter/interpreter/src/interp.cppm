@@ -122,7 +122,7 @@ private:
                      const Span& span) {
         auto entry = natives_.find(&definition);
         if (entry == natives_.end()) {
-            const NativeEntry* native = findNative(definition.name);
+            const NativeEntry* native = findNative(definition.hostName);
             if (native == nullptr) {
                 throw RuntimeError(span,
                                    std::format("this implementation has no host function named "

@@ -435,17 +435,13 @@ let declare_signatures state =
           resolve_signature state definition;
           (* A function without a body is one the host supplies, so the name has
              to be one the host knows. *)
-          if
-            (match definition.fd_body with None -> true | Some _ -> false)
-            &&
-            match Builtins.find_native definition.fd_name with
-            | None -> true
-            | Some _ -> false
-          then
-            compile_error definition.fd_span
-              "`%s` has no body, so it has to be a function this \
-               implementation provides, and there is none by that name"
-              definition.fd_name)
+          match definition.fd_host with
+          | Some host when Option.is_none (Builtins.find_native host) ->
+              compile_error definition.fd_span
+                "`%s` has no body, so it has to be a function this \
+                 implementation provides, and there is none by that name"
+                definition.fd_name
+          | _ -> ())
         module_ast.m_functions)
     (Program.order state.program);
   state.home <- None

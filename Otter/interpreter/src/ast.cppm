@@ -408,6 +408,9 @@ struct FunctionDefinition {
     TypeExprPtr declaredResult;
     // Absent when the host supplies the function.
     std::unique_ptr<Block> body;
+    // The host function standing behind a body-less one. A declaration written
+    // without a body names its own; a built-in module names the one it wraps.
+    std::string hostName;
     Span span;
 
     const Type* resultType = nullptr;

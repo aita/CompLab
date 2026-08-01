@@ -27,7 +27,7 @@ One pass per concern, and each concern is one module:
 | `Program` | finds and loads the modules a program reaches |
 | `Check` | resolves names and gives every expression a type |
 | `Value` | the runtime representation of a value, and the census |
-| `Builtins` | the host functions, and the built-in modules embedded at build time |
+| `Builtins` | the host functions, and the modules the implementation provides |
 | `Interp` | walks the tree and runs it |
 
 Syntax is handled by a generator: [`src/lexer.mll`](src/lexer.mll) and
@@ -35,11 +35,11 @@ Syntax is handled by a generator: [`src/lexer.mll`](src/lexer.mll) and
 builds the tree the checker annotates directly in its actions.
 
 The modules that ship with the interpreter — `io`, `str`, `math` and `gc` —
-are ordinary Otter source in [`modules/`](modules). A rule in
-[`src/dune`](src/dune) runs [`tools/embed.ml`](tools/embed.ml) over them at
-build time to make the table the interpreter carries, so they are read, checked
-and run through exactly the same path as a program's own modules; dropping
-another `.otter` file in that directory is all it takes to add one.
+are described in [`src/builtins.ml`](src/builtins.ml): a name, a signature, and
+the host function each one stands for. `Program` turns a description into an
+ordinary module whose functions have no body, which is what a body-less function
+is anywhere else, so from there on they are checked and run through exactly the
+same path as a program's own modules.
 
 The checker runs in phases, so that declarations may appear in any order: every
 struct gets a type before any field is resolved, and every function signature is
