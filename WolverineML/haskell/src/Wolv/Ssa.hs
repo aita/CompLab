@@ -146,7 +146,7 @@ freshReg :: Rn Reg
 freshReg = do
   s <- get
   put s {rFunc = (rFunc s) {fnRegs = fnRegs (rFunc s) + 1}}
-  pure (fnRegs (rFunc s))
+  pure (Reg (fnRegs (rFunc s)))
 
 -- | A variable read on a path that never wrote it reads zero.
 undefined' :: Reg -> Rn Reg
@@ -179,7 +179,7 @@ plantUndefined :: Rn ()
 plantUndefined = do
   s <- get
   let entry = blockOf (rFunc s) (fnEntry (rFunc s))
-      zeros = [Const (fromMaybe 0 (Map.lookup v (rUndef s))) 0 | v <- rUndefOrder s]
+      zeros = [Const (fromMaybe (Reg 0) (Map.lookup v (rUndef s))) 0 | v <- rUndefOrder s]
   put s {rFunc = setBlock entry {blInstrs = reverse zeros ++ blInstrs entry} (rFunc s)}
 
 -- | The dominator tree, walked with an explicit stack so that what a block
@@ -291,7 +291,7 @@ splitCriticalEdges f0 = recomputePreds (foldl' atBlock f0 (fnOrder f0))
                   withSplit = addBlock split f
                   f1 = setBlock (blockOf withSplit split) {blInstrs = [Jmp succ']} withSplit
                   b' = blockOf f1 label
-                  f2 = setBlock b' {blInstrs = init (blInstrs b') ++ [renameTarget succ' split (terminator b')]} f1
+                  f2 = setBlock (withTerminator (renameTarget succ' split (terminator b')) b') f1
                   t = blockOf f2 succ'
                   f3 = setBlock t {blPhis = map (move label split) (blPhis t)} f2
                in f3
@@ -306,10 +306,10 @@ verify f = do
   definition <- foldM claim Map.empty written
   let full = foldl' (\m p -> Map.insertWith (\_ old -> old) p (fnEntry f) m) definition (fnParams f)
       reaches r where' what = case Map.lookup r full of
-        Nothing -> Left ("%" ++ show r ++ " is never defined")
+        Nothing -> Left ("%" ++ show (unReg r) ++ " is never defined")
         Just at
           | dominates dom at where' -> Right ()
-          | otherwise -> Left ("%" ++ show r ++ " does not reach " ++ what)
+          | otherwise -> Left ("%" ++ show (unReg r) ++ " does not reach " ++ what)
   mapM_
     ( \b -> do
         mapM_
@@ -329,5 +329,5 @@ verify f = do
       [(phiDst p, blLabel b) | b <- walk f, p <- blPhis b]
         ++ [(r, blLabel b) | b <- walk f, i <- blInstrs b, Just r <- [defs i]]
     claim m (r, where')
-      | Map.member r m = Left ("%" ++ show r ++ " is defined twice")
+      | Map.member r m = Left ("%" ++ show (unReg r) ++ " is defined twice")
       | otherwise = Right (Map.insert r where' m)

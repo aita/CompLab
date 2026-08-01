@@ -11,9 +11,17 @@
 -- 'hasEffect' are for: an instruction says which register it writes and which it
 -- reads, and nothing outside this file asks what it is.
 module Wolv.Ir
-  ( Reg,
+  ( Reg (..),
     Label,
     Instr (..),
+    Op (..),
+    Rel (..),
+    Cond (..),
+    showOp,
+    showRel,
+    showCond,
+    condition,
+    opposite,
     Phi (..),
     Block (..),
     Func (..),
@@ -36,6 +44,9 @@ module Wolv.Ir
     setBlock,
     mapBlocks,
     terminator,
+    body,
+    withTerminator,
+    beforeTerminator,
     succs,
     recomputePreds,
     reachable,
@@ -56,9 +67,62 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 
-type Reg = Int
+-- | A virtual register.
+--
+-- A newtype and not `Int`, because three different numbers run through this
+-- compiler — a virtual register, a machine register (a colour), and a frame slot
+-- — and as plain `Int`s any of them typechecks where another was meant.  The
+-- emitter is where the first two meet, and it is the one place that turns one
+-- into the other.  A newtype is erased, so the distinction costs nothing at all.
+newtype Reg = Reg {unReg :: Int}
+  deriving (Eq, Ord, Show)
 
 type Label = String
+
+-- | The arithmetic an instruction can do, and the comparisons it can make.
+--
+-- Two types and not one set of strings: the folder, the selector and the
+-- emitter each answer one question per operator, and a sum makes every one of
+-- them exhaustive.  What the strings were is what 'showOp' and 'showRel' say,
+-- and only a dump asks.
+data Op = Add | Sub | Mul | Div | Mod | And | Or | Xor | Shl | Shr
+  deriving (Eq, Show)
+
+data Rel = Equal | NotEqual | Less | LessEq | Greater | GreaterEq | Below | AboveEq
+  deriving (Eq, Show)
+
+-- | An ARM condition code, which is what a comparison leaves behind for the
+-- branch under it.
+data Cond = CondEq | CondNe | CondLt | CondLe | CondGt | CondGe | CondLo | CondHs
+  deriving (Eq, Show)
+
+showOp :: Op -> String
+showOp op = case op of
+  Add -> "+"; Sub -> "-"; Mul -> "*"; Div -> "/"; Mod -> "mod"
+  And -> "and"; Or -> "or"; Xor -> "xor"; Shl -> "shl"; Shr -> "shr"
+
+showRel :: Rel -> String
+showRel rel = case rel of
+  Equal -> "="; NotEqual -> "<>"; Less -> "<"; LessEq -> "<="
+  Greater -> ">"; GreaterEq -> ">="; Below -> "u<"; AboveEq -> "u>="
+
+showCond :: Cond -> String
+showCond code = case code of
+  CondEq -> "eq"; CondNe -> "ne"; CondLt -> "lt"; CondLe -> "le"
+  CondGt -> "gt"; CondGe -> "ge"; CondLo -> "lo"; CondHs -> "hs"
+
+-- | Which condition code each comparison sets, and which one says the opposite —
+-- the emitter needs the opposite when the branch it is writing falls through to
+-- the block the comparison was true for.
+condition :: Rel -> Cond
+condition rel = case rel of
+  Equal -> CondEq; NotEqual -> CondNe; Less -> CondLt; LessEq -> CondLe
+  Greater -> CondGt; GreaterEq -> CondGe; Below -> CondLo; AboveEq -> CondHs
+
+opposite :: Cond -> Cond
+opposite code = case code of
+  CondEq -> CondNe; CondNe -> CondEq; CondLt -> CondGe; CondGe -> CondLt
+  CondGt -> CondLe; CondLe -> CondGt; CondLo -> CondHs; CondHs -> CondLo
 
 -- | Run to a fixed point.
 --
@@ -98,8 +162,8 @@ data Instr
   = Const Reg Int64
   | StrConst Reg String
   | Move Reg Reg
-  | Bin Reg String Reg Reg
-  | Cmp Reg String Reg Reg
+  | Bin Reg Op Reg Reg
+  | Cmp Reg Rel Reg Reg
   | Load Reg Reg Int
   | Store Reg Int Reg
   | -- | Read a frame slot of this function — an escaping variable, or a spill.
@@ -109,10 +173,10 @@ data Instr
     FrameAddr Reg
   | Call (Maybe Reg) String [Reg]
   | Jmp Label
-  | -- | An empty code means the branch tests its register.  After selection it
-    -- may instead read the flags a comparison just set, and then it reads no
-    -- register at all.
-    CBr Reg Label Label String
+  | -- | 'Nothing' means the branch tests its register.  After selection it may
+    -- instead read the flags a comparison just set, and then it reads no
+    -- register at all — which is what the 'Just' says.
+    CBr Reg Label Label (Maybe Cond)
   | Ret (Maybe Reg)
   | -- | The machine instruction: a form, a register it writes and some it reads.
     Machine
@@ -152,7 +216,7 @@ uses i = case i of
   StoreSlot _ src -> [src]
   Call _ _ args -> args
   Machine {mSrcs = srcs} -> srcs
-  CBr cond _ _ code -> [cond | null code]
+  CBr cond _ _ Nothing -> [cond]
   Ret value -> maybe [] (: []) value
   _ -> []
 
@@ -167,7 +231,7 @@ mapUses f i = case i of
   StoreSlot slot src -> StoreSlot slot (f src)
   Call d callee args -> Call d callee (map f args)
   m@(Machine {}) -> m {mSrcs = map f (mSrcs m)}
-  CBr cond t e code -> if null code then CBr (f cond) t e code else i
+  CBr cond t e Nothing -> CBr (f cond) t e Nothing
   Ret value -> Ret (fmap f value)
   _ -> i
 
@@ -290,6 +354,19 @@ terminator b
       i@(Ret _) -> i
       _ -> error ("block " ++ blLabel b ++ " falls through")
 
+-- | Everything but the terminator, and the two edits a pass makes to the end of
+-- a block.  Naming them is what keeps `init` and `last` out of five files.
+body :: Block -> [Instr]
+body b = case reverse (blInstrs b) of
+  (_ : rest) -> reverse rest
+  [] -> []
+
+withTerminator :: Instr -> Block -> Block
+withTerminator t b = b {blInstrs = body b ++ [t]}
+
+beforeTerminator :: [Instr] -> Block -> Block
+beforeTerminator instrs b = b {blInstrs = body b ++ instrs ++ [terminator b]}
+
 succs :: Block -> [Label]
 succs b = case terminator b of
   Jmp target -> [target]
@@ -341,16 +418,16 @@ rpo f = snd (go (Set.empty, []) (fnEntry f))
 
 regName :: Map.Map Reg Int -> Reg -> String
 regName colours r = case Map.lookup r colours of
-  Nothing -> "%" ++ show r
-  Just c -> "%" ++ show r ++ ":" ++ show c
+  Nothing -> "%" ++ show (unReg r)
+  Just c -> "%" ++ show (unReg r) ++ ":" ++ show c
 
 showInstr :: (Reg -> String) -> Instr -> String
 showInstr name i = case i of
   Const d v -> name d ++ " = " ++ show v
   StrConst d s -> name d ++ " = &" ++ s
   Move d s -> name d ++ " = " ++ name s
-  Bin d op a b -> name d ++ " = " ++ name a ++ " " ++ op ++ " " ++ name b
-  Cmp d op a b -> name d ++ " = " ++ name a ++ " " ++ op ++ " " ++ name b
+  Bin d op a b -> name d ++ " = " ++ name a ++ " " ++ showOp op ++ " " ++ name b
+  Cmp d op a b -> name d ++ " = " ++ name a ++ " " ++ showRel op ++ " " ++ name b
   Load d base off -> name d ++ " = [" ++ name base ++ " + " ++ show off ++ "]"
   Store base off src -> "[" ++ name base ++ " + " ++ show off ++ "] = " ++ name src
   LoadSlot d slot -> name d ++ " = slot" ++ show slot
@@ -361,7 +438,7 @@ showInstr name i = case i of
      in maybe call (\r -> name r ++ " = " ++ call) d
   Jmp target -> "jmp " ++ target
   CBr cond t e code ->
-    let test = if null code then name cond ++ " ?" else code ++ "?"
+    let test = maybe (name cond ++ " ?") ((++ "?") . showCond) code
      in "br " ++ test ++ " " ++ t ++ " : " ++ e
   Ret value -> maybe "ret" (\r -> "ret " ++ name r) value
   Machine form d srcs imm symbol _ ->

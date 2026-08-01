@@ -81,7 +81,7 @@ verify f alloc = mapM_ inBlock (walk f)
 
     coloured r
       | Map.member r colours = pure ()
-      | otherwise = Left ("%" ++ show r ++ " has no colour")
+      | otherwise = Left ("%" ++ show (unReg r) ++ " has no colour")
 
     -- Nothing else live here may hold the colour `written` was just given.
     noClash alive written where' = case Map.lookup written colours of
@@ -90,7 +90,7 @@ verify f alloc = mapM_ inBlock (walk f)
         Nothing -> pure ()
         Just other ->
           Left
-            ( "x" ++ show colour ++ " holds %" ++ show written ++ " and %" ++ show other
+            ( "x" ++ show colour ++ " holds %" ++ show (unReg written) ++ " and %" ++ show (unReg other)
                 ++ " at once in "
                 ++ where'
             )

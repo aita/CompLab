@@ -20,7 +20,19 @@
 -- leaving every value it read alive until then.  So the selector plans first —
 -- it asks, of each node with one reader, whether that reader has a tile that
 -- takes it — and everything else is computed where it was written.
-module Wolv.Dag (Node (..), Dag (..), nodes, build, nodeAt, rematerialisable, constant, alone, showDag) where
+module Wolv.Dag
+  ( Node (..),
+    Dag (..),
+    nodes,
+    build,
+    nodeAt,
+    operand,
+    rematerialisable,
+    constant,
+    alone,
+    showDag,
+  )
+where
 
 import Data.Int (Int64)
 import Data.List (foldl', intercalate)
@@ -83,6 +95,14 @@ build block liveOut = Dag (Map.map escaping counted) byValue
 nodeAt :: Dag -> Maybe Int -> Maybe Node
 nodeAt g index = index >>= (`Map.lookup` dgNodes g)
 
+-- | The @i@th thing a node reads, as a node index.  'Nothing' for an operand
+-- that came from outside the block — and for one the instruction does not have,
+-- which is the same answer and is why nothing here indexes a list.
+operand :: Int -> Node -> Maybe Int
+operand i n = case drop i (ndOperands n) of
+  (o : _) -> o
+  [] -> Nothing
+
 -- | A constant, which costs nothing to repeat and is often not an instruction at
 -- all once it has become an immediate operand.
 rematerialisable :: Dag -> Maybe Int -> Maybe Node
@@ -101,7 +121,7 @@ constant g index = case nodeAt g index of
 showDag :: Dag -> String
 showDag g = intercalate "\n" (map one (nodes g))
   where
-    plain r = "%" ++ show r
+    plain r = "%" ++ show (unReg r)
     one n =
       printf
         "  %3d%-2s %-38s reads [%s]  users %d"

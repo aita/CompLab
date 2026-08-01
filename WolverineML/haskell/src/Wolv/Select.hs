@@ -22,24 +22,17 @@ module Wolv.Select (selectModule, select, graphs, immediate) where
 
 import Data.List (foldl')
 import Control.Monad.State
-import Data.Bits (popCount, testBit)
+import Data.Bits (countTrailingZeros, popCount)
 import Data.Int (Int64)
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
 import Wolv.Dag
 import Wolv.Ir
 import Wolv.Liveness
-import Wolv.Mach (condition)
 
 -- | What @add@, @sub@ and @cmp@ take as an immediate operand.
 immediate :: Int64
 immediate = 4095
-
-logical :: String -> String
-logical op = case op of "and" -> "and"; "or" -> "orr"; "xor" -> "eor"; _ -> error "not logical"
-
-shifts :: String -> String
-shifts op = case op of "shl" -> "lsl"; "shr" -> "asr"; _ -> error "not a shift"
 
 selectModule :: Module -> Module
 selectModule m = m {modFuncs = map select (modFuncs m)}
@@ -67,7 +60,7 @@ data S = S
     sOut :: [Instr],
     sDone :: Set.Set Int,
     sAbsorbed :: Set.Set Int,
-    sFused :: Maybe String
+    sFused :: Maybe Cond
   }
 
 type Sel a = State S a
@@ -110,22 +103,22 @@ plan graph =
 swallows :: Dag -> Node -> Node -> Bool
 swallows graph reader n = case ndInstr reader of
   Bin _ op _ _
-    | op `elem` ["+", "-"] ->
-        ndOperands reader !! 1 == Just (ndIndex n)
-          && (isJust (asShift graph (Just (ndIndex n))) || isBin n "*")
-  Load _ _ offset -> head (ndOperands reader) == Just (ndIndex n) && isJust (displaces graph n offset)
-  Store _ offset _ -> head (ndOperands reader) == Just (ndIndex n) && isJust (displaces graph n offset)
+    | op `elem` [Add, Sub] ->
+        operand 1 reader == Just (ndIndex n)
+          && (isJust (asShift graph (Just (ndIndex n))) || isBin n Mul)
+  Load _ _ offset -> operand 0 reader == Just (ndIndex n) && isJust (displaces graph n offset)
+  Store _ offset _ -> operand 0 reader == Just (ndIndex n) && isJust (displaces graph n offset)
   _ -> False
 
-isBin :: Node -> String -> Bool
+isBin :: Node -> Op -> Bool
 isBin n op = case ndInstr n of Bin _ o _ _ -> o == op; _ -> False
 
 -- | @[pointer + 24]@, when what is added to the pointer is a constant.
 displaces :: Dag -> Node -> Int -> Maybe Int
 displaces graph n offset
-  | not (isBin n "+") = Nothing
+  | not (isBin n Add) = Nothing
   | otherwise = do
-      value <- constant graph (ndOperands n !! 1)
+      value <- constant graph (operand 1 n)
       let total = offset + fromIntegral value
       if (total >= 0 && total <= 32760 && total `mod` word == 0) || (total >= -256 && total <= 255)
         then Just total
@@ -138,15 +131,17 @@ asShift :: Dag -> Maybe Int -> Maybe (Node, Int64)
 asShift graph index = do
   n <- nodeAt graph index
   guard (alone n)
-  raw <- constant graph (ndOperands n !! 1)
+  raw <- constant graph (operand 1 n)
   amount <- case ndInstr n of
-    Bin _ "*" _ _ -> if raw > 0 && popCount raw == 1 then Just (log2 raw) else Nothing
-    Bin _ "shl" _ _ -> Just raw
+    Bin _ Mul _ _ -> if raw > 0 && popCount raw == 1 then Just (log2 raw) else Nothing
+    Bin _ Shl _ _ -> Just raw
     _ -> Nothing
   if amount >= 0 && amount < 64 then Just (n, amount) else Nothing
 
+-- | Only ever asked of a power of two, where it is the shift that multiplies by
+-- it.
 log2 :: Int64 -> Int64
-log2 v = head [fromIntegral i | i <- [0 .. 63 :: Int], testBit v i]
+log2 = fromIntegral . countTrailingZeros
 
 -- -- emitting -------------------------------------------------------------------
 
@@ -179,7 +174,7 @@ force index = do
   graph <- gets sGraph
   case nodeAt graph index of
     Nothing -> pure ()
-    Just n -> void (at index (fromMaybe 0 (defs (ndInstr n))))
+    Just n -> void (at index (fromMaybe (Reg 0) (defs (ndInstr n))))
 
 -- -- one node ---------------------------------------------------------------
 
@@ -190,15 +185,15 @@ tile n = case ndInstr n of
   Bin d op lhs rhs -> do arithmetic n d op lhs rhs; pure d
   Cmp d op lhs rhs -> do
     compare' n op lhs rhs
-    machine "cset" (Just d) [] 0 (condition op) False
+    machine "cset" (Just d) [] 0 (showCond (condition op)) False
     pure d
   Load d base offset -> do
-    (pointer, off) <- address (head (ndOperands n)) base offset
+    (pointer, off) <- address (operand 0 n) base offset
     machine "ldr" (Just d) [pointer] (fromIntegral off) "" False
     pure d
   Store base offset src -> do
-    value <- at (ndOperands n !! 1) src
-    (pointer, off) <- address (head (ndOperands n)) base offset
+    value <- at (operand 1 n) src
+    (pointer, off) <- address (operand 0 n) base offset
     machine "str" Nothing [pointer, value] (fromIntegral off) "" True
     pure src
   i -> do
@@ -209,31 +204,37 @@ tile n = case ndInstr n of
     mapM_ force (ndOperands n)
     fused <- gets sFused
     let written = case (i, fused) of
-          (CBr cond t e _, Just code) -> CBr cond t e code
+          (CBr cond t e _, Just code) -> CBr cond t e (Just code)
           _ -> i
     modify (\s -> s {sOut = written : sOut s})
-    pure (fromMaybe 0 (defs i))
+    pure (fromMaybe (Reg 0) (defs i))
 
 -- -- the tiles -------------------------------------------------------------
 
-arithmetic :: Node -> Reg -> String -> Reg -> Reg -> Sel ()
+-- | Every operator has a tile, and the compiler is what says so.  The mnemonic
+-- travels with the choice rather than through a second table.
+arithmetic :: Node -> Reg -> Op -> Reg -> Reg -> Sel ()
 arithmetic n d op lhs rhs = case op of
-  _ | op `elem` ["+", "-"] -> additive n d op lhs rhs
-  "*" -> multiply n d lhs rhs
-  "/" -> both n lhs rhs >>= \srcs -> machine "sdiv" (Just d) srcs 0 "" False
-  _ | op `elem` ["shl", "shr"] -> shift n d op lhs rhs
-  _ | op `elem` ["and", "or", "xor"] -> logic n d op lhs rhs
-  _ -> error ("no instruction for `" ++ op ++ "`")
+  Add -> additive n d op lhs rhs
+  Sub -> additive n d op lhs rhs
+  Mul -> multiply n d lhs rhs
+  Div -> both n lhs rhs >>= \srcs -> machine "sdiv" (Just d) srcs 0 "" False
+  Shl -> shift n d "lsl" lhs rhs
+  Shr -> shift n d "asr" lhs rhs
+  And -> logic n d "and" False lhs rhs
+  Or -> logic n d "orr" False lhs rhs
+  Xor -> logic n d "eor" True lhs rhs
+  Mod -> error "the remainder is spelled out in the IR"
 
 -- | Both operands in registers, which is what the plain forms want.
 both :: Node -> Reg -> Reg -> Sel [Reg]
 both n lhs rhs = do
-  left <- at (head (ndOperands n)) lhs
-  right <- at (ndOperands n !! 1) rhs
+  left <- at (operand 0 n) lhs
+  right <- at (operand 1 n) rhs
   pure [left, right]
 
 -- | @add@ and @sub@, in whichever of their four forms fits.
-additive :: Node -> Reg -> String -> Reg -> Reg -> Sel ()
+additive :: Node -> Reg -> Op -> Reg -> Reg -> Sel ()
 additive n d op lhs rhs = do
   -- A shifted operand comes first: `a + b * 8` is one instruction that way and
   -- two as a multiply-add, because the 8 would need a register.
@@ -242,77 +243,78 @@ additive n d op lhs rhs = do
     product' <- multiplyInto n d op lhs
     unless product' $ do
       graph <- gets sGraph
-      let left = head (ndOperands n)
-          right = ndOperands n !! 1
+      let left = operand 0 n
+          right = operand 1 n
       case constant graph right of
         Just v | v >= 0 && v <= immediate -> do
           a <- at left lhs
-          machine (if op == "+" then "addi" else "subi") (Just d) [a] v "" False
+          machine (if op == Add then "addi" else "subi") (Just d) [a] v "" False
         _ -> case (op, constant graph left) of
           -- Only addition may take its constant from the other side.
-          ("+", Just v) | v >= 0 && v <= immediate -> do
+          (Add, Just v) | v >= 0 && v <= immediate -> do
             a <- at right rhs
             machine "addi" (Just d) [a] v "" False
           _ -> do
             srcs <- both n lhs rhs
-            machine (if op == "+" then "add" else "sub") (Just d) srcs 0 "" False
+            machine (if op == Add then "add" else "sub") (Just d) srcs 0 "" False
 
 multiply :: Node -> Reg -> Reg -> Reg -> Sel ()
 multiply n d lhs rhs = do
   graph <- gets sGraph
-  case constant graph (ndOperands n !! 1) of
+  case constant graph (operand 1 n) of
     Just v | v > 0 && popCount v == 1 -> do
-      a <- at (head (ndOperands n)) lhs
+      a <- at (operand 0 n) lhs
       machine "lsli" (Just d) [a] (log2 v) "" False
     _ -> do
       srcs <- both n lhs rhs
       machine "mul" (Just d) srcs 0 "" False
 
 shift :: Node -> Reg -> String -> Reg -> Reg -> Sel ()
-shift n d op lhs rhs = do
+shift n d mnemonic lhs rhs = do
   graph <- gets sGraph
-  case constant graph (ndOperands n !! 1) of
+  case constant graph (operand 1 n) of
     Just v | v >= 0 && v < 64 -> do
-      a <- at (head (ndOperands n)) lhs
-      machine (shifts op ++ "i") (Just d) [a] v "" False
+      a <- at (operand 0 n) lhs
+      machine (mnemonic ++ "i") (Just d) [a] v "" False
     _ -> do
       srcs <- both n lhs rhs
-      machine (shifts op) (Just d) srcs 0 "" False
+      machine mnemonic (Just d) srcs 0 "" False
 
-logic :: Node -> Reg -> String -> Reg -> Reg -> Sel ()
-logic n d op lhs rhs = do
+-- | `flips` says whether an immediate 1 is worth a form of its own, which only
+-- `eor` has, and which is how `not` arrives.
+logic :: Node -> Reg -> String -> Bool -> Reg -> Reg -> Sel ()
+logic n d mnemonic flips lhs rhs = do
   graph <- gets sGraph
-  -- Which is how `not` arrives.
-  if op == "xor" && constant graph (ndOperands n !! 1) == Just 1
+  if flips && constant graph (operand 1 n) == Just 1
     then do
-      a <- at (head (ndOperands n)) lhs
+      a <- at (operand 0 n) lhs
       machine "eori" (Just d) [a] 1 "" False
     else do
       srcs <- both n lhs rhs
-      machine (logical op) (Just d) srcs 0 "" False
+      machine mnemonic (Just d) srcs 0 "" False
 
 -- | @a + b * c@ and @a - b * c@ are one instruction each.
-multiplyInto :: Node -> Reg -> String -> Reg -> Sel Bool
+multiplyInto :: Node -> Reg -> Op -> Reg -> Sel Bool
 multiplyInto n d op lhs = do
   graph <- gets sGraph
-  case nodeAt graph (ndOperands n !! 1) of
-    Just p | alone p, isBin p "*", Bin _ _ pl pr <- ndInstr p -> do
-      x <- at (head (ndOperands p)) pl
-      y <- at (ndOperands p !! 1) pr
-      z <- at (head (ndOperands n)) lhs
-      machine (if op == "+" then "madd" else "msub") (Just d) [x, y, z] 0 "" False
+  case nodeAt graph (operand 1 n) of
+    Just p | alone p, isBin p Mul, Bin _ _ pl pr <- ndInstr p -> do
+      x <- at (operand 0 p) pl
+      y <- at (operand 1 p) pr
+      z <- at (operand 0 n) lhs
+      machine (if op == Add then "madd" else "msub") (Just d) [x, y, z] 0 "" False
       pure True
     _ -> pure False
 
 -- | The second operand of an @add@ may be shifted on the way in.
-shiftInto :: Node -> Reg -> String -> Reg -> Sel Bool
+shiftInto :: Node -> Reg -> Op -> Reg -> Sel Bool
 shiftInto n d op lhs = do
   graph <- gets sGraph
-  case asShift graph (ndOperands n !! 1) of
+  case asShift graph (operand 1 n) of
     Just (shifted, amount) | Bin _ _ sl _ <- ndInstr shifted -> do
-      a <- at (head (ndOperands n)) lhs
-      b <- at (head (ndOperands shifted)) sl
-      machine (if op == "+" then "adds" else "subs") (Just d) [a, b] amount "" False
+      a <- at (operand 0 n) lhs
+      b <- at (operand 0 shifted) sl
+      machine (if op == Add then "adds" else "subs") (Just d) [a, b] amount "" False
       pure True
     _ -> pure False
 
@@ -325,7 +327,7 @@ address index base offset = do
       | alone n,
         Just displaced <- displaces graph n offset,
         Bin _ _ lhs _ <- ndInstr n -> do
-          pointer <- at (head (ndOperands n)) lhs
+          pointer <- at (operand 0 n) lhs
           pure (pointer, displaced)
     _ -> do
       pointer <- at index base
@@ -333,11 +335,11 @@ address index base offset = do
 
 -- -- comparisons and the branch that reads them ------------------------------
 
-compare' :: Node -> String -> Reg -> Reg -> Sel ()
+compare' :: Node -> Rel -> Reg -> Reg -> Sel ()
 compare' n _ lhs rhs = do
   graph <- gets sGraph
-  let left = head (ndOperands n)
-      right = ndOperands n !! 1
+  let left = operand 0 n
+      right = operand 1 n
   case constant graph right of
     Just v | v >= 0 && v <= immediate -> do
       a <- at left lhs

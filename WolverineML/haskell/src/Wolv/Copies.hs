@@ -35,13 +35,11 @@ sequentialize moves borrowed
       ready@(_ : _) ->
         [Mov d s | (d, s) <- pending, d `elem` ready]
           ++ go [m | m@(d, _) <- pending, d `notElem` ready]
-      [] -> case borrowed of
-        Just spare -> Mov spare stuck : go (moved pending stuck spare)
+      [] -> case (pending, borrowed) of
+        ((stuck, _) : _, Just free) -> Mov free stuck : go (moved pending stuck free)
         -- Swapping satisfies `stuck` outright and leaves its old value where the
         -- other end was, so everything still to read it reads there instead.
-        Nothing -> Swap stuck other : go (moved (drop 1 pending) stuck other)
-        where
-          (stuck, other) = head pending
+        ((stuck, other) : rest, Nothing) -> Swap stuck other : go (moved rest stuck other)
 
 -- | The value that was in @was@ is in @now@; whoever wanted it looks there.
 moved :: [(Int, Int)] -> Int -> Int -> [(Int, Int)]

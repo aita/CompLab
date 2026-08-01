@@ -383,7 +383,7 @@ middleTests h = do
 
   test h "dead code goes" $ do
     let m = optimise (inSsa False "fun f (n : int) : int = let val unused = n * n in n + 1 end\nval () = printInt (f (2))")
-    expect h "no multiply" (null [() | Bin _ "*" _ _ <- instructions (modFuncs m !! 1)])
+    expect h "no multiply" (null [() | Bin _ Mul _ _ <- instructions (modFuncs m !! 1)])
 
   test h "unreachable blocks go" $ do
     let m = optimise (inSsa False "val () = if true then print (\"a\") else print (\"b\")")
@@ -429,7 +429,7 @@ middleTests h = do
 
   test h "a comparison read only by its branch sets the flags" $ do
     let source = "fun f (a : int) : int = if a < 3 then 1 else 2\nval () = printInt (f (1))"
-        codes = [code | f <- modFuncs (selected False source), b <- walk f, CBr _ _ _ code <- [terminator b]]
+        codes = [showCond code | f <- modFuncs (selected False source), b <- walk f, CBr _ _ _ (Just code) <- [terminator b]]
     includes' "lt" codes
     excludes' "cset" (formsOf source)
 
@@ -534,7 +534,7 @@ allocatorTests h = do
       let colours = alColours (allocOf f)
       forM_ (instructions f) $ \i -> do
         forM_ (uses i) $ \r -> expect h ("%" ++ show r ++ " uncoloured") (Map.member r colours)
-        forM_ (defs i) $ \d -> expect h ("%" ++ show d ++ " uncoloured") (Map.member d colours)
+        forM_ (defs i) $ \d -> expect h ("%" ++ show (unReg d) ++ " uncoloured") (Map.member d colours)
 
   test h "values live together differ" $
     forM_ (modFuncs m) $ \f -> verified h (fnName f) (Allocator.verify f (allocOf f))
@@ -555,16 +555,26 @@ allocatorTests h = do
         entry = blockOf f0 "entry"
         f =
           recomputePreds
-            (setBlock entry {blInstrs = [Const 0 1, Move 1 0, Call Nothing "wol_print_int" [0], Ret (Just 1)]} f0)
+            ( setBlock
+              entry
+                { blInstrs =
+                    [ Const (Reg 0) 1,
+                      Move (Reg 1) (Reg 0),
+                      Call Nothing "wol_print_int" [Reg 0],
+                      Ret (Just (Reg 1))
+                    ]
+                }
+              f0
+          )
               { fnRegs = 2
               }
-    verified h "coalesced" (Allocator.verify f (Allocation (Map.fromList [(0, 9), (1, 9)]) [] Map.empty))
+    verified h "coalesced" (Allocator.verify f (Allocation (Map.fromList [(Reg 0, 9), (Reg 1, 9)]) [] Map.empty))
 
   test h "a value live across a call is callee-saved" $
     forM_ (modFuncs m) $ \f -> do
       let colours = alColours (allocOf f)
       forM_ (Set.toList (acrossCalls f (analyse f))) $ \r ->
-        expect h ("%" ++ show r ++ " is caller-saved") (Map.lookup r colours `elem` map Just calleeSaved)
+        expect h ("%" ++ show (unReg r) ++ " is caller-saved") (Map.lookup r colours `elem` map Just calleeSaved)
 
   test h "only the callee-saved it used are saved" $
     forM_ (modFuncs m) $ \f -> do

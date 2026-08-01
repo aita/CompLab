@@ -40,7 +40,7 @@ destruct f0 = recomputePreds (mapBlocks noPhis (foldl' atBlock f0 (fnOrder f0)))
 copyInParallel :: Label -> [(Reg, Reg)] -> Func -> Func
 copyInParallel label moves f
   | null real = f
-  | otherwise = setBlock b {blInstrs = init (blInstrs b) ++ copies ++ [last (blInstrs b)]} f'
+  | otherwise = setBlock (beforeTerminator copies b) f'
   where
     real = [(d, s) | (d, s) <- moves, d /= s]
     written = Set.fromList (map fst real)
@@ -54,7 +54,7 @@ copyInParallel label moves f
                   ++ [Move d (through Map.! d) | (d, _) <- real]
               )
       | otherwise = (f, [Move d s | (d, s) <- real])
-    reserve (g, m) d = (g {fnRegs = fnRegs g + 1}, Map.insert d (fnRegs g) m)
+    reserve (g, m) d = (g {fnRegs = fnRegs g + 1}, Map.insert d (Reg (fnRegs g)) m)
     b = blockOf f' label
 
 destructModule :: Module -> Module

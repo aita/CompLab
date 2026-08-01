@@ -137,13 +137,13 @@ jump :: Label -> M ()
 jump target = terminate (Jmp target)
 
 branch :: Reg -> Label -> Label -> M ()
-branch cond yes no = terminate (CBr cond yes no "")
+branch cond yes no = terminate (CBr cond yes no Nothing)
 
 newReg :: M Reg
 newReg = do
   f <- gets lFunc
   modifyFunc (\g -> g {fnRegs = fnRegs g + 1})
-  pure (fnRegs f)
+  pure (Reg (fnRegs f))
 
 newSlot :: M Int
 newSlot = do
@@ -357,7 +357,7 @@ expression e = case eNode e of
   ENeg operand -> do
     zero <- constant 0
     operand' <- value operand
-    Just <$> binop "-" zero operand'
+    Just <$> binop Sub zero operand'
   EBin op lhs rhs -> Just <$> binExp op lhs rhs
   ELogic op lhs rhs -> Just <$> logic op lhs rhs
   EAssign target v -> assign target v >> pure Nothing
@@ -373,13 +373,13 @@ expression e = case eNode e of
     declarations decls
     expression body
 
-binop :: String -> Reg -> Reg -> M Reg
+binop :: Op -> Reg -> Reg -> M Reg
 binop op lhs rhs = do
   r <- newReg
   emit (Bin r op lhs rhs)
   pure r
 
-compare' :: String -> Reg -> Reg -> M Reg
+compare' :: Rel -> Reg -> Reg -> M Reg
 compare' op lhs rhs = do
   r <- newReg
   emit (Cmp r op lhs rhs)
@@ -391,32 +391,43 @@ callRuntime name args = do
   emit (Call (Just r) name args)
   pure r
 
+-- | What the surface operator means to the machine.  Everything the parser can
+-- write that is not one of these is a call or a branch, and is handled above.
+arithmetic :: String -> Maybe Op
+arithmetic op = lookup op [("+", Add), ("-", Sub), ("*", Mul), ("/", Div), ("mod", Mod)]
+
+comparison :: String -> Maybe Rel
+comparison op =
+  lookup
+    op
+    [ ("=", Equal), ("<>", NotEqual), ("<", Less), ("<=", LessEq),
+      (">", Greater), (">=", GreaterEq)
+    ]
+
 binExp :: String -> Exp -> Exp -> M Reg
 binExp op lhs rhs = do
   l <- value lhs
   r <- value rhs
-  case op of
-    "^" -> callRuntime "wol_concat" [l, r]
-    _
-      | op `elem` ["/", "mod"] -> do
-          checkNonzero r
-          if op == "/"
-            then binop "/" l r
-            else do
-              -- The remainder is spelled out rather than left to the emitter:
-              -- the quotient it needs in between is a value like any other, and
-              -- the allocator can find it a register.  The emitter fuses the
-              -- last two back into one `msub`.
-              q <- binop "/" l r
-              product' <- binop "*" q r
-              binop "-" l product'
-      | op `elem` ["+", "-", "*"] -> binop op l r
-      | otherwise -> case eTy lhs of
-          Just TString -> do
-            order <- callRuntime "wol_string_cmp" [l, r]
-            zero <- constant 0
-            compare' op order zero
-          _ -> compare' op l r
+  case (op, arithmetic op, comparison op) of
+    ("^", _, _) -> callRuntime "wol_concat" [l, r]
+    (_, Just Div, _) -> do checkNonzero r; binop Div l r
+    (_, Just Mod, _) -> do
+      checkNonzero r
+      -- The remainder is spelled out rather than left to the emitter: the
+      -- quotient it needs in between is a value like any other, and the
+      -- allocator can find it a register.  The emitter fuses the last two back
+      -- into one `msub`.
+      q <- binop Div l r
+      product' <- binop Mul q r
+      binop Sub l product'
+    (_, Just plain, _) -> binop plain l r
+    (_, _, Just rel) -> case eTy lhs of
+      Just TString -> do
+        order <- callRuntime "wol_string_cmp" [l, r]
+        zero <- constant 0
+        compare' rel order zero
+      _ -> compare' rel l r
+    _ -> error ("lowering does not know the operator `" ++ op ++ "`")
 
 -- | @andalso@ and @orelse@ are branches, so the result needs a register.
 logic :: String -> Exp -> Exp -> M Reg
@@ -437,16 +448,17 @@ logic op lhs rhs = do
 call :: Exp -> String -> [Exp] -> M (Maybe Reg)
 call e _ args = case eSym e of
   Just (SFun sym) -> case fsBuiltin sym of
-    Just "not" -> do
-      a <- value (head args)
+    -- The checker has already counted the arguments, so these shapes hold.
+    Just "not" | [a] <- args -> do
+      x <- value a
       one <- constant 1
-      Just <$> binop "xor" a one
-    Just "array" -> do
-      n <- value (head args)
-      init' <- value (args !! 1)
+      Just <$> binop Xor x one
+    Just "array" | [count, fill] <- args -> do
+      n <- value count
+      init' <- value fill
       Just <$> callRuntime "wol_array" [n, init']
-    Just "length" -> do
-      arr <- value (head args)
+    Just "length" | [a] <- args -> do
+      arr <- value a
       checkNotNil arr
       r <- newReg
       emit (Load r arr 0)
@@ -487,8 +499,8 @@ elementAddress array index = do
   checkNotNil base
   checkBounds base idx
   three <- constant 3
-  shifted <- binop "shl" idx three
-  binop "+" base shifted
+  shifted <- binop Shl idx three
+  binop Add base shifted
 
 assign :: Exp -> Exp -> M ()
 assign target v = case eNode target of
@@ -566,19 +578,19 @@ forExp e lo hi body = do
   bodyBlock <- fresh "forbody"
   step <- fresh "forstep"
   done <- fresh "fordone"
-  test <- compare' "<=" lo' hi'
+  test <- compare' LessEq lo' hi'
   branch test bodyBlock done
 
   modify (\s -> s {lCur = bodyBlock})
   inLoop done (expression body)
   i <- readVar sym
-  again <- compare' "<" i hi'
+  again <- compare' Less i hi'
   branch again step done
 
   modify (\s -> s {lCur = step})
   i' <- readVar sym
   one <- constant 1
-  next <- binop "+" i' one
+  next <- binop Add i' one
   writeVar sym next
   jump bodyBlock
 
@@ -603,7 +615,7 @@ checkNotNil base = do
   checks <- gets lChecks
   when checks $ do
     zero <- constant 0
-    test <- compare' "=" base zero
+    test <- compare' Equal base zero
     guard' "nil" test True (Call Nothing "wol_nil_error" [])
 
 checkBounds :: Reg -> Reg -> M ()
@@ -612,7 +624,7 @@ checkBounds base idx = do
   when checks $ do
     len <- newReg
     emit (Load len base 0)
-    test <- compare' "u<" idx len
+    test <- compare' Below idx len
     guard' "oob" test False (Call Nothing "wol_bounds_error" [idx, len])
 
 checkNonzero :: Reg -> M ()
@@ -620,5 +632,5 @@ checkNonzero rhs = do
   checks <- gets lChecks
   when checks $ do
     zero <- constant 0
-    test <- compare' "=" rhs zero
+    test <- compare' Equal rhs zero
     guard' "divzero" test True (Call Nothing "wol_div_error" [])

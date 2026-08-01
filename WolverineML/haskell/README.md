@@ -71,6 +71,25 @@ them in. Nothing here can be filled in, so `check` returns a second tree with
 the answers already in it, and every pass after it reads that one. The parser's
 tree is still around and still empty; nothing looks at it again.
 
+**A `newtype` is free, so the three integers are three types.** A virtual
+register, a machine register and a frame slot are all `Int`, and as plain `Int`s
+any of them typechecks where another was meant. `newtype Reg = Reg {unReg ::
+Int}` is erased at run time — unlike Kotlin's `@JvmInline`, which still boxes at
+a map key — so the distinction costs nothing anywhere, and the emitter is the one
+place that turns a `Reg` into the colour it was given.
+
+**The operators are a sum, so every table over them is exhaustive.** `Bin Reg
+String Reg Reg` had 120 operator literals scattered over the tree and six
+`error`s for "no instruction for `op`", "not a shift", "unknown comparison" and
+the rest. They are `data Op`, `data Rel` and `data Cond` now: the folder, the
+selector and the emitter each answer one question per operator, and the compiler
+is what says none is missing. What the strings were is `showOp`/`showRel`, and
+only a dump asks. Lowering is where a surface operator becomes a machine one,
+which is the seam that was implicit before.
+
+`CBr` says the same thing in its type: the condition code is a `Maybe Cond`
+rather than a `String` whose emptiness meant "test the register".
+
 **Identity is a number, because a value has none.** Whether a variable escapes
 is settled long after the node that mentions it was made, and where it ended up
 living is settled later still. So a `VarSym` carries an `Int` that is only ever
@@ -140,4 +159,4 @@ in is written down exactly once, and `emit -s opt` cannot drift from `build`.
 - **88 tests, none skipped** — including the end-to-end runs under qemu and the
   random-program oracle
 - **no warnings** at `-Wall`
-- 5164 lines in 26 modules (3962 of them code), and 1166 in the tests
+- 5275 lines in 26 modules (4027 of them code), and 1166 in the tests

@@ -325,6 +325,18 @@ arity e callee args want =
           ++ show (length args)
       )
 
+-- | The arguments a builtin takes, counted and taken apart at once, so that
+-- nothing indexes the list afterwards.
+one :: Exp -> String -> [Exp] -> C Exp
+one e callee args = case args of
+  [a] -> pure a
+  _ -> arity e callee args 1 >> bad (eAt e) "unreachable"
+
+two :: Exp -> String -> [Exp] -> C (Exp, Exp)
+two e callee args = case args of
+  [a, b] -> pure (a, b)
+  _ -> arity e callee args 2 >> bad (eAt e) "unreachable"
+
 callExp :: Exp -> String -> [Exp] -> C Exp
 callExp e name args = do
   f <- lookupVal name (eAt e)
@@ -334,22 +346,20 @@ callExp e name args = do
       let done ty args' = pure (Exp (eAt e) (Just ty) (Just f) (eOffset e) (ECall name args'))
       case fsBuiltin sym of
         Just "array" -> do
-          arity e name args 2
-          n <- inferExp (head args)
+          (count, fill) <- two e name args
+          n <- inferExp count
           unify TInt (tyOf n) (eAt n) "as an array length"
-          init' <- inferExp (args !! 1)
+          init' <- inferExp fill
           case tyOf init' of
             TNil -> bad (eAt init') "`array` cannot tell which record `nil` stands for"
             elem' -> done (TArray elem') [n, init']
         Just "length" -> do
-          arity e name args 1
-          arr <- inferExp (head args)
+          arr <- inferExp =<< one e name args
           case tyOf arr of
             TArray _ -> done TInt [arr]
             got -> bad (eAt arr) ("`length` wants an array, found `" ++ showTy got ++ "`")
         Just "not" -> do
-          arity e name args 1
-          arg <- inferExp (head args)
+          arg <- inferExp =<< one e name args
           unify TBool (tyOf arg) (eAt e) "in a call to `not`"
           done TBool [arg]
         _ -> do

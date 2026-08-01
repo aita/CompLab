@@ -23,6 +23,8 @@ module Wolv.Types
   )
 where
 
+import Wolv.Ir (Reg)
+
 data Type
   = TInt
   | TString
@@ -65,7 +67,7 @@ compatible a b = same a b
 -- a slot number beside a register number: a frame slot may be negative — that is
 -- an argument the caller left on the stack — so no number is free to mean "not
 -- decided yet".
-data Home = InRegister !Int | InFrame !Int
+data Home = InRegister Reg | InFrame !Int
   deriving (Show)
 
 -- | One binding occurrence of a variable.

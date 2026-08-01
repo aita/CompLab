@@ -68,8 +68,9 @@ spill victim f0 = (withPhis, slot, reloads)
           (next, made, after i (i : out))
       | otherwise =
           ( next + 1,
-            next : made,
-            after i (mapUses (\r -> if r == victim then next else r) i : LoadSlot next slot : out)
+            Reg next : made,
+            after i
+              (mapUses (\r -> if r == victim then Reg next else r) i : LoadSlot (Reg next) slot : out)
           )
     after i out = [StoreSlot slot victim | defs i == Just victim] ++ out
     isSpillStore i = case i of StoreSlot n _ -> n == slot; _ -> False
@@ -85,11 +86,11 @@ spill victim f0 = (withPhis, slot, reloads)
     reload (f, made, args) (pred', arg)
       | arg /= victim = (f, made, (pred', arg) : args)
       | otherwise =
-          let fresh = fnRegs f
+          let fresh = Reg (fnRegs f)
               source = blockOf f pred'
               f' =
                 setBlock
-                  source {blInstrs = init (blInstrs source) ++ [LoadSlot fresh slot, last (blInstrs source)]}
+                  (beforeTerminator [LoadSlot fresh slot] source)
                   f {fnRegs = fnRegs f + 1}
            in (f', fresh : made, (pred', fresh) : args)
 

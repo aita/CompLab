@@ -31,8 +31,8 @@ import qualified Data.Set as Set
 import Text.Printf (printf)
 import Wolv.Copies
 import Wolv.Ir
-import Wolv.Mach (forms, opposite)
-import Wolv.Registers (argumentRegs, callerSaved, scratch)
+import Wolv.Mach (forms)
+import Wolv.Registers (argumentRegs, callerSaved, resultRegister, spare)
 
 -- | Whether the emitter may borrow a register to untangle a cycle of copies.
 -- Shut off, the copies swap instead — which is the path a test would never reach
@@ -42,12 +42,6 @@ data Borrowing = MayBorrow | MustSwap
 
 unscaled :: String -> String
 unscaled op = case op of "ldr" -> "ldur"; "str" -> "stur"; _ -> op
-
--- | The one register kept back.  A frame big enough to put a slot out of reach
--- of @ldur@ is only discovered after allocation has added its spill slots, so
--- the address has to be computed somewhere the allocator does not know about.
-spare :: Int
-spare = head scratch
 
 -- | Nothing of ours is live at the top of the prologue except the incoming
 -- arguments, so a caller-saved register that is not one of them is free there.
@@ -152,7 +146,7 @@ emitFunc borrowing f alloc = steps
              "\t.size " ++ fnLabel f ++ ", .-" ++ fnLabel f
            ]
 
-    colour r = fromMaybe (error ("%" ++ show r ++ " was never coloured")) (Map.lookup r colours)
+    colour r = fromMaybe (error ("%" ++ show (unReg r) ++ " was never coloured")) (Map.lookup r colours)
 
     mov dst src = if dst == src then [] else [line (printf "mov x%d, x%d" dst src)]
 
@@ -175,32 +169,32 @@ emitFunc borrowing f alloc = steps
            )
         ++ concat [access "str" reg 29 (savedOffset fr i) | (i, reg) <- zip [0 ..] (frSaved fr)]
         ++ parallel
-          [ (colour p, argumentRegs !! i)
-            | (i, p) <- zip [0 ..] (fnParams f),
+          [ (colour p, reg)
+            | (p, reg) <- zip (fnParams f) argumentRegs,
               Set.member p readSomewhere
           ]
 
     restore = concat [access "ldr" reg 29 (savedOffset fr i) | (i, reg) <- zip [0 ..] (frSaved fr)]
 
-    block b next = concatMap instruction (init (blInstrs b)) ++ terminator' b next
+    block b next = concatMap instruction (body b) ++ terminator' b next
 
     terminator' b next = case terminator b of
       Jmp target ->
         edge (blLabel b) target
           ++ [line ("b " ++ block' target) | Just target /= next]
-      CBr cond t e code
-        | not (null code) ->
-            if Just t == next
-              then [line ("b." ++ opposite code ++ " " ++ block' e)]
-              else
-                line ("b." ++ code ++ " " ++ block' t)
-                  : [line ("b " ++ block' e) | Just e /= next]
+      CBr _ t e (Just code) ->
+        if Just t == next
+          then [line ("b." ++ showCond (opposite code) ++ " " ++ block' e)]
+          else
+            line ("b." ++ showCond code ++ " " ++ block' t)
+              : [line ("b " ++ block' e) | Just e /= next]
+      CBr cond t e Nothing
         | Just t == next -> [line (printf "cbz x%d, %s" (colour cond) (block' e))]
         | otherwise ->
             line (printf "cbnz x%d, %s" (colour cond) (block' t))
               : [line ("b " ++ block' e) | Just e /= next]
       Ret value ->
-        maybe [] (\r -> mov (head argumentRegs) (colour r)) value
+        maybe [] (mov resultRegister . colour) value
           -- The epilogue follows the last block, so the last `ret` needs no branch.
           ++ [line ("b " ++ epilogue) | next /= Nothing]
       _ -> []
@@ -256,8 +250,9 @@ emitFunc borrowing f alloc = steps
          in [ line (printf "adrp x%d, %s" d (mSymbol i)),
               line (printf "add x%d, x%d, :lo12:%s" d d (mSymbol i))
             ]
-      "ldr" -> access "ldr" (colour (fromMaybe (error "no destination") (mDst i))) (head srcs) (fromIntegral (mImm i))
-      "str" -> access "str" (srcs !! 1) (head srcs) (fromIntegral (mImm i))
+      "ldr" | (base : _) <- srcs ->
+        access "ldr" (colour (fromMaybe (error "no destination") (mDst i))) base (fromIntegral (mImm i))
+      "str" | (base : value : _) <- srcs -> access "str" value base (fromIntegral (mImm i))
       form -> [line (fill (fromMaybe (error "no such form") (lookup form forms)))]
       where
         srcs = map colour (mSrcs i)
@@ -271,7 +266,8 @@ emitFunc borrowing f alloc = steps
           | name == "imm" = show (mImm i)
           | name == "sym" = mSymbol i
           | name == "d" = maybe "" (\d -> "x" ++ show (colour d)) (mDst i)
-          | "s" `isPrefixOf` name = "x" ++ show (srcs !! read (drop 1 name))
+          | "s" `isPrefixOf` name, [(at, "")] <- reads (drop 1 name), at < length srcs =
+              "x" ++ show (srcs !! at)
           | otherwise = "{" ++ name ++ "}"
 
     call d callee args =
@@ -281,7 +277,7 @@ emitFunc borrowing f alloc = steps
         ]
         ++ parallel [(reg, colour a) | (reg, a) <- zip argumentRegs args]
         ++ [line ("bl " ++ callee)]
-        ++ maybe [] (\r -> mov (colour r) (head argumentRegs)) d
+        ++ maybe [] (\r -> mov (colour r) resultRegister) d
 
 -- | One character of a literal is one byte; write the ones @.ascii@ cannot.
 escape :: String -> String

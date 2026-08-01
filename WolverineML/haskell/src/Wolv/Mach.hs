@@ -18,7 +18,7 @@
 -- >     adr     the address of a string, which is `adrp` and an `add`
 -- >     ldr     a load, whose addressing mode depends on how far the offset reaches
 -- >     str     a store, likewise
-module Wolv.Mach (forms, condition, opposite, expanded, verify, verifyModule) where
+module Wolv.Mach (forms, expanded, verify, verifyModule) where
 
 import Wolv.Ir
 
@@ -48,21 +48,6 @@ forms =
     ("cmpi", "cmp {s0}, #{imm}"),
     ("cset", "cset {d}, {sym}")
   ]
-
--- | Which condition code each comparison sets, and which one says the opposite —
--- the emitter needs the opposite when the branch it is writing falls through to
--- the block the comparison was true for.
-condition :: String -> String
-condition op = case op of
-  "=" -> "eq"; "<>" -> "ne"; "<" -> "lt"; "<=" -> "le"
-  ">" -> "gt"; ">=" -> "ge"; "u<" -> "lo"; "u>=" -> "hs"
-  _ -> error ("no condition code for " ++ op)
-
-opposite :: String -> String
-opposite code = case code of
-  "eq" -> "ne"; "ne" -> "eq"; "lt" -> "ge"; "ge" -> "lt"
-  "gt" -> "le"; "le" -> "gt"; "lo" -> "hs"; "hs" -> "lo"
-  _ -> error ("no opposite of " ++ code)
 
 -- | The ones the emitter writes itself, because they are not one instruction.
 expanded :: [String]

@@ -16,7 +16,7 @@
 -- `==`.
 module Wolv.Opt (optimise, optimiseFunc) where
 
-import Data.Bits
+import Data.Bits (xor, (.&.), (.|.))
 import Data.Int (Int64)
 import Data.List (foldl', mapAccumL)
 import qualified Data.Map.Strict as Map
@@ -84,41 +84,41 @@ foldOne known i = case i of
       -- The identities are worth having on their own: `x shl 0` and `x * 1` come
       -- out of lowering an index, and folding them is what lets the selector see
       -- one `add` where there were three instructions.
-      | b == Just 0 && op `elem` ["+", "-", "or", "xor", "shl", "shr"] -> Just (Move d lhs)
-      | b == Just 1 && op `elem` ["*", "/"] -> Just (Move d lhs)
-      | a == Just 0 && op == "+" -> Just (Move d rhs)
+      | b == Just 0 && op `elem` [Add, Sub, Or, Xor, Shl, Shr] -> Just (Move d lhs)
+      | b == Just 1 && op `elem` [Mul, Div] -> Just (Move d lhs)
+      | a == Just 0 && op == Add -> Just (Move d rhs)
       | otherwise -> Nothing
   Cmp d op lhs rhs -> case (Map.lookup lhs known, Map.lookup rhs known) of
     (Just a, Just b) -> Just (Const d (if order op a b then 1 else 0))
     _ -> Nothing
   _ -> Nothing
 
--- | The arithmetic of the machine, which is 'Int64' and needs no help.
-arith :: String -> Int64 -> Int64 -> Maybe Int64
+-- | The arithmetic of the machine, which is 'Int64' and needs no help.  Nothing
+-- is what a division by zero and a shift by a negative answer; every operator
+-- has a case, and the compiler is what says so.
+arith :: Op -> Int64 -> Int64 -> Maybe Int64
 arith op a b = case op of
-  "+" -> Just (a + b)
-  "-" -> Just (a - b)
-  "*" -> Just (a * b)
-  "/" -> if b == 0 then Nothing else Just (quotient a b)
-  "mod" -> if b == 0 then Nothing else Just (remainder a b)
-  "and" -> Just (a .&. b)
-  "or" -> Just (a .|. b)
-  "xor" -> Just (xor a b)
-  "shl" -> shl a b
-  "shr" -> shr a b
-  _ -> Nothing
+  Add -> Just (a + b)
+  Sub -> Just (a - b)
+  Mul -> Just (a * b)
+  Div -> if b == 0 then Nothing else Just (quotient a b)
+  Mod -> if b == 0 then Nothing else Just (remainder a b)
+  And -> Just (a .&. b)
+  Or -> Just (a .|. b)
+  Xor -> Just (a `xor` b)
+  Shl -> shl a b
+  Shr -> shr a b
 
-order :: String -> Int64 -> Int64 -> Bool
+order :: Rel -> Int64 -> Int64 -> Bool
 order op a b = case op of
-  "=" -> a == b
-  "<>" -> a /= b
-  "<" -> a < b
-  "<=" -> a <= b
-  ">" -> a > b
-  ">=" -> a >= b
-  "u<" -> unsigned a < unsigned b
-  "u>=" -> unsigned a >= unsigned b
-  _ -> error ("unknown comparison " ++ op)
+  Equal -> a == b
+  NotEqual -> a /= b
+  Less -> a < b
+  LessEq -> a <= b
+  Greater -> a > b
+  GreaterEq -> a >= b
+  Below -> unsigned a < unsigned b
+  AboveEq -> unsigned a >= unsigned b
 
 propagateCopies :: Pass
 propagateCopies f
@@ -154,7 +154,7 @@ foldBranches f
       _ -> Nothing
     one g (label, target) =
       let b = blockOf g label
-       in setBlock b {blInstrs = init (blInstrs b) ++ [Jmp target]} g
+       in setBlock (withTerminator (Jmp target) b) g
 
 -- | Removing one dead value can make another dead, so this one has a fixed point
 -- of its own rather than waiting for the next round.

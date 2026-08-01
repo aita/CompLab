@@ -10,7 +10,8 @@ module Wolv.Registers
   ( callerSaved,
     calleeSaved,
     argumentRegs,
-    scratch,
+    resultRegister,
+    spare,
     Machine (..),
     whole,
     anywhere,
@@ -28,8 +29,15 @@ calleeSaved = [19, 20, 21, 22, 23, 24, 25, 26, 27, 28]
 argumentRegs :: [Int]
 argumentRegs = [0, 1, 2, 3, 4, 5, 6, 7]
 
-scratch :: [Int]
-scratch = [17]
+-- | Where an argument goes in and where a result comes back, which AAPCS64 makes
+-- the same register.
+resultRegister :: Int
+resultRegister = head argumentRegs
+
+-- | The one register kept back, for an address the emitter has to compute after
+-- allocation is over.
+spare :: Int
+spare = 17
 
 -- | The machine an allocator is colouring for.
 data Machine = Machine {mCaller :: [Int], mCallee :: [Int]}

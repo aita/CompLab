@@ -18,7 +18,7 @@ preferences f = foldl' one (Map.fromList (zip (fnParams f) argumentRegs)) wanted
   where
     wanted = concatMap fromInstr [i | b <- walk f, i <- blInstrs b]
     fromInstr i = case i of
-      Call d _ args -> zip args argumentRegs ++ maybe [] (\r -> [(r, head argumentRegs)]) d
-      Ret (Just value) -> [(value, head argumentRegs)]
+      Call d _ args -> zip args argumentRegs ++ maybe [] (\r -> [(r, resultRegister)]) d
+      Ret (Just value) -> [(value, resultRegister)]
       _ -> []
     one m (r, colour) = Map.insert r colour m
