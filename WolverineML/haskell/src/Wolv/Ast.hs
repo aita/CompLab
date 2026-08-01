@@ -20,6 +20,8 @@ module Wolv.Ast
     Ann,
     Exp (..),
     Node (..),
+    Place (..),
+    PNode (..),
     FieldInit (..),
     TyExp (..),
     TyField (..),
@@ -30,6 +32,7 @@ module Wolv.Ast
     FunBind (..),
     Program,
     parsed,
+    placed,
     tyAt,
     declAt,
   )
@@ -68,25 +71,37 @@ data Exp p = Exp {eAt :: Span, eTy :: Ann p Type, eNode :: Node p}
 parsed :: Span -> Node 'Parsed -> Exp 'Parsed
 parsed at = Exp at ()
 
+placed :: Span -> PNode 'Parsed -> Exp 'Parsed
+placed at node = parsed at (EPlace (Place at () node))
+
+-- | The three shapes that can be read and written, which are the three the left
+-- of @:=@ accepts.  They are their own type so that assignment can say which
+-- ones it takes: the parser is where a target that is not one of them is
+-- refused, and nothing after that has to ask again.
+data Place p = Place {plAt :: Span, plTy :: Ann p Type, plNode :: PNode p}
+
+data PNode p
+  = -- | The symbol the name resolved to.
+    PVar String (Ann p VarSym)
+  | PIndex (Exp p) (Exp p)
+  | -- | Which word of the record the field is.
+    PField (Exp p) String (Ann p Int)
+
 data Node p
   = EInt Integer
   | EStr String
   | EBool Bool
   | ENil
   | EUnit
-  | -- | The symbol the name resolved to.
-    EVar String (Ann p VarSym)
+  | EPlace (Place p)
   | ECall String [Exp p] (Ann p FunSym)
   | -- | The initialisers are put into declaration order by the checker.
     ERecord String [FieldInit p]
-  | EIndex (Exp p) (Exp p)
-  | -- | Which word of the record the field is.
-    EField (Exp p) String (Ann p Int)
   | ENeg (Exp p)
   | EBin String (Exp p) (Exp p)
   | -- | @andalso@ and @orelse@, which are control flow and not operators.
     ELogic String (Exp p) (Exp p)
-  | EAssign (Exp p) (Exp p)
+  | EAssign (Place p) (Exp p)
   | EIf (Exp p) (Exp p) (Maybe (Exp p))
   | EWhile (Exp p) (Exp p)
   | EFor String (Exp p) (Exp p) (Exp p) (Ann p VarSym)

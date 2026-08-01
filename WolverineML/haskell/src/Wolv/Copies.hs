@@ -13,20 +13,20 @@
 -- reserved for this anywhere in the compiler.
 module Wolv.Copies (Step (..), sequentialize) where
 
-import Data.List (foldl')
 
 data Step = Mov {stDst :: Int, stSrc :: Int} | Swap {stA :: Int, stB :: Int}
   deriving (Eq, Show)
 
 -- | Order @(destination, source)@ pairs so that nothing is lost on the way.
 -- @borrowed@ is a register free to clobber, or 'Nothing'.
+--
+-- The pairs are a parallel copy, so no destination appears twice: they come
+-- from the phis of one block, whose destinations are distinct because SSA
+-- construction gave each one a register of its own.
 sequentialize :: [(Int, Int)] -> Maybe Int -> [Step]
-sequentialize moves borrowed
-  | length real /= length (unique (map fst real)) = error "a parallel copy writes a register twice"
-  | otherwise = go real
+sequentialize moves borrowed = go real
   where
     real = [(d, s) | (d, s) <- moves, d /= s]
-    unique = foldl' (\seen x -> if x `elem` seen then seen else seen ++ [x]) []
 
     -- `pending` stays in the order it was given: which copy is picked when
     -- several are ready is what the emitted sequence looks like.

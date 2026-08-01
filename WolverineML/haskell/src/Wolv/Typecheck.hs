@@ -264,11 +264,11 @@ inferExp e = case eNode e of
   EBool b -> pure (typed e TBool (EBool b))
   ENil -> pure (typed e TNil ENil)
   EUnit -> pure (typed e TUnit EUnit)
-  EVar name _ -> variable e name
+  EPlace p -> do
+    p' <- inferPlace p
+    pure (typed e (plTy p') (EPlace p'))
   ECall name args _ -> callExp e name args
   ERecord tyname inits -> recordLit e tyname inits
-  EIndex array index -> indexExp e array index
-  EField record name _ -> fieldExp e record name
   ENeg operand -> do
     operand' <- inferExp operand
     unify TInt (tyOf operand') (eAt e) "in a negation"
@@ -305,17 +305,39 @@ inferExp e = case eNode e of
     pop
     pure (typed e (tyOf body') (ELet decls' body'))
 
-variable :: Exp 'Parsed -> String -> C (Exp 'Typed)
-variable e name = do
-  sym <- lookupVal name (eAt e)
-  case sym of
-    SFun _ -> bad (eAt e) ("`" ++ name ++ "` is a function, and functions are not values")
-    SVar v -> do
-      -- Read from deeper than it was bound: it cannot live in a register.
-      depth <- gets chDepth
-      when (vsDepth v < depth) $
-        modify (\s -> s {chEscapes = Set.insert (vsId v) (chEscapes s)})
-      pure (typed e (vsTy v) (EVar name v))
+-- | The three places, typed in one function, so that reading one and assigning
+-- to one ask the same question.
+inferPlace :: Place 'Parsed -> C (Place 'Typed)
+inferPlace p = case plNode p of
+  PVar name _ -> do
+    sym <- lookupVal name at
+    case sym of
+      SFun _ -> bad at ("`" ++ name ++ "` is a function, and functions are not values")
+      SVar v -> do
+        -- Read from deeper than it was bound: it cannot live in a register.
+        depth <- gets chDepth
+        when (vsDepth v < depth) $
+          modify (\s -> s {chEscapes = Set.insert (vsId v) (chEscapes s)})
+        pure (Place at (vsTy v) (PVar name v))
+  PIndex array index -> do
+    array' <- inferExp array
+    case tyOf array' of
+      TArray elem' -> do
+        index' <- inferExp index
+        unify TInt (tyOf index') (eAt index') "as an array index"
+        pure (Place at elem' (PIndex array' index'))
+      got -> bad at ("`" ++ showTy got ++ "` is not an array")
+  PField record name _ -> do
+    record' <- inferExp record
+    case tyOf record' of
+      found@(TRecord _ rname _) -> do
+        fields <- fieldsOf found
+        case lookup name fields of
+          Nothing -> bad at ("`" ++ rname ++ "` has no field `" ++ name ++ "`")
+          Just ty -> pure (Place at ty (PField record' name (length (takeWhile ((/= name) . fst) fields))))
+      got -> bad at ("`" ++ showTy got ++ "` is not a record")
+  where
+    at = plAt p
 
 arity :: Exp p -> String -> [a] -> Int -> C ()
 arity e callee args want =
@@ -399,28 +421,6 @@ recordLit e tyname inits = do
         unify want (tyOf value) (fiAt f) ("in field `" ++ name ++ "`")
         pure (FieldInit (fiName f) value (fiAt f))
 
-indexExp :: Exp 'Parsed -> Exp 'Parsed -> Exp 'Parsed -> C (Exp 'Typed)
-indexExp e array index = do
-  array' <- inferExp array
-  case tyOf array' of
-    TArray elem' -> do
-      index' <- inferExp index
-      unify TInt (tyOf index') (eAt index') "as an array index"
-      pure (typed e elem' (EIndex array' index'))
-    got -> bad (eAt e) ("`" ++ showTy got ++ "` is not an array")
-
-fieldExp :: Exp 'Parsed -> Exp 'Parsed -> String -> C (Exp 'Typed)
-fieldExp e record name = do
-  record' <- inferExp record
-  case tyOf record' of
-    found@(TRecord _ rname _) -> do
-      fields <- fieldsOf found
-      case lookup name fields of
-        Nothing -> bad (eAt e) ("`" ++ rname ++ "` has no field `" ++ name ++ "`")
-        Just ty ->
-          pure (typed e ty (EField record' name (length (takeWhile ((/= name) . fst) fields))))
-    got -> bad (eAt e) ("`" ++ showTy got ++ "` is not a record")
-
 binop :: Exp 'Parsed -> String -> Exp 'Parsed -> Exp 'Parsed -> C (Exp 'Typed)
 binop e op lhs rhs = do
   lhs' <- inferExp lhs
@@ -452,16 +452,16 @@ binop e op lhs rhs = do
     comparable ty = case ty of TInt -> True; TString -> True; _ -> False
     isUnit ty = case ty of TUnit -> True; _ -> False
 
-assign :: Exp 'Parsed -> Exp 'Parsed -> Exp 'Parsed -> C (Exp 'Typed)
+assign :: Exp 'Parsed -> Place 'Parsed -> Exp 'Parsed -> C (Exp 'Typed)
 assign e target value = do
-  target' <- inferExp target
-  case eNode target' of
-    EVar _ v
+  target' <- inferPlace target
+  case plNode target' of
+    PVar _ v
       | not (vsMutable v) ->
           bad (eAt e) ("`" ++ vsName v ++ "` is a `val`, so it cannot be assigned")
     _ -> pure ()
   value' <- inferExp value
-  unify (tyOf target') (tyOf value') (eAt value') "in an assignment"
+  unify (plTy target') (tyOf value') (eAt value') "in an assignment"
   pure (typed e TUnit (EAssign target' value'))
 
 ifExp :: Exp 'Parsed -> Exp 'Parsed -> Exp 'Parsed -> Maybe (Exp 'Parsed) -> C (Exp 'Typed)

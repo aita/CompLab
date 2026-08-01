@@ -18,7 +18,6 @@ module Wolv.Lower (Options (..), defaultOptions, lower) where
 
 import Control.Monad.State
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import Wolv.Ast
 import Wolv.Ir
@@ -200,8 +199,10 @@ functionBody bind sym = do
 setHome :: Int -> Home -> M ()
 setHome uid home = modify (\s -> s {lHomes = Map.insert uid home (lHomes s)})
 
-homeOf :: VarSym -> M Home
-homeOf sym = gets (fromMaybe (error "a variable with no home") . Map.lookup (vsId sym) . lHomes)
+-- | Where a variable lives, or nothing: a variable of type @unit@ is never
+-- given a home, because there is nothing to keep in one.
+homeOf :: VarSym -> M (Maybe Home)
+homeOf sym = gets (Map.lookup (vsId sym) . lHomes)
 
 escapes :: VarSym -> M Bool
 escapes sym = gets (Set.member (vsId sym) . lEscapes)
@@ -291,32 +292,35 @@ frameAt depth = do
           climb next (here - 1)
 
 -- | Where a variable lives is the whole answer: a register means it did not
--- escape, and a slot means it did, so neither of these asks the escape set a
--- second time and neither has a case that cannot happen.
-readVar :: VarSym -> M Reg
+-- escape, a slot means it did, and no home at all means there is nothing to
+-- read — so neither of these asks the escape set a second time and neither has
+-- a case it has to invent an answer for.
+readVar :: VarSym -> M (Maybe Reg)
 readVar sym = do
   home <- homeOf sym
   here <- gets (fnDepth . lFunc)
   case home of
-    InRegister r -> pure r
-    InFrame slot
+    Nothing -> pure Nothing
+    Just (InRegister r) -> pure (Just r)
+    Just (InFrame slot)
       | vsDepth sym == here -> do
           r <- newReg
           emit (LoadSlot r slot)
-          pure r
+          pure (Just r)
       | otherwise -> do
           base <- frameAt (vsDepth sym)
           r <- newReg
           emit (Load r base (slotOffset slot))
-          pure r
+          pure (Just r)
 
 writeVar :: VarSym -> Reg -> M ()
 writeVar sym value = do
   home <- homeOf sym
   here <- gets (fnDepth . lFunc)
   case home of
-    InRegister r -> emit (Move r value)
-    InFrame slot
+    Nothing -> pure ()
+    Just (InRegister r) -> emit (Move r value)
+    Just (InFrame slot)
       | vsDepth sym == here -> emit (StoreSlot slot value)
       | otherwise -> do
           base <- frameAt (vsDepth sym)
@@ -324,8 +328,18 @@ writeVar sym value = do
 
 -- -- expressions ----------------------------------------------------------------
 
+-- | An expression where a register is wanted.
+--
+-- The one that has none is @unit@, whose representation is zero: a @unit@
+-- argument still takes a register from the calling convention, and a @unit@
+-- field still takes a word of the record, so the caller of this is right to
+-- want one and this is what it is.
 value :: Exp 'Typed -> M Reg
-value e = fromMaybe (error "expected a value here") <$> expression e
+value e = expression e >>= maybe (constant 0) pure
+
+-- | A variable where a register is wanted, on the same terms as 'value'.
+held :: VarSym -> M Reg
+held sym = readVar sym >>= maybe (constant 0) pure
 
 expression :: Exp 'Typed -> M (Maybe Reg)
 expression e = case eNode e of
@@ -338,20 +352,9 @@ expression e = case eNode e of
     r <- newReg
     emit (StrConst r symbol)
     pure (Just r)
-  EVar _ sym -> Just <$> readVar sym
+  EPlace p -> readPlace p
   ECall _ args sym -> call sym args
   ERecord _ fields -> Just <$> record e fields
-  EIndex array index -> do
-    addr <- elementAddress array index
-    r <- newReg
-    emit (Load r addr word)
-    pure (Just r)
-  EField record' _ offset -> do
-    base <- value record'
-    checkNotNil base
-    r <- newReg
-    emit (Load r base (word * offset))
-    pure (Just r)
   ENeg operand -> do
     zero <- constant 0
     operand' <- value operand
@@ -498,19 +501,37 @@ elementAddress array index = do
   shifted <- binop Shl idx three
   binop Add base shifted
 
-assign :: Exp 'Typed -> Exp 'Typed -> M ()
-assign target v = case eNode target of
-  EVar _ sym -> value v >>= writeVar sym
-  EIndex array index -> do
+-- | A place read.  A variable of type @unit@ has no home, so it has no value;
+-- the other two are a word out of memory.
+readPlace :: Place 'Typed -> M (Maybe Reg)
+readPlace p = case plNode p of
+  PVar _ sym -> readVar sym
+  PIndex array index -> do
+    addr <- elementAddress array index
+    r <- newReg
+    emit (Load r addr word)
+    pure (Just r)
+  PField record' _ offset -> do
+    base <- value record'
+    checkNotNil base
+    r <- newReg
+    emit (Load r base (word * offset))
+    pure (Just r)
+
+-- | The same three, written to.  There is no fourth: the parser is what refuses
+-- a target that is not a place, so by here there is nothing left to refuse.
+assign :: Place 'Typed -> Exp 'Typed -> M ()
+assign target v = case plNode target of
+  PVar _ sym -> value v >>= writeVar sym
+  PIndex array index -> do
     addr <- elementAddress array index
     v' <- value v
     emit (Store addr word v')
-  EField record' _ offset -> do
+  PField record' _ offset -> do
     base <- value record'
     checkNotNil base
     v' <- value v
     emit (Store base (word * offset) v')
-  _ -> error "assignment to something that is not a place"
 
 ifExp :: Exp 'Typed -> Exp 'Typed -> Exp 'Typed -> Maybe (Exp 'Typed) -> M (Maybe Reg)
 ifExp e cond then' els = do
@@ -576,12 +597,12 @@ forExp sym lo hi body = do
 
   modify (\s -> s {lCur = bodyBlock})
   inLoop done (expression body)
-  i <- readVar sym
+  i <- held sym
   again <- compare' Less i hi'
   branch again step done
 
   modify (\s -> s {lCur = step})
-  i' <- readVar sym
+  i' <- held sym
   one <- constant 1
   next <- binop Add i' one
   writeVar sym next

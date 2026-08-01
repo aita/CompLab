@@ -100,6 +100,49 @@ mutable field that is null until the checker runs, and a lowering pass that
 trusts it. Here the checker is the only thing that can make a tree lowering will
 take.
 
+**No `error` anywhere.** There is not one call to `error` in the compiler. Every
+partial function either became total or became a `Maybe` its caller has
+something to say about, and two of them were hiding real bugs — `val u = ()`
+followed by a read of `u` crashed the compiler, and so did passing a `unit` to a
+anything that wanted a register.
+
+The rule that fixed both: **a value of type `unit` has no register, and a
+variable of type `unit` has no home.** `readVar` answers `Maybe Reg`, which is
+what `expression` answers anyway, so reading a variable with no home is reading
+nothing. Where a register is genuinely wanted — a `unit` argument still takes one
+from the calling convention, a `unit` field still takes a word of the record —
+`value` supplies the zero that `unit` is. Python asserts on the second of these,
+so this tree compiles a program the reference does not.
+
+The rest were invariants stated twice, and saying them once is what removed
+them:
+
+| was | is |
+| --- | --- |
+| `lookup pred (phiArgs p)` in two passes | `onEdge from block`, a filter over the arguments that name the edge |
+| a worklist of move *numbers*, then a lookup for the move | `Map.Map Int (Reg, Reg)`: the worklist holds the moves |
+| `nodeAt graph (Just reader)` forced open | `Just reader <- [nodeAt graph (ndReader n)]` in the comprehension |
+| `at rank`/`at idom`, one `error` for both | the climb reads what it needs and stops where there is nothing above |
+| an assertion that a parallel copy writes each register once | the phis of one block, whose destinations SSA made distinct |
+
+Two are silent rather than loud: an abstract instruction reaching the emitter,
+and — before places became a type — a `:=` onto something that is not one. Both
+have an earlier pass whose job is to say so with a span and a message, so the
+second copy of the check had nothing to add.
+
+**Assignment says what it takes.** The left of `:=` is one of three shapes, and
+`Place` is those three:
+
+```haskell
+data Place p = Place {plAt :: Span, plTy :: Ann p Type, plNode :: PNode p}
+data PNode p = PVar String (Ann p VarSym) | PIndex (Exp p) (Exp p) | PField (Exp p) String (Ann p Int)
+```
+
+`EAssign (Place p) (Exp p)`, and `EPlace (Place p)` is how a place is read. The
+parser is where a target that is not one is refused — it already was — and the
+checker types a place in one function whether it is being read or written, so
+nothing is inferred twice.
+
 **One case split, not two.** `defs` said which register an instruction writes
 and `withDef` made it write another, over the same fourteen constructors — and
 `withDef` had an `error` for the ones that write nothing, which the caller had
@@ -228,4 +271,5 @@ in is written down exactly once, and `emit -s opt` cannot drift from `build`.
 - **88 tests, none skipped** — including the end-to-end runs under qemu and the
   random-program oracle
 - **no warnings** at `-Wall`
-- 5309 lines in 26 modules (4001 of them code), and 1170 in the tests
+- 5364 lines in 26 modules (4008 of them code), and 1174 in the tests
+- **no `error` in the compiler**

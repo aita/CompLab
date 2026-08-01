@@ -87,8 +87,11 @@ data C = C
     cPreferred :: Map.Map Reg Int,
     cMoves :: Map.Map Int (Reg, Reg),
     cMovesOf :: Map.Map Reg (Set.Set Int),
-    cWorklistMoves :: Set.Set Int,
-    cActiveMoves :: Set.Set Int,
+    -- A worklist of moves holds the moves, not numbers that name them: the
+    -- coalescer wants both ends of the one it takes off, and taking it off is
+    -- the only way it gets one.
+    cWorklistMoves :: Map.Map Int (Reg, Reg),
+    cActiveMoves :: Map.Map Int (Reg, Reg),
     cSimplifyWL :: Set.Set Reg,
     cFreezeWL :: Set.Set Reg,
     cSpillWL :: Set.Set Reg,
@@ -103,7 +106,7 @@ data C = C
 start :: Func -> Machine -> Set.Set Reg -> C
 start f machine protected =
   C f machine protected Map.empty Map.empty Map.empty Map.empty Map.empty Map.empty
-    Set.empty Set.empty Set.empty Set.empty Set.empty [] Set.empty Set.empty Map.empty
+    Map.empty Map.empty Set.empty Set.empty Set.empty [] Set.empty Set.empty Map.empty
     Map.empty Set.empty
 
 type A a = State C a
@@ -121,14 +124,14 @@ run = do
     loop = do
       c <- get
       unless
-        ( Set.null (cSimplifyWL c) && Set.null (cWorklistMoves c)
+        ( Set.null (cSimplifyWL c) && Map.null (cWorklistMoves c)
             && Set.null (cFreezeWL c)
             && Set.null (cSpillWL c)
         )
         $ do
           if
               | not (Set.null (cSimplifyWL c)) -> simplify
-              | not (Set.null (cWorklistMoves c)) -> coalesce
+              | not (Map.null (cWorklistMoves c)) -> coalesce
               | not (Set.null (cFreezeWL c)) -> freeze
               | otherwise -> selectSpill
           loop
@@ -190,7 +193,7 @@ build = do
             c
               { cMoves = Map.insert index (d, s) (cMoves c),
                 cMovesOf = foldr (Map.alter (Just . Set.insert index . fromMaybe Set.empty)) (cMovesOf c) [d, s],
-                cWorklistMoves = Set.insert index (cWorklistMoves c)
+                cWorklistMoves = Map.insert index (d, s) (cWorklistMoves c)
               }
           pure (Set.delete s alive)
         _ -> pure alive
@@ -243,11 +246,13 @@ makeWorklists = do
               then c {cFreezeWL = Set.insert r (cFreezeWL c)}
               else c {cSimplifyWL = Set.insert r (cSimplifyWL c)}
 
-nodeMoves :: Reg -> A [Int]
+-- | The moves this register is still an end of, waiting or active.
+nodeMoves :: Reg -> A [(Int, (Reg, Reg))]
 nodeMoves r = do
   c <- get
   let mine = fromMaybe Set.empty (Map.lookup r (cMovesOf c))
-  pure [i | i <- Set.toAscList mine, Set.member i (cActiveMoves c) || Set.member i (cWorklistMoves c)]
+      onAList i = Map.lookup i (cActiveMoves c) `mplus` Map.lookup i (cWorklistMoves c)
+  pure [(i, m) | i <- Set.toAscList mine, Just m <- [onAList i]]
 
 moveRelated :: Reg -> A Bool
 moveRelated r = not . null <$> nodeMoves r
@@ -292,14 +297,14 @@ enableMoves = mapM_ one
   where
     one :: Reg -> A ()
     one r = nodeMoves r >>= mapM_ activate
-    activate :: Int -> A ()
-    activate index =
+    activate :: (Int, (Reg, Reg)) -> A ()
+    activate (index, move) =
       modify $ \c ->
-        if Set.member index (cActiveMoves c)
+        if Map.member index (cActiveMoves c)
           then
             c
-              { cActiveMoves = Set.delete index (cActiveMoves c),
-                cWorklistMoves = Set.insert index (cWorklistMoves c)
+              { cActiveMoves = Map.delete index (cActiveMoves c),
+                cWorklistMoves = Map.insert index move (cWorklistMoves c)
               }
           else c
 
@@ -315,20 +320,19 @@ aliasOf r = do
       | otherwise = x
 
 coalesce :: A ()
-coalesce = do
-  c0 <- get
-  let index = Set.findMin (cWorklistMoves c0)
-      (dst, src) = fromMaybe (error "no such move") (Map.lookup index (cMoves c0))
-  modify (\c -> c {cWorklistMoves = Set.delete index (cWorklistMoves c)})
-  u <- aliasOf dst
-  v <- aliasOf src
-  joined <- adjacent u
-  ok <- conservative u v
-  if
-      | u == v -> addToWorklist u
-      | Set.member v joined -> addToWorklist u >> addToWorklist v
-      | ok -> combine u v >> addToWorklist u
-      | otherwise -> modify (\c -> c {cActiveMoves = Set.insert index (cActiveMoves c)})
+coalesce = gets (Map.lookupMin . cWorklistMoves) >>= mapM_ one
+  where
+    one (index, move@(dst, src)) = do
+      modify (\c -> c {cWorklistMoves = Map.delete index (cWorklistMoves c)})
+      u <- aliasOf dst
+      v <- aliasOf src
+      joined <- adjacent u
+      ok <- conservative u v
+      if
+          | u == v -> addToWorklist u
+          | Set.member v joined -> addToWorklist u >> addToWorklist v
+          | ok -> combine u v >> addToWorklist u
+          | otherwise -> modify (\c -> c {cActiveMoves = Map.insert index move (cActiveMoves c)})
 
 addToWorklist :: Reg -> A ()
 addToWorklist r = do
@@ -391,13 +395,11 @@ freezeMoves r = do
   indices <- nodeMoves r
   mapM_ one indices
   where
-    one index = do
-      c0 <- get
-      let (dst, src) = fromMaybe (error "no such move") (Map.lookup index (cMoves c0))
+    one (index, (dst, src)) = do
       modify $ \c ->
         c
-          { cActiveMoves = Set.delete index (cActiveMoves c),
-            cWorklistMoves = Set.delete index (cWorklistMoves c)
+          { cActiveMoves = Map.delete index (cActiveMoves c),
+            cWorklistMoves = Map.delete index (cWorklistMoves c)
           }
       aliasDst <- aliasOf dst
       aliasR <- aliasOf r

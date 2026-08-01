@@ -14,7 +14,6 @@ module Wolv.OutOfSsa (destruct, destructModule) where
 
 import Data.List (foldl')
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
 import qualified Data.Set as Set
 import Wolv.Ir
 
@@ -29,13 +28,7 @@ destruct f0 = recomputePreds (mapBlocks noPhis (foldl' atBlock f0 (fnOrder f0)))
     fromPred label f pred'
       | length (succs (blockOf f pred')) /= 1 =
           error (pred' ++ " -> " ++ label ++ " is a critical edge")
-      | otherwise =
-          copyInParallel
-            pred'
-            [ (phiDst p, fromMaybe (error "a phi with a missing argument") (lookup pred' (phiArgs p)))
-              | p <- blPhis (blockOf f label)
-            ]
-            f
+      | otherwise = copyInParallel pred' (onEdge pred' (blockOf f label)) f
 
 copyInParallel :: Label -> [(Reg, Reg)] -> Func -> Func
 copyInParallel label moves f

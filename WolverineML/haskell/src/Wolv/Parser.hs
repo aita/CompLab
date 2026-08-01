@@ -18,7 +18,7 @@
 module Wolv.Parser (parse, parseExp) where
 
 import Data.List (foldl')
-import Control.Monad (void, when)
+import Control.Monad (void)
 import Control.Monad.State (lift)
 import Text.Parsec hiding (parse)
 import Text.Parsec.Pos (newPos)
@@ -31,13 +31,15 @@ import Wolv.Lexer
 -- > right is right-associative, which only @:=@ is.
 --
 -- One table rather than two, so no token can have a precedence and no spelling.
-type Infix = (Exp 'Parsed -> Exp 'Parsed -> Node 'Parsed, Int, Int)
+-- | Assignment is the one that can refuse its left side, so building a node is
+-- in the parser rather than beside it.
+type Infix = (Exp 'Parsed -> Exp 'Parsed -> P (Node 'Parsed), Int, Int)
 
 infixOp :: Tok -> Maybe Infix
 infixOp t = case t of
-  ASSIGN -> Just (EAssign, 2, 1)
-  ORELSE -> Just (ELogic "orelse", 4, 5)
-  ANDALSO -> Just (ELogic "andalso", 6, 7)
+  ASSIGN -> Just (\l r -> (`EAssign` r) <$> place l, 2, 1)
+  ORELSE -> Just (pure2 (ELogic "orelse"), 4, 5)
+  ANDALSO -> Just (pure2 (ELogic "andalso"), 6, 7)
   EQ_ -> bin "=" 8; NE -> bin "<>" 8; LT_ -> bin "<" 8
   LE -> bin "<=" 8; GT_ -> bin ">" 8; GE -> bin ">=" 8
   CARET -> bin "^" 10
@@ -45,7 +47,8 @@ infixOp t = case t of
   STAR -> bin "*" 14; SLASH -> bin "/" 14; MOD -> bin "mod" 14
   _ -> Nothing
   where
-    bin name power = Just (EBin name, power, power + 1)
+    bin name power = Just (pure2 (EBin name), power, power + 1)
+    pure2 f a b = pure (f a b)
 
 unaryBP :: Int
 unaryBP = 16
@@ -225,16 +228,14 @@ expression minBP = atom >>= loop
       case infixOp (tokKind t) of
         Just (build, l, r) | l >= minBP -> do
           void anyTok
-          when (tokKind t == ASSIGN) (checkLvalue left)
           right <- expression r
-          loop (parsed (tokAt t) (build left right))
+          node <- build left right
+          loop (parsed (tokAt t) node)
         _ -> pure left
 
-checkLvalue :: Exp 'Parsed -> P ()
-checkLvalue e = case eNode e of
-  EVar _ _ -> pure ()
-  EIndex _ _ -> pure ()
-  EField _ _ _ -> pure ()
+place :: Exp 'Parsed -> P (Place 'Parsed)
+place e = case eNode e of
+  EPlace p -> pure p
   _ -> bad (eAt e) "the left of `:=` is not assignable"
 
 atom :: P (Exp 'Parsed)
@@ -299,7 +300,7 @@ named = do
       fields <-
         between (kindIs LBRACE) (expect RBRACE) (emptyOr RBRACE (fieldInit `sepBy1` kindIs COMMA))
       pure (parsed at (ERecord (tokText tok) fields))
-    _ -> pure (parsed at (EVar (tokText tok) ()))
+    _ -> pure (placed at (PVar (tokText tok) ()))
 
 fieldInit :: P (FieldInit 'Parsed)
 fieldInit = do
@@ -315,11 +316,11 @@ postfix base = do
       void anyTok
       index <- expression 0
       void (expect RBRACK)
-      postfix (parsed (tokAt t) (EIndex base index))
+      postfix (placed (tokAt t) (PIndex base index))
     DOT -> do
       void anyTok
       name <- expectIdent
-      postfix (parsed (tokAt t) (EField base (tokText name) ()))
+      postfix (placed (tokAt t) (PField base (tokText name) ()))
     _ -> pure base
 
 ifExp :: P (Exp 'Parsed)

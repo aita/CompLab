@@ -95,8 +95,8 @@ plan graph =
     [ ndIndex n
       | n <- nodes graph,
         alone n,
-        Just reader <- [ndReader n],
-        swallows graph (fromMaybe (error "no reader") (nodeAt graph (Just reader))) n
+        Just reader <- [nodeAt graph (ndReader n)],
+        swallows graph reader n
     ]
 
 -- | Whether the instruction chosen for @reader@ has room for @node@.

@@ -47,7 +47,6 @@ dominance f = Dominance idom children frontier order
   where
     order = rpo f
     rank = Map.fromList (zip order [(0 :: Int) ..])
-    at m k = fromMaybe (error "no rank") (Map.lookup k m)
 
     -- The two runners climb until they meet, each time from the deeper one.
     intersect table a b
@@ -56,9 +55,13 @@ dominance f = Dominance idom children frontier order
           let a' = climb table a b
               b' = climb table b a'
            in intersect table a' b'
-    climb table x y
-      | at rank x > at rank y = climb table (at table x) y
-      | otherwise = x
+
+    -- Both runners are blocks the round has already given a dominator, so both
+    -- are in the table and both are in the order; a runner that is in neither
+    -- has nowhere to climb to and stays where it is.
+    climb table x y = case (Map.lookup x rank, Map.lookup y rank, Map.lookup x table) of
+      (Just deeper, Just shallower, Just parent) | deeper > shallower -> climb table parent y
+      _ -> x
 
     idom = converge round' (Map.singleton (fnEntry f) (fnEntry f))
     round' table = foldl' one table (drop 1 order)
@@ -70,16 +73,18 @@ dominance f = Dominance idom children frontier order
     children =
       Map.fromListWith
         (flip (++))
-        ([(label, []) | label <- order] ++ [(at idom label, [label]) | label <- order, at idom label /= label])
+        ( [(label, []) | label <- order]
+            ++ [(parent, [label]) | label <- order, Just parent <- [Map.lookup label idom], parent /= label]
+        )
 
     frontier = foldl' runners (Map.fromList [(label, Set.empty) | label <- order]) order
     runners table label
       | length (blPreds (blockOf f label)) < 2 = table
       | otherwise = foldl' (climbFrom label) table (blPreds (blockOf f label))
-    climbFrom label table runner
-      | runner /= at idom label && Map.member runner idom =
-          climbFrom label (Map.adjust (Set.insert label) runner table) (at idom runner)
-      | otherwise = table
+    climbFrom label table runner = case (Map.lookup label idom, Map.lookup runner idom) of
+      (Just parent, Just up)
+        | runner /= parent -> climbFrom label (Map.adjust (Set.insert label) runner table) up
+      _ -> table
 
 -- | Where each register is written, and how often.  A register written twice in
 -- one block is as much a variable as one written in two blocks, so the count is

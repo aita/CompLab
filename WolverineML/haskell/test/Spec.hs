@@ -113,11 +113,11 @@ shape e = case eNode e of
   EBool value -> if value then "true" else "false"
   ENil -> "nil"
   EUnit -> "()"
-  EVar name _ -> name
+  EPlace p -> place p
   ENeg operand -> "(~ " ++ shape operand ++ ")"
   EBin op lhs rhs -> "(" ++ op ++ " " ++ shape lhs ++ " " ++ shape rhs ++ ")"
   ELogic op lhs rhs -> "(" ++ op ++ " " ++ shape lhs ++ " " ++ shape rhs ++ ")"
-  EAssign target value -> "(:= " ++ shape target ++ " " ++ shape value ++ ")"
+  EAssign target value -> "(:= " ++ place target ++ " " ++ shape value ++ ")"
   EIf cond then' els ->
     "(if " ++ shape cond ++ " " ++ shape then' ++ maybe "" ((" " ++) . shape) els ++ ")"
   EWhile cond body -> "(while " ++ shape cond ++ " " ++ shape body ++ ")"
@@ -126,11 +126,15 @@ shape e = case eNode e of
   EBreak -> "break"
   ESeq items -> "(seq " ++ unwords (map shape items) ++ ")"
   ECall name args _ -> "(" ++ name ++ " " ++ unwords (map shape args) ++ ")"
-  EIndex array index -> "(index " ++ shape array ++ " " ++ shape index ++ ")"
-  EField record name _ -> "(field " ++ shape record ++ " " ++ name ++ ")"
   ERecord tyname fields ->
     "(record " ++ tyname ++ " " ++ unwords [fiName f ++ "=" ++ shape (fiValue f) | f <- fields] ++ ")"
   ELet decls body -> "(let " ++ show (length decls) ++ " " ++ shape body ++ ")"
+
+place :: Place 'Parsed -> String
+place p = case plNode p of
+  PVar name _ -> name
+  PIndex array index -> "(index " ++ shape array ++ " " ++ shape index ++ ")"
+  PField record name _ -> "(field " ++ shape record ++ " " ++ name ++ ")"
 
 parserTests :: Harness -> IO ()
 parserTests h = do

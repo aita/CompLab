@@ -37,6 +37,7 @@ module Wolv.Ir
     uses,
     mapUses,
     definition,
+    onEdge,
     hasEffect,
     renameTarget,
     newFunc,
@@ -215,6 +216,15 @@ data Form
   | FCmp | FCmpi
   | FCset Cond
   deriving (Eq, Show)
+
+-- | The copies a block's phis stand for on the edge from @from@: each phi's
+-- destination, and the argument that phi names for that predecessor.
+--
+-- A phi names one argument per predecessor, so this is a filter and not a
+-- lookup — there is nothing to say when an edge is missing, because taking the
+-- arguments that mention the edge cannot ask for one that does not.
+onEdge :: Label -> Block -> [(Reg, Reg)]
+onEdge from b = [(phiDst p, src) | p <- blPhis b, (label, src) <- phiArgs p, label == from]
 
 -- | The register an instruction writes, and how to make it write another one.
 --

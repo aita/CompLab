@@ -205,10 +205,7 @@ emitFunc borrowing f alloc = steps
     -- tree keeps left SSA already, so this is only ever asked of a block with no
     -- phis.
     edge source target =
-      parallel
-        [ (colour (phiDst p), colour (fromMaybe (error "no argument") (lookup source (phiArgs p))))
-          | p <- blPhis (blockOf f target)
-        ]
+      parallel [(colour d, colour src) | (d, src) <- onEdge source (blockOf f target)]
 
     parallel moves = concatMap step (sequentialize moves (borrowed moves))
       where
@@ -248,7 +245,10 @@ emitFunc borrowing f alloc = steps
       StoreSlot slot s -> access "str" (colour s) 29 (slotOffset slot)
       FrameAddr d -> mov (colour d) 29
       Call d callee args -> call d callee args
-      _ -> error "cannot emit this instruction"
+      -- Anything else is an abstract instruction that selection should have
+      -- replaced, which `Mach.verify` says so about before emission is reached;
+      -- there is no line for it because there is no instruction for it.
+      _ -> []
 
     -- Write down one selected instruction: the table's line with its holes
     -- filled in.

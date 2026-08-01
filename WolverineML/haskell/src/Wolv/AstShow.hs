@@ -66,6 +66,15 @@ showDecl escapes depth d out = case d of
           result = showTy (fsResult (fbSym b))
        in showExp escapes (depth + 1) (fbBody b) (put depth ("fun " ++ fbName b ++ "(" ++ params ++ ") : " ++ result) o)
 
+showPlace :: Set.Set Int -> Int -> Place 'Typed -> Lines -> Lines
+showPlace escapes depth p out = case plNode p of
+  PVar name _ -> put depth ("var " ++ name ++ ofPlace) out
+  PIndex array index -> kids [array, index] (put depth ("index" ++ ofPlace) out)
+  PField record name _ -> kids [record] (put depth ("field ." ++ name ++ ofPlace) out)
+  where
+    ofPlace = " : " ++ showTy (plTy p)
+    kids es o = foldl' (\o' k -> showExp escapes (depth + 1) k o') o es
+
 showExp :: Set.Set Int -> Int -> Exp 'Typed -> Lines -> Lines
 showExp escapes depth e out = case eNode e of
   EInt value -> put depth ("int " ++ show value) out
@@ -73,19 +82,18 @@ showExp escapes depth e out = case eNode e of
   EBool value -> put depth ("bool " ++ (if value then "true" else "false")) out
   ENil -> put depth "nil" out
   EUnit -> put depth "()" out
-  EVar name _ -> put depth ("var " ++ name ++ ofType e) out
+  EPlace p -> showPlace escapes depth p out
   ECall name args _ -> kids args (put depth ("call " ++ name ++ ofType e) out)
   ERecord tyname fields ->
     foldl'
       (\o f -> showExp escapes (depth + 2) (fiValue f) (put (depth + 1) (fiName f ++ " =") o))
       (put depth ("record " ++ tyname ++ ofType e) out)
       fields
-  EIndex array index -> kids [array, index] (put depth ("index" ++ ofType e) out)
-  EField record name _ -> kids [record] (put depth ("field ." ++ name ++ ofType e) out)
   ENeg operand -> kids [operand] (put depth "neg" out)
   EBin op lhs rhs -> kids [lhs, rhs] (put depth (op ++ ofType e) out)
   ELogic op lhs rhs -> kids [lhs, rhs] (put depth (op ++ ofType e) out)
-  EAssign target value -> kids [target, value] (put depth ":=" out)
+  EAssign target value ->
+    kids [value] (showPlace escapes (depth + 1) target (put depth ":=" out))
   EIf cond then' els ->
     kids (cond : then' : maybe [] (: []) els) (put depth ("if" ++ ofType e) out)
   EWhile cond body -> kids [cond, body] (put depth "while" out)
