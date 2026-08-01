@@ -1,0 +1,6 @@
+# The compiler, as a neko program.  Neko is a `sys` target, so `sys.io.Process`
+# is there to drive the cross `gcc` and qemu with.
+-cp src
+-main Wolv
+-neko bin/wolv.n
+-resource runtime/runtime.c@runtime.c

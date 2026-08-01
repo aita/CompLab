@@ -29,6 +29,7 @@ val () = print (intToString (gcd (84, 36)) ^ " " ^ intToString (sumTo (100)) ^ "
 ```
 
 ```
+$ cd python
 $ uv run python -m wolv run examples/tour.wol
 $ uv run python -m wolv build examples/queens.wol -o queens && qemu-aarch64 ./queens
 ```
@@ -38,9 +39,30 @@ every dump in it taken from an actual run. Two to start with:
 [パイプライン](doc/00-pipeline.md) と
 [レジスタ割り当て(1) 支配木彩色](doc/07-chordal.md)。
 
+## The compilers
+
+[`python/`](python) holds the one this file describes, and the one the book is
+written about: both allocators are here, and so is everything the chapters dump.
+
+[`kotlin/`](kotlin), [`go/`](go), [`ocaml/`](ocaml), [`typescript/`](typescript)
+and [`haxe/`](haxe) hold the same compiler written again, each described in a
+README of its own. They carry one allocator — the graph — because the comparison
+the other one exists for is made in the Python tree. Every other stage is the
+same pass over the same shapes, and for every example and test program in every
+configuration, every stage dumps the same bytes out of any of the six, the
+assembly included.
+
+None of the five is a transliteration. Each says the same thing the way its own
+language says things — a sealed hierarchy and one exhaustive `when` per question
+in Kotlin, variants with mutable inline records in OCaml, a flat package and a
+type switch in Go, a discriminated union in TypeScript, an immutable `enum` and
+pure rewriting in Haxe — and the READMEs are largely about where those choices
+led.
+
 ## Build and run
 
 ```sh
+cd python
 uv sync
 uv run pytest                     # 183 tests
 uv run mypy                       # every module is strictly typed
@@ -407,8 +429,16 @@ right, a test that caught a swap the ordering was doing twice.
 Structural tests for the middle. After construction and after every
 optimisation, `ssa.verify` insists on one definition per register, that each
 definition dominates its uses, and that it reaches each phi through the edge
-that names it. `allocator.verify` insists that no two values live at the same
-point share a colour, and every test that says so runs against both allocators.
+that names it. `allocator.verify` insists that no two values holding different
+things at once share a colour, and every test that says so runs against both
+allocators.
+
+"Different things" is the load-bearing half. Both ends of a copy are live after
+it and hold the same value, which is exactly what coalescing gives them one
+register for, so the check is made where the interference graph draws an edge —
+at each definition — and not over a whole live set. Reading the set instead
+rejects `queens` under `--no-opt`, where `%156` and `%157` are a copy apart and
+both in `x19`.
 
 And end-to-end tests, which compile seven programs to ARMv8, link them against
 the runtime, run them under qemu, and compare the output — under eight

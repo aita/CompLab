@@ -86,11 +86,23 @@ Tiger の言語を SML の書き方で書き、ARMv8 に落とす処理系の解
 
 ## 走らせながら読む
 
-各章のダンプは全部この2つの形で出せます。
+各章のダンプは全部この2つの形で出せます。`python/` で走らせてください。
 
 ```sh
 uv run python -m wolv emit -s <stage> [--regalloc graph] [--max-regs N] prog.wol
 uv run python -m wolv run prog.wol
+```
+
+Kotlin 版・Go 版・OCaml 版・TypeScript 版・Haxe 版はレジスタ割り当てがグラフ彩色
+1本だけで、それ以外の段は同じものです。`--regalloc` を除けば同じ引数で、同じ
+ダンプが出ます。
+
+```sh
+cd kotlin     && ./gradlew installDist && ./build/install/wolv/bin/wolv emit -s <stage> prog.wol
+cd go         && go build -o bin/wolv . && ./bin/wolv emit -s <stage> prog.wol
+cd ocaml      && dune build && ./_build/default/bin/main.exe emit -s <stage> prog.wol
+cd typescript && node src/main.ts emit -s <stage> prog.wol
+cd haxe       && haxe build.hxml && neko bin/wolv.n emit -s <stage> prog.wol
 ```
 
 `<stage>` は `tokens` `ast` `ir` `ssa` `opt` `dag` `mach` `flat` `ra` `asm` の10段で、

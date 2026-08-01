@@ -1,0 +1,19 @@
+{
+  "name": "wolv",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "WolverineML, compiled to ARMv8",
+  "bin": {
+    "wolv": "./src/main.ts"
+  },
+  "scripts": {
+    "wolv": "node src/main.ts",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "check": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.10.0"
+  }
+}

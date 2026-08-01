@@ -1,0 +1,21 @@
+; The compiler is a library so that a test can drive one pass on its own, and
+; `bin/` wraps it in an executable.  `wrapped false` keeps the module names
+; flat: `Ir` is `Ir` from anywhere, the way the Python modules are.
+
+(library
+ (name wolv)
+ (wrapped false)
+ (libraries unix uucp containers)
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
+
+; The run-time system is C, and it travels inside the compiler as a string that
+; `driver.ml` writes back out to hand to the cross compiler.
+
+(rule
+ (targets runtime_source.ml)
+ (deps ../runtime/runtime.c ../tools/embed.ml)
+ (action
+  (with-stdout-to
+   runtime_source.ml
+   (run ocaml %{dep:../tools/embed.ml} %{dep:../runtime/runtime.c}))))

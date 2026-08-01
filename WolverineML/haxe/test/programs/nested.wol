@@ -1,0 +1,65 @@
+(* Static links, three deep, and variables that escape into them. *)
+
+fun show (label : string, n : int) =
+  print (label ^ " = " ^ intToString (n) ^ "\n")
+
+fun counter () : int =
+  let
+    var n = 0
+    fun bump () = n := n + 3
+  in
+    bump (); bump (); bump ();
+    n
+  end
+
+val () = show ("counter", counter ())
+
+fun outer (seed : int) : int =
+  let
+    var acc = seed
+    fun middle (k : int) : int =
+      let
+        var here = k * 2
+        fun inner (m : int) : int = acc + here + m
+      in
+        acc := acc + 1;
+        inner (k) + inner (k + 1)
+      end
+  in
+    middle (5) + acc
+  end
+
+val () = show ("outer", outer (100))
+
+(* A loop variable that escapes into a nested function. *)
+fun escapingLoop () : int =
+  let var total = 0 in
+    for i = 1 to 4 do
+      let fun add () = total := total + i * i in
+        add ()
+      end;
+    total
+  end
+
+val () = show ("escaping", escapingLoop ())
+
+(* Mutual recursion between nested functions. *)
+fun parity (n : int) : string =
+  let
+    fun even (k : int) : bool = if k = 0 then true else odd (k - 1)
+    and odd (k : int) : bool = if k = 0 then false else even (k - 1)
+  in
+    if even (n) then "even" else "odd"
+  end
+
+val () = print (parity (10) ^ " " ^ parity (7) ^ "\n")
+
+(* A top-level variable read from two levels down. *)
+var global = 5
+
+fun useGlobal () : int =
+  let fun deeper () : int = global * 2 in
+    deeper () + global
+  end
+
+val () = show ("global", useGlobal ())

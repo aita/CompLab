@@ -175,6 +175,120 @@ def check_lvalue(self, e: ast.Exp) -> None:
 
 ---
 
+## 1.6 文法の全体
+
+以上をまとめると次のようになります。`{ }` は0回以上の繰り返し、`[ ]` は省略可、
+`|` は選択で、引用符の中がそのままの字面です。
+
+### 宣言
+
+```
+program   ::= { decl }
+
+decl      ::= "type" typebind { "and" typebind }
+            | ( "val" | "var" ) ( ident | "(" ")" ) [ ":" ty ] "=" exp
+            | "fun" funbind { "and" funbind }
+
+typebind  ::= ident "=" ty
+funbind   ::= ident "(" [ param { "," param } ] ")" [ ":" ty ] "=" exp
+param     ::= ident ":" ty
+```
+
+`and` で繋いだ組は互いに再帰してよく、そこが1つの宣言の単位です。`val () = e` は
+名前を付けない束縛で、`e` は `unit` でなければなりません。
+
+### 型
+
+```
+ty        ::= tyatom { "array" }
+tyatom    ::= ident
+            | "{" [ tyfield { "," tyfield } ] "}"
+            | "(" ty ")"
+tyfield   ::= ident ":" ty
+```
+
+`array` は予約語ではありません。型の位置に現れた識別子 `array` だけが後置の
+構成子として読まれ、式の位置では組み込み関数の名前です。レコード型 `{ … }` は
+ここでは読めますが、`type` で名前を与えていない限り型検査が拒みます —— レコード型が
+公称的だからです（[2章](02-types.md)）。
+
+### 式
+
+構文解析は優先順位表1つの Pratt 法で、階層を持ちません（[1.2](#12-pratt-構文解析)）。
+以下は**その表と同じものを階層で書き直したもの**で、読み方の定義としては等価です。
+上ほど弱く結合します。
+
+```
+exp       ::= assign
+assign    ::= orelse [ ":=" assign ]                          -- 右結合
+orelse    ::= andalso { "orelse" andalso }
+andalso   ::= compare { "andalso" compare }
+compare   ::= concat { ( "=" | "<>" | "<" | "<=" | ">" | ">=" ) concat }
+concat    ::= additive { "^" additive }
+additive  ::= product { ( "+" | "-" ) product }
+product   ::= unary { ( "*" | "/" | "mod" ) unary }
+unary     ::= "~" unary | primary
+```
+
+`:=` だけが右結合で、残りは全て左結合です。`~` は `*` より強く結合するので
+`~x * y` は `(~x) * y` になります。
+
+```
+primary   ::= atom { postfix }
+            | "true" | "false" | "nil" | "break"
+            | "if" exp "then" exp [ "else" exp ]
+            | "while" exp "do" exp
+            | "for" ident "=" exp "to" exp "do" exp
+            | "let" { decl } "in" [ seq ] "end"
+
+atom      ::= int | string
+            | ident "(" [ exp { "," exp } ] ")"               -- 呼び出し
+            | ident "{" [ field { "," field } ] "}"           -- レコード生成
+            | ident                                           -- 変数
+            | "(" ")"                                         -- unit
+            | "(" seq ")"
+
+field     ::= ident "=" exp
+postfix   ::= "[" exp "]" | "." ident
+seq       ::= exp { ";" exp } [ ";" ]
+```
+
+3つ、この形からしか読めないことがあります。
+
+- **後置が付くのは `atom` だけ**です。`if` 式やリテラルの `nil` に `.f` を続けることは
+  できず、`(if c then a else b).f` と書きます。
+- **`;` は演算子ではありません**。`( … )` の中と `let … in … end` の中だけに現れます。
+  だから `if c then a else b ; d` は `if` 式と `d` の2つに割れます。閉じ括弧の直前の
+  `;` は許されます。
+- **`let … in end` は合法**で、値は `unit` です。
+
+`:=` の左に置ける `orelse` は構文上は何でも書けますが、変数・添字・フィールドの
+いずれかでなければその場で弾かれます（[1.5](#15-代入できるものは構文で決める)）。
+
+### 字句
+
+```
+ident     ::= ( letter | "_" ) { letter | digit | "_" | "'" }
+int       ::= digit { digit }
+string    ::= '"' { schar } '"'
+schar     ::= <"、\、改行 以外の1文字> | escape
+escape    ::= "\" ( "n" | "t" | "r" | '"' | "\" )
+            | "\" digit digit digit                           -- 1バイトを名指す
+comment   ::= "(*" { comment | <任意の1文字> } "*)"            -- 入れ子になる
+```
+
+`letter` と `digit` は Unicode の分類で、名前は ASCII に限りません。文字列リテラルは
+バイト列で、ソースの1文字はその UTF-8 のバイト列になります（[1.1](#11-字句)）。
+
+予約語は次の22個です。これ以外の識別子は変数か関数か型の名前になります。
+
+```
+and  andalso  break  do  else  end  false  for  fun  if  in  let  mod
+nil  orelse  then  to  true  type  val  var  while
+```
+
+---
+
 ## していないこと
 
 - 演算子の定義（`infix` 宣言）はありません。表は固定です。

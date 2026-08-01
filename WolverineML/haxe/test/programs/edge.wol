@@ -1,0 +1,41 @@
+fun show (label : string, n : int) =
+  print (label ^ " = " ^ intToString (n) ^ "\n")
+
+(* Exactly eight arguments: with the static link that is the last register. *)
+fun eight (a : int, b : int, c : int, d : int, e : int, f : int, g : int, h : int) : int =
+  a + b + c + d + e + f + g + h
+
+fun nine (a : int, b : int, c : int, d : int, e : int, f : int, g : int, h : int,
+          i : int) : int = a + i * 100
+
+(* Forty escaping variables, so the frame runs past what `stur` can reach. *)
+fun wide () : int =
+  let
+    var v0 = 0  var v1 = 1  var v2 = 2  var v3 = 3  var v4 = 4
+    var v5 = 5  var v6 = 6  var v7 = 7  var v8 = 8  var v9 = 9
+    var w0 = 10 var w1 = 11 var w2 = 12 var w3 = 13 var w4 = 14
+    var w5 = 15 var w6 = 16 var w7 = 17 var w8 = 18 var w9 = 19
+    var x0 = 20 var x1 = 21 var x2 = 22 var x3 = 23 var x4 = 24
+    var x5 = 25 var x6 = 26 var x7 = 27 var x8 = 28 var x9 = 29
+    var y0 = 30 var y1 = 31 var y2 = 32 var y3 = 33 var y4 = 34
+    var y5 = 35 var y6 = 36 var y7 = 37 var y8 = 38 var y9 = 39
+    fun total () : int =
+      v0 + v1 + v2 + v3 + v4 + v5 + v6 + v7 + v8 + v9 +
+      w0 + w1 + w2 + w3 + w4 + w5 + w6 + w7 + w8 + w9 +
+      x0 + x1 + x2 + x3 + x4 + x5 + x6 + x7 + x8 + x9 +
+      y0 + y1 + y2 + y3 + y4 + y5 + y6 + y7 + y8 + y9
+  in
+    y9 := y9 + 1;
+    total ()
+  end
+
+val () = show ("eight", eight (1, 2, 3, 4, 5, 6, 7, 8))
+val () = show ("nine", nine (1, 2, 3, 4, 5, 6, 7, 8, 9))
+val () = show ("wide", wide ())
+val () = show ("big", 1234567890123 + 1)
+val () = show ("negative", ~1234567890123)
+val () = show ("wrap", 9223372036854775807 + 1)
+val () = show ("deep", if 1 < 2 then if 2 < 3 then if 3 < 4 then
+                       if 4 < 5 then if 5 < 6 then 6 else 5 else 4 else 3 else 2 else 1)
+val () = print ("escapes: \065\066\067 \"quoted\" tab\there\n")
+val () = print ("unicode: \230\151\165\230\156\172\232\170\158\n")

@@ -1,0 +1,48 @@
+(* The eight queens, the way Tiger's own example does it: one array for the
+   board and three for the diagonals, and a nested function that recurses on
+   the column.  `row`, `col` and the rest escape into `place`, so they live in
+   the frame rather than in registers. *)
+
+val n = 8
+
+val row = array (n, 0)
+val col = array (n, 0)
+val diag1 = array (n + n - 1, 0)
+val diag2 = array (n + n - 1, 0)
+var solutions = 0
+
+fun show () =
+  let
+    var i = 0
+  in
+    while i < n do
+      let var j = 0 in
+        while j < n do (
+          print (if col[i] = j then " Q" else " .");
+          j := j + 1
+        );
+        print ("\n");
+        i := i + 1
+      end;
+    print ("\n")
+  end
+
+fun place (c : int) =
+  if c = n then (
+    solutions := solutions + 1;
+    if solutions <= 2 then show () else ()
+  ) else
+    for r = 0 to n - 1 do
+      if row[r] = 0 andalso diag1[r + c] = 0 andalso diag2[r + 7 - c] = 0 then (
+        row[r] := 1;
+        diag1[r + c] := 1;
+        diag2[r + 7 - c] := 1;
+        col[c] := r;
+        place (c + 1);
+        row[r] := 0;
+        diag1[r + c] := 0;
+        diag2[r + 7 - c] := 0
+      ) else ()
+
+val () = place (0)
+val () = print ("solutions: " ^ intToString (solutions) ^ "\n")

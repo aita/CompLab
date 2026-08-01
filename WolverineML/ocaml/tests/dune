@@ -1,0 +1,12 @@
+; The tests, as one executable: `dune test` runs the lot and says how many
+; passed.  The end-to-end ones need a cross `gcc` and `qemu-aarch64`, and say so
+; and skip when there is neither.
+
+(test
+ (name run_tests)
+ (libraries wolv)
+ (deps
+  (source_tree programs)
+  (source_tree ../examples))
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
