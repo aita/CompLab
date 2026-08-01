@@ -1,3 +1,4 @@
+{-# LANGUAGE TupleSections #-}
 -- | The three-address IR, and the control flow graph both IRs are written in.
 --
 -- There are two instruction sets in this compiler.  This file has the first:
@@ -35,7 +36,7 @@ module Wolv.Ir
     defs,
     uses,
     mapUses,
-    withDef,
+    definition,
     hasEffect,
     renameTarget,
     newFunc,
@@ -87,7 +88,9 @@ type Label = String
 -- emitter each answer one question per operator, and a sum makes every one of
 -- them exhaustive.  What the strings were is what 'showOp' and 'showRel' say,
 -- and only a dump asks.
-data Op = Add | Sub | Mul | Div | Mod | And | Or | Xor | Shl | Shr
+-- | There is no remainder: lowering spells it out as a divide, a multiply and
+-- a subtract, so no instruction selector has to have a case that cannot happen.
+data Op = Add | Sub | Mul | Div | And | Or | Xor | Shl | Shr
   deriving (Eq, Show)
 
 data Rel = Equal | NotEqual | Less | LessEq | Greater | GreaterEq | Below | AboveEq
@@ -100,7 +103,7 @@ data Cond = CondEq | CondNe | CondLt | CondLe | CondGt | CondGe | CondLo | CondH
 
 showOp :: Op -> String
 showOp op = case op of
-  Add -> "+"; Sub -> "-"; Mul -> "*"; Div -> "/"; Mod -> "mod"
+  Add -> "+"; Sub -> "-"; Mul -> "*"; Div -> "/"
   And -> "and"; Or -> "or"; Xor -> "xor"; Shl -> "shl"; Shr -> "shr"
 
 showRel :: Rel -> String
@@ -213,23 +216,32 @@ data Form
   | FCset Cond
   deriving (Eq, Show)
 
+-- | The register an instruction writes, and how to make it write another one.
+--
+-- The two are one case split rather than two, because they always had to agree:
+-- a renamer that asks whether an instruction defines anything and then asks for
+-- it to define something else is asking the same question twice, and only one
+-- of the two answers can be a total function unless both are written here.
+definition :: Instr -> Maybe (Reg, Reg -> Instr)
+definition i = case i of
+  Const d v -> Just (d, \r -> Const r v)
+  StrConst d symbol -> Just (d, \r -> StrConst r symbol)
+  Move d src -> Just (d, \r -> Move r src)
+  Bin d op a b -> Just (d, \r -> Bin r op a b)
+  Cmp d op a b -> Just (d, \r -> Cmp r op a b)
+  Load d base off -> Just (d, \r -> Load r base off)
+  LoadSlot d slot -> Just (d, \r -> LoadSlot r slot)
+  FrameAddr d -> Just (d, FrameAddr)
+  Call d callee args -> fmap (,\r -> Call (Just r) callee args) d
+  MConst d v -> Just (d, \r -> MConst r v)
+  MAdr d symbol -> Just (d, \r -> MAdr r symbol)
+  MLoad d base off -> Just (d, \r -> MLoad r base off)
+  m@(Machine {mDst = d}) -> fmap (,\r -> m {mDst = Just r}) d
+  _ -> Nothing
+
 -- | The register it writes, or nothing.
 defs :: Instr -> Maybe Reg
-defs i = case i of
-  Const d _ -> Just d
-  StrConst d _ -> Just d
-  Move d _ -> Just d
-  Bin d _ _ _ -> Just d
-  Cmp d _ _ _ -> Just d
-  Load d _ _ -> Just d
-  LoadSlot d _ -> Just d
-  FrameAddr d -> Just d
-  Call d _ _ -> d
-  MConst d _ -> Just d
-  MAdr d _ -> Just d
-  MLoad d _ _ -> Just d
-  Machine {mDst = d} -> d
-  _ -> Nothing
+defs = fmap fst . definition
 
 -- | The registers it reads.  A phi's arguments are read on the edges, not where
 -- the phi stands, so a phi is not an instruction here at all.
@@ -265,24 +277,6 @@ mapUses f i = case i of
   CBr cond t e Nothing -> CBr (f cond) t e Nothing
   Ret value -> Ret (fmap f value)
   _ -> i
-
--- | The same instruction, writing @r@ instead.  Only asked of one that writes.
-withDef :: Reg -> Instr -> Instr
-withDef r i = case i of
-  Const _ v -> Const r v
-  StrConst _ s -> StrConst r s
-  Move _ s -> Move r s
-  Bin _ op a b -> Bin r op a b
-  Cmp _ op a b -> Cmp r op a b
-  Load _ base off -> Load r base off
-  LoadSlot _ slot -> LoadSlot r slot
-  FrameAddr _ -> FrameAddr r
-  Call _ callee args -> Call (Just r) callee args
-  MConst _ v -> MConst r v
-  MAdr _ symbol -> MAdr r symbol
-  MLoad _ base off -> MLoad r base off
-  m@(Machine {}) -> m {mDst = Just r}
-  _ -> error "this instruction defines nothing"
 
 -- | True when it has to be kept even if its result is dead.
 hasEffect :: Instr -> Bool

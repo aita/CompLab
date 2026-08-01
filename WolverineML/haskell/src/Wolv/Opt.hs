@@ -102,7 +102,6 @@ arith op a b = case op of
   Sub -> Just (a - b)
   Mul -> Just (a * b)
   Div -> if b == 0 then Nothing else Just (quotient a b)
-  Mod -> if b == 0 then Nothing else Just (remainder a b)
   And -> Just (a .&. b)
   Or -> Just (a .|. b)
   Xor -> Just (a `xor` b)

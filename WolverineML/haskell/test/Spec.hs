@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 -- | Everything the compiler promises, in one run.
 module Main (main) where
 
@@ -105,14 +106,14 @@ refuses h kind message answer = case answer of
 -- -- the parser ----------------------------------------------------------------
 
 -- | A parenthesised sketch of the tree, so precedence is easy to assert.
-shape :: Exp -> String
+shape :: Exp 'Parsed -> String
 shape e = case eNode e of
   EInt value -> show value
   EStr value -> "\"" ++ value ++ "\""
   EBool value -> if value then "true" else "false"
   ENil -> "nil"
   EUnit -> "()"
-  EVar name -> name
+  EVar name _ -> name
   ENeg operand -> "(~ " ++ shape operand ++ ")"
   EBin op lhs rhs -> "(" ++ op ++ " " ++ shape lhs ++ " " ++ shape rhs ++ ")"
   ELogic op lhs rhs -> "(" ++ op ++ " " ++ shape lhs ++ " " ++ shape rhs ++ ")"
@@ -120,13 +121,13 @@ shape e = case eNode e of
   EIf cond then' els ->
     "(if " ++ shape cond ++ " " ++ shape then' ++ maybe "" ((" " ++) . shape) els ++ ")"
   EWhile cond body -> "(while " ++ shape cond ++ " " ++ shape body ++ ")"
-  EFor name lo hi body ->
+  EFor name lo hi body _ ->
     "(for " ++ name ++ " " ++ shape lo ++ " " ++ shape hi ++ " " ++ shape body ++ ")"
   EBreak -> "break"
   ESeq items -> "(seq " ++ unwords (map shape items) ++ ")"
-  ECall name args -> "(" ++ name ++ " " ++ unwords (map shape args) ++ ")"
+  ECall name args _ -> "(" ++ name ++ " " ++ unwords (map shape args) ++ ")"
   EIndex array index -> "(index " ++ shape array ++ " " ++ shape index ++ ")"
-  EField record name -> "(field " ++ shape record ++ " " ++ name ++ ")"
+  EField record name _ -> "(field " ++ shape record ++ " " ++ name ++ ")"
   ERecord tyname fields ->
     "(record " ++ tyname ++ " " ++ unwords [fiName f ++ "=" ++ shape (fiValue f) | f <- fields] ++ ")"
   ELet decls body -> "(let " ++ show (length decls) ++ " " ++ shape body ++ ")"
@@ -281,7 +282,7 @@ typecheckTests h = do
           \  let fun inner () : int = n in inner () end\n"
     case parse source >>= check of
       Right (Checked (DFun _ (b : _) : _) escapes) -> case fbParams b of
-        (p : _) -> expect h "n escapes" (maybe False ((`Set.member` escapes) . vsId) (pSym p))
+        (p : _) -> expect h "n escapes" (Set.member (vsId (pSym p)) escapes)
         _ -> expect h "one parameter" False
       _ -> expect h "one function" False
 
@@ -300,7 +301,7 @@ typecheckTests h = do
       Right _ -> pure ()
       Left e -> expect h (source ++ ": " ++ errMessage e) False
     rejects message source = refuses h TypeKind message (parse source >>= check)
-    escaped escapes d = maybe False ((`Set.member` escapes) . vsId) (dSym d)
+    escaped escapes d = maybe False ((`Set.member` escapes) . vsId . bSym) (dBound d)
 
 -- -- the middle ----------------------------------------------------------------
 

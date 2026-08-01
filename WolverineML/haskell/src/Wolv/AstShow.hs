@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+
 -- | An indented dump of the typed syntax tree, for @wolv emit -s ast@.
 module Wolv.AstShow (showProgram, quoted) where
 
@@ -42,43 +44,44 @@ showProgram (Checked prog escapes) =
 put :: Int -> String -> Lines -> Lines
 put depth text out = (replicate (2 * depth) ' ' ++ text) : out
 
-escaped :: Set.Set Int -> Maybe VarSym -> String
-escaped escapes (Just sym) | Set.member (vsId sym) escapes = " (escapes)"
-escaped _ _ = ""
+escaped :: Set.Set Int -> VarSym -> String
+escaped escapes sym
+  | Set.member (vsId sym) escapes = " (escapes)"
+  | otherwise = ""
 
-ofType :: Exp -> String
-ofType e = maybe "" (\t -> " : " ++ showTy t) (eTy e)
+ofType :: Exp 'Typed -> String
+ofType e = " : " ++ showTy (eTy e)
 
-showDecl :: Set.Set Int -> Int -> Decl -> Lines -> Lines
+showDecl :: Set.Set Int -> Int -> Decl 'Typed -> Lines -> Lines
 showDecl escapes depth d out = case d of
   DType _ binds -> foldl' (\o b -> put depth ("type " ++ tbName b) o) out binds
   DVal {} ->
     let keyword = if dMutable d then "var" else "val"
-        name = maybe "()" id (dName d)
-     in showExp escapes (depth + 1) (dInit d) (put depth (keyword ++ " " ++ name ++ escaped escapes (dSym d)) out)
+        bound = maybe "()" (\b -> bName b ++ escaped escapes (bSym b)) (dBound d)
+     in showExp escapes (depth + 1) (dInit d) (put depth (keyword ++ " " ++ bound) out)
   DFun _ binds -> foldl' one out binds
   where
     one o b =
       let params = intercalate ", " [pName p ++ escaped escapes (pSym p) | p <- fbParams b]
-          result = maybe "?" (showTy . fsResult) (fbSym b)
+          result = showTy (fsResult (fbSym b))
        in showExp escapes (depth + 1) (fbBody b) (put depth ("fun " ++ fbName b ++ "(" ++ params ++ ") : " ++ result) o)
 
-showExp :: Set.Set Int -> Int -> Exp -> Lines -> Lines
+showExp :: Set.Set Int -> Int -> Exp 'Typed -> Lines -> Lines
 showExp escapes depth e out = case eNode e of
   EInt value -> put depth ("int " ++ show value) out
   EStr value -> put depth ("string " ++ quoted value) out
   EBool value -> put depth ("bool " ++ (if value then "true" else "false")) out
   ENil -> put depth "nil" out
   EUnit -> put depth "()" out
-  EVar name -> put depth ("var " ++ name ++ ofType e) out
-  ECall name args -> kids args (put depth ("call " ++ name ++ ofType e) out)
+  EVar name _ -> put depth ("var " ++ name ++ ofType e) out
+  ECall name args _ -> kids args (put depth ("call " ++ name ++ ofType e) out)
   ERecord tyname fields ->
     foldl'
       (\o f -> showExp escapes (depth + 2) (fiValue f) (put (depth + 1) (fiName f ++ " =") o))
       (put depth ("record " ++ tyname ++ ofType e) out)
       fields
   EIndex array index -> kids [array, index] (put depth ("index" ++ ofType e) out)
-  EField record name -> kids [record] (put depth ("field ." ++ name ++ ofType e) out)
+  EField record name _ -> kids [record] (put depth ("field ." ++ name ++ ofType e) out)
   ENeg operand -> kids [operand] (put depth "neg" out)
   EBin op lhs rhs -> kids [lhs, rhs] (put depth (op ++ ofType e) out)
   ELogic op lhs rhs -> kids [lhs, rhs] (put depth (op ++ ofType e) out)
@@ -86,8 +89,8 @@ showExp escapes depth e out = case eNode e of
   EIf cond then' els ->
     kids (cond : then' : maybe [] (: []) els) (put depth ("if" ++ ofType e) out)
   EWhile cond body -> kids [cond, body] (put depth "while" out)
-  EFor name lo hi body ->
-    kids [lo, hi, body] (put depth ("for " ++ name ++ escaped escapes (binder (eSym e))) out)
+  EFor name lo hi body sym ->
+    kids [lo, hi, body] (put depth ("for " ++ name ++ escaped escapes sym) out)
   EBreak -> put depth "break" out
   ESeq items -> kids items (put depth ("seq" ++ ofType e) out)
   ELet decls body ->
@@ -96,5 +99,3 @@ showExp escapes depth e out = case eNode e of
         foldl' (\o d -> showDecl escapes (depth + 1) d o) (put depth ("let" ++ ofType e) out) decls
   where
     kids es o = foldl' (\o' k -> showExp escapes (depth + 1) k o') o es
-    binder (Just (SVar v)) = Just v
-    binder _ = Nothing

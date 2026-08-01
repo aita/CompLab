@@ -228,7 +228,6 @@ arithmetic n d op lhs rhs = case op of
   And -> logic n d FAnd Nothing lhs rhs
   Or -> logic n d FOrr Nothing lhs rhs
   Xor -> logic n d FEor (Just FEori) lhs rhs
-  Mod -> error "the remainder is spelled out in the IR"
 
 -- | Both operands in registers, which is what the plain forms want.
 both :: Node -> Reg -> Reg -> Sel [Reg]

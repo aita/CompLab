@@ -1,22 +1,35 @@
--- | The syntax tree.
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE TypeFamilies #-}
+
+-- | The syntax tree, in two phases.
 --
--- Every expression is a span, the node itself, and the three things the checker
--- works out — the type, what a name resolved to, and which word of a record a
--- field access reads.  The parser leaves those empty and the checker answers
--- with a tree that has them filled in: nothing is written into the tree the
--- parser built, because nothing in Haskell can be.
+-- Every expression is a span, the node itself, and the things the checker works
+-- out — the type, what a name resolved to, and which word of a record a field
+-- access reads.  The parser does not know any of them and the checker does, so
+-- the tree is indexed by which of the two made it: 'Parsed' fills every
+-- annotation with @()@, and 'Typed' fills it with the answer.
+--
+-- What that buys is downstream.  Lowering takes a @Program 'Typed@, so
+-- @EVar name sym@ hands it a 'VarSym' and not a @Maybe VarSym@ it would have to
+-- open with an error for the case the checker has already ruled out.  The other
+-- ports keep one tree with holes in it and an invariant nobody checks; here the
+-- invariant is the index, and the checker is the only thing that can produce a
+-- tree lowering will accept.
 module Wolv.Ast
-  ( Exp (..),
+  ( Phase (..),
+    Ann,
+    Exp (..),
     Node (..),
     FieldInit (..),
     TyExp (..),
     TyField (..),
+    Binder (..),
     Decl (..),
     TypeBind (..),
     Param (..),
     FunBind (..),
     Program,
-    exp0,
+    parsed,
     tyAt,
     declAt,
   )
@@ -25,16 +38,22 @@ where
 import Wolv.Diag (Span)
 import Wolv.Types
 
+-- | Which pass made this tree.
+data Phase = Parsed | Typed
+
+-- | An annotation: nothing before the checker has run, the answer after.
+type family Ann (p :: Phase) a where
+  Ann 'Parsed a = ()
+  Ann 'Typed a = a
+
 -- -- types as they are written ------------------------------------------------
 
 data TyExp
   = TyName Span String
   | TyArray Span TyExp
   | TyRecord Span [TyField]
-  deriving (Show)
 
 data TyField = TyField {tfName :: String, tfTy :: TyExp, tfAt :: Span}
-  deriving (Show)
 
 tyAt :: TyExp -> Span
 tyAt (TyName at _) = at
@@ -43,81 +62,74 @@ tyAt (TyRecord at _) = at
 
 -- -- expressions ---------------------------------------------------------------
 
-data Exp = Exp
-  { eAt :: Span,
-    eTy :: Maybe Type,
-    eSym :: Maybe Sym,
-    eOffset :: !Int,
-    eNode :: Node
-  }
-  deriving (Show)
+data Exp p = Exp {eAt :: Span, eTy :: Ann p Type, eNode :: Node p}
 
 -- | What the parser always wants: a node with its span and nothing known yet.
-exp0 :: Span -> Node -> Exp
-exp0 at node = Exp at Nothing Nothing (-1) node
+parsed :: Span -> Node 'Parsed -> Exp 'Parsed
+parsed at = Exp at ()
 
-data Node
+data Node p
   = EInt Integer
   | EStr String
   | EBool Bool
   | ENil
   | EUnit
-  | EVar String
-  | ECall String [Exp]
+  | -- | The symbol the name resolved to.
+    EVar String (Ann p VarSym)
+  | ECall String [Exp p] (Ann p FunSym)
   | -- | The initialisers are put into declaration order by the checker.
-    ERecord String [FieldInit]
-  | EIndex Exp Exp
-  | EField Exp String
-  | ENeg Exp
-  | EBin String Exp Exp
+    ERecord String [FieldInit p]
+  | EIndex (Exp p) (Exp p)
+  | -- | Which word of the record the field is.
+    EField (Exp p) String (Ann p Int)
+  | ENeg (Exp p)
+  | EBin String (Exp p) (Exp p)
   | -- | @andalso@ and @orelse@, which are control flow and not operators.
-    ELogic String Exp Exp
-  | EAssign Exp Exp
-  | EIf Exp Exp (Maybe Exp)
-  | EWhile Exp Exp
-  | EFor String Exp Exp Exp
+    ELogic String (Exp p) (Exp p)
+  | EAssign (Exp p) (Exp p)
+  | EIf (Exp p) (Exp p) (Maybe (Exp p))
+  | EWhile (Exp p) (Exp p)
+  | EFor String (Exp p) (Exp p) (Exp p) (Ann p VarSym)
   | EBreak
-  | ESeq [Exp]
-  | ELet [Decl] Exp
-  deriving (Show)
+  | ESeq [Exp p]
+  | ELet [Decl p] (Exp p)
 
-data FieldInit = FieldInit {fiName :: String, fiValue :: Exp, fiAt :: Span}
-  deriving (Show)
+data FieldInit p = FieldInit {fiName :: String, fiValue :: Exp p, fiAt :: Span}
 
 -- -- declarations ---------------------------------------------------------------
 
-data Decl
+-- | What a @val@ binds, when it binds anything: @val () = e@ binds nothing at
+-- all.  The name and its symbol travel together, so there is no pair of
+-- 'Maybe's that have to agree about which of the two cases this is.
+data Binder p = Binder {bName :: String, bSym :: Ann p VarSym}
+
+data Decl p
   = DType Span [TypeBind]
   | DVal
       { dAt :: Span,
-        dName :: Maybe String,
+        dBound :: Maybe (Binder p),
         dWritten :: Maybe TyExp,
-        dInit :: Exp,
-        dMutable :: !Bool,
-        dSym :: Maybe VarSym
+        dInit :: Exp p,
+        dMutable :: !Bool
       }
-  | DFun Span [FunBind]
-  deriving (Show)
+  | DFun Span [FunBind p]
 
 data TypeBind = TypeBind {tbName :: String, tbBound :: TyExp, tbAt :: Span}
-  deriving (Show)
 
-data Param = Param {pName :: String, pTy :: TyExp, pAt :: Span, pSym :: Maybe VarSym}
-  deriving (Show)
+data Param p = Param {pName :: String, pTy :: TyExp, pAt :: Span, pSym :: Ann p VarSym}
 
-data FunBind = FunBind
+data FunBind p = FunBind
   { fbName :: String,
-    fbParams :: [Param],
+    fbParams :: [Param p],
     fbResult :: Maybe TyExp,
-    fbBody :: Exp,
+    fbBody :: Exp p,
     fbAt :: Span,
-    fbSym :: Maybe FunSym
+    fbSym :: Ann p FunSym
   }
-  deriving (Show)
 
-type Program = [Decl]
+type Program p = [Decl p]
 
-declAt :: Decl -> Span
+declAt :: Decl p -> Span
 declAt (DType at _) = at
 declAt d@(DVal {}) = dAt d
 declAt (DFun at _) = at

@@ -1,3 +1,4 @@
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE MultiWayIf #-}
 -- | The type checker, which also decides which variables escape.
 --
@@ -12,10 +13,11 @@
 -- crosses a function boundary marks the variable as escaping, and the lowering
 -- pass gives those a frame slot instead.
 --
--- Nothing is written into the tree the parser built.  What comes out is a second
--- tree with the answers in it, and beside it the set of variables that escape —
--- because a variable is marked long after the node that mentions it was made,
--- and a value cannot be changed once it exists.
+-- Nothing is written into the tree the parser built.  What comes out is a tree
+-- of a different type — @Program 'Typed@, where every annotation the parser left
+-- as @()@ holds the answer — and beside it the set of variables that escape,
+-- because a variable is marked long after the node that mentions it was made and
+-- a value cannot be changed once it exists.
 module Wolv.Typecheck (check, Checked (..)) where
 
 import Control.Monad.State
@@ -28,7 +30,7 @@ import Wolv.Diag
 import Wolv.Types
 
 -- | The typed tree, and what the tree cannot hold: which variables escape.
-data Checked = Checked {ckProgram :: Program, ckEscapes :: Set.Set Int}
+data Checked = Checked {ckProgram :: Program 'Typed, ckEscapes :: Set.Set Int}
 
 builtins :: [(String, [Type], Type, String)]
 builtins =
@@ -75,11 +77,10 @@ data Checker = Checker
 
 type C a = StateT Checker (Either WolvError) a
 
-failWith :: (Span -> String -> Either WolvError ()) -> Span -> String -> C a
-failWith raise at message = lift (raise at message >> error "unreachable")
-
+-- | 'typeError' answers an 'Either' of any type, because it only ever answers
+-- 'Left'; lifting it is the whole of raising one.
 bad :: Span -> String -> C a
-bad = failWith typeError
+bad at message = lift (typeError at message)
 
 fresh :: C Int
 fresh = do
@@ -154,12 +155,12 @@ fieldsOf _ = pure []
 
 -- -- declarations -------------------------------------------------------------
 
-check :: Program -> Either WolvError Checked
+check :: Program 'Parsed -> Either WolvError Checked
 check prog = do
   (decls', s) <- runStateT (push >> mapM decl prog) prelude
   Right (Checked decls' (chEscapes s))
 
-decl :: Decl -> C Decl
+decl :: Decl 'Parsed -> C (Decl 'Typed)
 decl (DType at binds) = DType at <$> typeDecl binds
 decl d@(DVal {}) = valDecl d
 decl (DFun at binds) = DFun at <$> funDecl binds
@@ -188,7 +189,7 @@ typeDecl binds = do
       t <- resolve (tfTy f)
       pure ((tfName f, t) : seen)
 
-valDecl :: Decl -> C Decl
+valDecl :: Decl 'Parsed -> C (Decl 'Typed)
 valDecl d = do
   init' <- inferExp (dInit d)
   got <- case dWritten d of
@@ -197,11 +198,12 @@ valDecl d = do
       want <- resolve written
       unify want (tyOf init') (eAt init') "in this binding"
       pure want
-  case dName d of
+  let rebuilt bound = DVal (dAt d) bound (dWritten d) init' (dMutable d)
+  case dBound d of
     Nothing -> do
       unify TUnit got (eAt init') "in `val () =`"
-      pure d {dInit = init'}
-    Just name -> do
+      pure (rebuilt Nothing)
+    Just (Binder name _) -> do
       case got of
         TNil -> bad (dAt d) ("`" ++ name ++ "` needs a type annotation to hold `nil`")
         _ -> pure ()
@@ -209,63 +211,64 @@ valDecl d = do
       depth <- gets chDepth
       let sym = VarSym uid name got (dMutable d) depth
       bindVal name (SVar sym)
-      pure d {dInit = init', dSym = Just sym}
+      pure (rebuilt (Just (Binder name sym)))
 
 -- | Every signature in the group is bound before any body is typed.
-funDecl :: [FunBind] -> C [FunBind]
+funDecl :: [FunBind 'Parsed] -> C [FunBind 'Typed]
 funDecl binds = do
   signed <- mapM signature binds
-  mapM_ bindSignature signed
+  mapM_ (\(b, _, sym) -> bindVal (fbName b) (SFun sym)) signed
   mapM body signed
   where
+    -- The parsed bind, the parameters with their symbols, and the function's
+    -- own symbol: what the second pass needs and cannot work out again.
     signature b = do
       depth <- gets chDepth
-      params <- foldM (oneParam (depth + 1)) [] (fbParams b)
+      params <- reverse <$> foldM (oneParam (depth + 1)) [] (fbParams b)
       result <- maybe (pure TUnit) resolve (fbResult b)
       label <- uniqueLabel (fbName b)
-      let syms = [s | Just s <- map pSym (reverse params)]
-      pure b {fbParams = reverse params, fbSym = Just (FunSym (fbName b) label syms result (depth + 1) Nothing)}
+      let sym = FunSym (fbName b) label (map pSym params) result (depth + 1) Nothing
+      pure (b, params, sym)
     oneParam depth seen p = do
       when (any ((== pName p) . pName) seen) $
         bad (pAt p) ("duplicate parameter `" ++ pName p ++ "`")
       t <- resolve (pTy p)
       uid <- fresh
-      pure (p {pSym = Just (VarSym uid (pName p) t False depth)} : seen)
-    bindSignature b = case fbSym b of
-      Just sym -> bindVal (fbName b) (SFun sym)
-      Nothing -> pure ()
-    body b@(FunBind {fbSym = Just sym}) = do
+      pure (Param (pName p) (pTy p) (pAt p) (VarSym uid (pName p) t False depth) : seen)
+    body (b, params, sym) = do
       outer <- gets chLoops
       modify (\s -> s {chDepth = chDepth s + 1, chLoops = 0})
       push
-      mapM_ (\p -> maybe (pure ()) (bindVal (pName p) . SVar) (pSym p)) (fbParams b)
+      mapM_ (\p -> bindVal (pName p) (SVar (pSym p))) params
       body' <- inferExp (fbBody b)
       unify (fsResult sym) (tyOf body') (eAt body') ("in the body of `" ++ fbName b ++ "`")
       pop
       modify (\s -> s {chDepth = chDepth s - 1, chLoops = outer})
-      pure b {fbBody = body'}
-    body b = pure b
+      pure (FunBind (fbName b) params (fbResult b) body' (fbAt b) sym)
 
 -- -- expressions --------------------------------------------------------------
 
-tyOf :: Exp -> Type
-tyOf e = fromMaybe (error "the checker leaves no expression untyped") (eTy e)
+-- | On a checked expression the type is not a 'Maybe'; this is the name the
+-- rest of the file reads better under.
+tyOf :: Exp 'Typed -> Type
+tyOf = eTy
 
-typed :: Exp -> Type -> Node -> Exp
-typed e ty node = e {eTy = Just ty, eNode = node}
+-- | The answer for a node: the span it came from, its type, and what it became.
+typed :: Exp p -> Type -> Node 'Typed -> Exp 'Typed
+typed e ty = Exp (eAt e) ty
 
-inferExp :: Exp -> C Exp
+inferExp :: Exp 'Parsed -> C (Exp 'Typed)
 inferExp e = case eNode e of
-  EInt _ -> pure e {eTy = Just TInt}
-  EStr _ -> pure e {eTy = Just TString}
-  EBool _ -> pure e {eTy = Just TBool}
-  ENil -> pure e {eTy = Just TNil}
-  EUnit -> pure e {eTy = Just TUnit}
-  EVar name -> variable e name
-  ECall name args -> callExp e name args
+  EInt n -> pure (typed e TInt (EInt n))
+  EStr t -> pure (typed e TString (EStr t))
+  EBool b -> pure (typed e TBool (EBool b))
+  ENil -> pure (typed e TNil ENil)
+  EUnit -> pure (typed e TUnit EUnit)
+  EVar name _ -> variable e name
+  ECall name args _ -> callExp e name args
   ERecord tyname inits -> recordLit e tyname inits
   EIndex array index -> indexExp e array index
-  EField record name -> fieldExp e record name
+  EField record name _ -> fieldExp e record name
   ENeg operand -> do
     operand' <- inferExp operand
     unify TInt (tyOf operand') (eAt e) "in a negation"
@@ -287,11 +290,11 @@ inferExp e = case eNode e of
     unify TUnit (tyOf body') (eAt body') "in a `while` body"
     modify (\s -> s {chLoops = chLoops s - 1})
     pure (typed e TUnit (EWhile cond' body'))
-  EFor name lo hi body -> forExp e name lo hi body
+  EFor name lo hi body _ -> forExp e name lo hi body
   EBreak -> do
     loops <- gets chLoops
     when (loops == 0) $ bad (eAt e) "`break` is outside any loop"
-    pure e {eTy = Just TUnit}
+    pure (typed e TUnit EBreak)
   ESeq items -> do
     items' <- mapM inferExp items
     pure (typed e (if null items' then TUnit else tyOf (last items')) (ESeq items'))
@@ -302,7 +305,7 @@ inferExp e = case eNode e of
     pop
     pure (typed e (tyOf body') (ELet decls' body'))
 
-variable :: Exp -> String -> C Exp
+variable :: Exp 'Parsed -> String -> C (Exp 'Typed)
 variable e name = do
   sym <- lookupVal name (eAt e)
   case sym of
@@ -312,9 +315,9 @@ variable e name = do
       depth <- gets chDepth
       when (vsDepth v < depth) $
         modify (\s -> s {chEscapes = Set.insert (vsId v) (chEscapes s)})
-      pure e {eTy = Just (vsTy v), eSym = Just sym}
+      pure (typed e (vsTy v) (EVar name v))
 
-arity :: Exp -> String -> [a] -> Int -> C ()
+arity :: Exp p -> String -> [a] -> Int -> C ()
 arity e callee args want =
   unless (length args == want) $
     bad
@@ -327,23 +330,23 @@ arity e callee args want =
 
 -- | The arguments a builtin takes, counted and taken apart at once, so that
 -- nothing indexes the list afterwards.
-one :: Exp -> String -> [Exp] -> C Exp
+one :: Exp 'Parsed -> String -> [Exp 'Parsed] -> C (Exp 'Parsed)
 one e callee args = case args of
   [a] -> pure a
   _ -> arity e callee args 1 >> bad (eAt e) "unreachable"
 
-two :: Exp -> String -> [Exp] -> C (Exp, Exp)
+two :: Exp 'Parsed -> String -> [Exp 'Parsed] -> C (Exp 'Parsed, Exp 'Parsed)
 two e callee args = case args of
   [a, b] -> pure (a, b)
   _ -> arity e callee args 2 >> bad (eAt e) "unreachable"
 
-callExp :: Exp -> String -> [Exp] -> C Exp
+callExp :: Exp 'Parsed -> String -> [Exp 'Parsed] -> C (Exp 'Typed)
 callExp e name args = do
   f <- lookupVal name (eAt e)
   case f of
     SVar _ -> bad (eAt e) ("`" ++ name ++ "` is a variable, not a function")
     SFun sym -> do
-      let done ty args' = pure (Exp (eAt e) (Just ty) (Just f) (eOffset e) (ECall name args'))
+      let done ty args' = pure (typed e ty (ECall name args' sym))
       case fsBuiltin sym of
         Just "array" -> do
           (count, fill) <- two e name args
@@ -372,7 +375,7 @@ callExp e name args = do
 
 -- | The initialisers are put into declaration order, which is what lowering
 -- wants.
-recordLit :: Exp -> String -> [FieldInit] -> C Exp
+recordLit :: Exp 'Parsed -> String -> [FieldInit 'Parsed] -> C (Exp 'Typed)
 recordLit e tyname inits = do
   found <- lookupType tyname (eAt e)
   case found of
@@ -380,7 +383,7 @@ recordLit e tyname inits = do
       fields <- fieldsOf found
       foldM_ (given name fields) [] inits
       ordered <- mapM (inOrder) fields
-      pure (Exp (eAt e) (Just found) (eSym e) (eOffset e) (ERecord tyname ordered))
+      pure (typed e found (ERecord tyname ordered))
     _ -> bad (eAt e) ("`" ++ tyname ++ "` is not a record type")
   where
     given name fields seen f = do
@@ -394,9 +397,9 @@ recordLit e tyname inits = do
       Just f -> do
         value <- inferExp (fiValue f)
         unify want (tyOf value) (fiAt f) ("in field `" ++ name ++ "`")
-        pure f {fiValue = value}
+        pure (FieldInit (fiName f) value (fiAt f))
 
-indexExp :: Exp -> Exp -> Exp -> C Exp
+indexExp :: Exp 'Parsed -> Exp 'Parsed -> Exp 'Parsed -> C (Exp 'Typed)
 indexExp e array index = do
   array' <- inferExp array
   case tyOf array' of
@@ -406,7 +409,7 @@ indexExp e array index = do
       pure (typed e elem' (EIndex array' index'))
     got -> bad (eAt e) ("`" ++ showTy got ++ "` is not an array")
 
-fieldExp :: Exp -> Exp -> String -> C Exp
+fieldExp :: Exp 'Parsed -> Exp 'Parsed -> String -> C (Exp 'Typed)
 fieldExp e record name = do
   record' <- inferExp record
   case tyOf record' of
@@ -415,15 +418,10 @@ fieldExp e record name = do
       case lookup name fields of
         Nothing -> bad (eAt e) ("`" ++ rname ++ "` has no field `" ++ name ++ "`")
         Just ty ->
-          pure
-            e
-              { eTy = Just ty,
-                eOffset = length (takeWhile ((/= name) . fst) fields),
-                eNode = EField record' name
-              }
+          pure (typed e ty (EField record' name (length (takeWhile ((/= name) . fst) fields))))
     got -> bad (eAt e) ("`" ++ showTy got ++ "` is not a record")
 
-binop :: Exp -> String -> Exp -> Exp -> C Exp
+binop :: Exp 'Parsed -> String -> Exp 'Parsed -> Exp 'Parsed -> C (Exp 'Typed)
 binop e op lhs rhs = do
   lhs' <- inferExp lhs
   rhs' <- inferExp rhs
@@ -454,11 +452,11 @@ binop e op lhs rhs = do
     comparable ty = case ty of TInt -> True; TString -> True; _ -> False
     isUnit ty = case ty of TUnit -> True; _ -> False
 
-assign :: Exp -> Exp -> Exp -> C Exp
+assign :: Exp 'Parsed -> Exp 'Parsed -> Exp 'Parsed -> C (Exp 'Typed)
 assign e target value = do
   target' <- inferExp target
-  case (eNode target', eSym target') of
-    (EVar _, Just (SVar v))
+  case eNode target' of
+    EVar _ v
       | not (vsMutable v) ->
           bad (eAt e) ("`" ++ vsName v ++ "` is a `val`, so it cannot be assigned")
     _ -> pure ()
@@ -466,7 +464,7 @@ assign e target value = do
   unify (tyOf target') (tyOf value') (eAt value') "in an assignment"
   pure (typed e TUnit (EAssign target' value'))
 
-ifExp :: Exp -> Exp -> Exp -> Maybe Exp -> C Exp
+ifExp :: Exp 'Parsed -> Exp 'Parsed -> Exp 'Parsed -> Maybe (Exp 'Parsed) -> C (Exp 'Typed)
 ifExp e cond then' els = do
   cond' <- inferExp cond
   unify TBool (tyOf cond') (eAt cond') "as an `if` condition"
@@ -483,7 +481,7 @@ ifExp e cond then' els = do
         bad (eAt e) ("the branches differ: `" ++ showTy t ++ "` and `" ++ showTy other ++ "`")
       pure (typed e (case t of TNil -> other; _ -> t) (EIf cond' then'' (Just els'')))
 
-forExp :: Exp -> String -> Exp -> Exp -> Exp -> C Exp
+forExp :: Exp 'Parsed -> String -> Exp 'Parsed -> Exp 'Parsed -> Exp 'Parsed -> C (Exp 'Typed)
 forExp e name lo hi body = do
   lo' <- inferExp lo
   unify TInt (tyOf lo') (eAt lo') "as a `for` bound"
@@ -499,9 +497,4 @@ forExp e name lo hi body = do
   unify TUnit (tyOf body') (eAt body') "in a `for` body"
   modify (\s -> s {chLoops = chLoops s - 1})
   pop
-  pure
-    e
-      { eTy = Just TUnit,
-        eSym = Just (SVar sym),
-        eNode = EFor name lo' hi' body'
-      }
+  pure (typed e TUnit (EFor name lo' hi' body' sym))

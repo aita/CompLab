@@ -216,10 +216,10 @@ renameBlock phiVars vars label = do
   where
     oneInstr (out, mine) instr = do
       renamed <- mapUsesM (\r -> if Set.member r vars then top r else pure r) instr
-      case defs renamed of
-        Just d | Set.member d vars -> do
+      case definition renamed of
+        Just (d, writing) | Set.member d vars -> do
           d' <- rename d
-          pure (withDef d' renamed : out, mine ++ [d])
+          pure (writing d' : out, mine ++ [d])
         _ -> pure (renamed : out, mine)
     fill from succ' = do
       f <- gets rFunc

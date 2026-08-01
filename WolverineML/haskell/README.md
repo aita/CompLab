@@ -64,12 +64,60 @@ describes this compiler as well as the other, chapter 7 aside.
 
 ## What Haskell made different
 
-**The checker cannot write on the tree, so it builds another one.** Every other
-port parses a tree with three holes in each node — the type, what a name
-resolved to, which word of a record a field access reads — and the checker fills
-them in. Nothing here can be filled in, so `check` returns a second tree with
-the answers already in it, and every pass after it reads that one. The parser's
-tree is still around and still empty; nothing looks at it again.
+**The checker's tree is a different type from the parser's.** Every other port
+parses a tree with three holes in each node — the type, what a name resolved to,
+which word of a record a field access reads — and the checker fills them in.
+Nothing here can be filled in, so `check` returns a second tree; and because it
+is a second tree, it does not have to have the same type as the first.
+
+The tree is indexed by which pass made it. An annotation is a type family:
+
+```haskell
+data Phase = Parsed | Typed
+
+type family Ann (p :: Phase) a where
+  Ann 'Parsed a = ()
+  Ann 'Typed a = a
+
+data Exp p = Exp {eAt :: Span, eTy :: Ann p Type, eNode :: Node p}
+data Node p = … | EVar String (Ann p VarSym) | ECall String [Exp p] (Ann p FunSym) | …
+```
+
+`parse` answers a `Program 'Parsed`, where every annotation is `()`. `check`
+answers a `Program 'Typed`, where each is the thing that pass worked out. So
+lowering, which takes a `Program 'Typed`, gets a `VarSym` from `EVar name sym`
+and not a `Maybe VarSym` it would have to open with an error for a case the
+checker has already ruled out. Five `error`s went with it: "a variable with no
+symbol", "a call with no symbol", "an assignment with no symbol", "a for with no
+symbol", and `tyOf`, which is now `eTy`.
+
+What a `val` binds is the same idea one step down. It was a `Maybe String` and a
+`Maybe VarSym` that had to agree about whether this was `val () = e`; it is a
+`Maybe (Binder p)`, and the name and the symbol travel together.
+
+The other eight ports have exactly this invariant and check none of it: a
+mutable field that is null until the checker runs, and a lowering pass that
+trusts it. Here the checker is the only thing that can make a tree lowering will
+take.
+
+**One case split, not two.** `defs` said which register an instruction writes
+and `withDef` made it write another, over the same fourteen constructors — and
+`withDef` had an `error` for the ones that write nothing, which the caller had
+just asked `defs` about. They are one function:
+
+```haskell
+definition :: Instr -> Maybe (Reg, Reg -> Instr)
+defs = fmap fst . definition
+```
+
+The renamer gets the register and the way to change it from the same answer.
+The two had already drifted: `StrConst` was in `defs` and missing from
+`withDef`, so a renamed string constant would have hit the `error`.
+
+`Parser.hs` had the same shape — a table of binding powers and a table of
+spellings, and an `error "not a binary operator"` for a token in one and not the
+other. `infixOp` returns the node to build with the two powers, so there is one
+table.
 
 **A `newtype` is free, so the three integers are three types.** A virtual
 register, a machine register and a frame slot are all `Int`, and as plain `Int`s
@@ -104,6 +152,12 @@ The symbol field and the effect flag are gone — the form says both — and the
 emitter's table is `template :: Form -> String`, a total function. `Mach.verify`
 had two things to check and has one: nothing can name an instruction that does
 not exist.
+
+**There is no remainder in the IR.** `Op` had a `Mod` that lowering never
+built — it spells the remainder out as a divide, a multiply and a subtract, so
+the quotient in between is a value the allocator can place. The constructor was
+still there, which meant a fold case that could not fire and an `error` in the
+selector for an instruction that could not arrive. Deleting it deletes both.
 
 **Identity is a number, because a value has none.** Whether a variable escapes
 is settled long after the node that mentions it was made, and where it ended up
@@ -174,4 +228,4 @@ in is written down exactly once, and `emit -s opt` cannot drift from `build`.
 - **88 tests, none skipped** — including the end-to-end runs under qemu and the
   random-program oracle
 - **no warnings** at `-Wall`
-- 5317 lines in 26 modules (4051 of them code), and 1170 in the tests
+- 5309 lines in 26 modules (4001 of them code), and 1170 in the tests

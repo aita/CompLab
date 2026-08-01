@@ -1,3 +1,5 @@
+{-# LANGUAGE DataKinds #-}
+
 -- | Lowering: the typed syntax tree becomes a control flow graph.
 --
 -- Two things are worth knowing about this pass.
@@ -159,13 +161,13 @@ constant value = do
 
 -- -- function bodies ------------------------------------------------------------
 
-topLevel :: Program -> M ()
+topLevel :: Program 'Typed -> M ()
 topLevel decls = do
   declarations decls
   terminate (Ret Nothing)
   finish
 
-functionBody :: FunBind -> FunSym -> M ()
+functionBody :: FunBind 'Typed -> FunSym -> M ()
 functionBody bind sym = do
   depth <- gets (fnDepth . lFunc)
   when (depth > 0) $ do
@@ -231,7 +233,7 @@ dropUnusedLink = do
 
 -- -- declarations ----------------------------------------------------------------
 
-declarations :: [Decl] -> M ()
+declarations :: [Decl 'Typed] -> M ()
 declarations = mapM_ one
   where
     one (DType _ _) = pure ()
@@ -239,16 +241,15 @@ declarations = mapM_ one
     one (DFun _ binds) = do
       modify (\s -> s {lChildren = True})
       mapM_ nested binds
-    nested b = case fbSym b of
-      Nothing -> pure ()
-      Just sym ->
-        openFunction (newFunc (fsLabel sym) (fsName sym) (fsDepth sym)) (functionBody b sym)
+    nested b =
+      let sym = fbSym b
+       in openFunction (newFunc (fsLabel sym) (fsName sym) (fsDepth sym)) (functionBody b sym)
 
-valDecl :: Decl -> M ()
+valDecl :: Decl 'Typed -> M ()
 valDecl d = do
   value <- expression (dInit d)
-  case (dSym d, value) of
-    (Just sym, Just r) | notUnit (vsTy sym) -> bind sym r
+  case (dBound d, value) of
+    (Just (Binder _ sym), Just r) | notUnit (vsTy sym) -> bind sym r
     _ -> pure ()
   where
     notUnit TUnit = False
@@ -323,10 +324,10 @@ writeVar sym value = do
 
 -- -- expressions ----------------------------------------------------------------
 
-value :: Exp -> M Reg
+value :: Exp 'Typed -> M Reg
 value e = fromMaybe (error "expected a value here") <$> expression e
 
-expression :: Exp -> M (Maybe Reg)
+expression :: Exp 'Typed -> M (Maybe Reg)
 expression e = case eNode e of
   EInt v -> Just <$> constant v
   EBool b -> Just <$> constant (if b then 1 else 0)
@@ -337,21 +338,19 @@ expression e = case eNode e of
     r <- newReg
     emit (StrConst r symbol)
     pure (Just r)
-  EVar _ -> case eSym e of
-    Just (SVar sym) -> Just <$> readVar sym
-    _ -> error "a variable with no symbol"
-  ECall name args -> call e name args
+  EVar _ sym -> Just <$> readVar sym
+  ECall _ args sym -> call sym args
   ERecord _ fields -> Just <$> record e fields
   EIndex array index -> do
     addr <- elementAddress array index
     r <- newReg
     emit (Load r addr word)
     pure (Just r)
-  EField record' _ -> do
+  EField record' _ offset -> do
     base <- value record'
     checkNotNil base
     r <- newReg
-    emit (Load r base (word * eOffset e))
+    emit (Load r base (word * offset))
     pure (Just r)
   ENeg operand -> do
     zero <- constant 0
@@ -362,7 +361,7 @@ expression e = case eNode e of
   EAssign target v -> assign target v >> pure Nothing
   EIf cond then' els -> ifExp e cond then' els
   EWhile cond body -> whileExp cond body >> pure Nothing
-  EFor _ lo hi body -> forExp e lo hi body >> pure Nothing
+  EFor _ lo hi body sym -> forExp sym lo hi body >> pure Nothing
   EBreak -> do
     breaks <- gets lBreaks
     terminate (Jmp (head breaks))
@@ -393,7 +392,7 @@ callRuntime name args = do
 -- | What the surface operator means to the machine.  Everything the parser can
 -- write that is not one of these is a call or a branch, and is handled above.
 arithmetic :: String -> Maybe Op
-arithmetic op = lookup op [("+", Add), ("-", Sub), ("*", Mul), ("/", Div), ("mod", Mod)]
+arithmetic op = lookup op [("+", Add), ("-", Sub), ("*", Mul), ("/", Div)]
 
 comparison :: String -> Maybe Rel
 comparison op =
@@ -403,14 +402,14 @@ comparison op =
       (">", Greater), (">=", GreaterEq)
     ]
 
-binExp :: String -> Exp -> Exp -> M Reg
+binExp :: String -> Exp 'Typed -> Exp 'Typed -> M Reg
 binExp op lhs rhs = do
   l <- value lhs
   r <- value rhs
   case (op, arithmetic op, comparison op) of
     ("^", _, _) -> callRuntime "wol_concat" [l, r]
     (_, Just Div, _) -> do checkNonzero r; binop Div l r
-    (_, Just Mod, _) -> do
+    ("mod", _, _) -> do
       checkNonzero r
       -- The remainder is spelled out rather than left to the emitter: the
       -- quotient it needs in between is a value like any other, and the
@@ -421,7 +420,7 @@ binExp op lhs rhs = do
       binop Sub l product'
     (_, Just plain, _) -> binop plain l r
     (_, _, Just rel) -> case eTy lhs of
-      Just TString -> do
+      TString -> do
         order <- callRuntime "wol_string_cmp" [l, r]
         zero <- constant 0
         compare' rel order zero
@@ -429,7 +428,7 @@ binExp op lhs rhs = do
     _ -> error ("lowering does not know the operator `" ++ op ++ "`")
 
 -- | @andalso@ and @orelse@ are branches, so the result needs a register.
-logic :: String -> Exp -> Exp -> M Reg
+logic :: String -> Exp 'Typed -> Exp 'Typed -> M Reg
 logic op lhs rhs = do
   result <- newReg
   rhsBlock <- fresh "logic"
@@ -444,9 +443,8 @@ logic op lhs rhs = do
   modify (\s -> s {lCur = join'})
   pure result
 
-call :: Exp -> String -> [Exp] -> M (Maybe Reg)
-call e _ args = case eSym e of
-  Just (SFun sym) -> case fsBuiltin sym of
+call :: FunSym -> [Exp 'Typed] -> M (Maybe Reg)
+call sym args = case fsBuiltin sym of
     -- The checker has already counted the arguments, so these shapes hold.
     Just "not" | [a] <- args -> do
       x <- value a
@@ -472,11 +470,10 @@ call e _ args = case eSym e of
       case fsResult sym of
         TUnit -> do emit (Call Nothing (fsLabel sym) full); pure Nothing
         _ -> Just <$> callRuntime (fsLabel sym) full
-  _ -> error "a call with no symbol"
 
-record :: Exp -> [FieldInit] -> M Reg
+record :: Exp 'Typed -> [FieldInit 'Typed] -> M Reg
 record e fields = do
-  let arity = case eTy e of Just (TRecord _ _ n) -> n; _ -> 0
+  let arity = case eTy e of TRecord _ _ n -> n; _ -> 0
   size <- constant (fromIntegral (word * max arity 1))
   base <- callRuntime "wol_alloc" [size]
   mapM_ (one base) (zip [0 ..] fields)
@@ -491,7 +488,7 @@ record e fields = do
 -- The selector turns this into one @add@ with a shifted operand, and the word is
 -- the load's displacement, so the two instructions that come out are the two the
 -- machine has.
-elementAddress :: Exp -> Exp -> M Reg
+elementAddress :: Exp 'Typed -> Exp 'Typed -> M Reg
 elementAddress array index = do
   base <- value array
   idx <- value index
@@ -501,26 +498,24 @@ elementAddress array index = do
   shifted <- binop Shl idx three
   binop Add base shifted
 
-assign :: Exp -> Exp -> M ()
+assign :: Exp 'Typed -> Exp 'Typed -> M ()
 assign target v = case eNode target of
-  EVar _ -> case eSym target of
-    Just (SVar sym) -> value v >>= writeVar sym
-    _ -> error "an assignment with no symbol"
+  EVar _ sym -> value v >>= writeVar sym
   EIndex array index -> do
     addr <- elementAddress array index
     v' <- value v
     emit (Store addr word v')
-  EField record' _ -> do
+  EField record' _ offset -> do
     base <- value record'
     checkNotNil base
     v' <- value v
-    emit (Store base (word * eOffset target) v')
+    emit (Store base (word * offset) v')
   _ -> error "assignment to something that is not a place"
 
-ifExp :: Exp -> Exp -> Exp -> Maybe Exp -> M (Maybe Reg)
+ifExp :: Exp 'Typed -> Exp 'Typed -> Exp 'Typed -> Maybe (Exp 'Typed) -> M (Maybe Reg)
 ifExp e cond then' els = do
   result <- case eTy e of
-    Just TUnit -> pure Nothing
+    TUnit -> pure Nothing
     _ -> Just <$> newReg
   yes <- fresh "then"
   no <- fresh "else"
@@ -551,7 +546,7 @@ inLoop done body = do
   _ <- body
   modify (\s -> s {lBreaks = drop 1 (lBreaks s)})
 
-whileExp :: Exp -> Exp -> M ()
+whileExp :: Exp 'Typed -> Exp 'Typed -> M ()
 whileExp cond body = do
   test <- fresh "test"
   bodyBlock <- fresh "body"
@@ -566,9 +561,8 @@ whileExp cond body = do
   modify (\s -> s {lCur = done})
 
 -- | @for i = lo to hi@ counts up, and stops before overflowing at @hi@.
-forExp :: Exp -> Exp -> Exp -> Exp -> M ()
-forExp e lo hi body = do
-  let sym = case eSym e of Just (SVar v) -> v; _ -> error "a for with no symbol"
+forExp :: VarSym -> Exp 'Typed -> Exp 'Typed -> Exp 'Typed -> M ()
+forExp sym lo hi body = do
   lo' <- value lo
   hiValue <- value hi
   hi' <- newReg
