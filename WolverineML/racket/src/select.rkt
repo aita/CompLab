@@ -22,6 +22,7 @@
 ;; visible, rather than by looking at the line before.
 
 (require racket/list
+         racket/match
          racket/set
          (prefix-in dag: "dag.rkt")
          (prefix-in ir: "ir.rkt")
@@ -92,22 +93,17 @@
 
 ;; Whether the instruction chosen for `reader` has room for `node`.
 (define (swallows? s reader n)
-  (define i (dag:node-instr reader))
   (define operands (dag:node-operands reader))
-  (cond
-    [(and (ir:i:bin? i) (member (ir:i:bin-op i) '("+" "-")))
-     (and (eqv? (second operands) (dag:node-index n))
+  (define (second-is? index) (eqv? (second operands) index))
+  (define (first-is? index) (eqv? (first operands) index))
+  (match (dag:node-instr reader)
+    [(ir:i:bin _ (or "+" "-") _ _)
+     (and (second-is? (dag:node-index n))
           (or (as-shift s (dag:node-index n)) (bin? n "*"))
           #t)]
-    [(ir:i:load? i)
-     (and (eqv? (first operands) (dag:node-index n))
-          (displaces s n (ir:i:load-offset i))
-          #t)]
-    [(ir:i:store? i)
-     (and (eqv? (first operands) (dag:node-index n))
-          (displaces s n (ir:i:store-offset i))
-          #t)]
-    [else #f]))
+    [(or (ir:i:load _ _ offset) (ir:i:store _ offset _))
+     (and (first-is? (dag:node-index n)) (displaces s n offset) #t)]
+    [_ #f]))
 
 ;; `[pointer + 24]`, when what is added to the pointer is a constant.
 (define (displaces s n offset)
@@ -146,53 +142,46 @@
 ;; -- one node ----------------------------------------------------------------
 
 (define (tile! s n)
-  (define i (dag:node-instr n))
-  (cond
-    [(ir:i:const? i)
-     (machine! s "const" (ir:i:const-dst i) '() (ir:i:const-value i))
-     (ir:i:const-dst i)]
-    [(ir:i:str-const? i)
-     (machine! s "adr" (ir:i:str-const-dst i) '() 0 (ir:i:str-const-symbol i))
-     (ir:i:str-const-dst i)]
-    [(ir:i:bin? i)
-     (arithmetic! s n (ir:i:bin-dst i) (ir:i:bin-op i) (ir:i:bin-lhs i) (ir:i:bin-rhs i))
-     (ir:i:bin-dst i)]
-    [(ir:i:cmp? i)
-     (compare! s n (ir:i:cmp-op i) (ir:i:cmp-lhs i) (ir:i:cmp-rhs i))
-     (machine! s "cset" (ir:i:cmp-dst i) '() 0 (mach:condition-of (ir:i:cmp-op i)))
-     (ir:i:cmp-dst i)]
-    [(ir:i:load? i)
-     (define-values (pointer offset)
-       (address s (first (dag:node-operands n)) (ir:i:load-base i) (ir:i:load-offset i)))
-     (machine! s "ldr" (ir:i:load-dst i) (list pointer) offset)
-     (ir:i:load-dst i)]
-    [(ir:i:store? i)
-     (define value (at s (second (dag:node-operands n)) (ir:i:store-src i)))
-     (define-values (pointer offset)
-       (address s (first (dag:node-operands n)) (ir:i:store-base i) (ir:i:store-offset i)))
-     (machine! s "str" #f (list pointer value) offset "" #t)
-     (ir:i:store-src i)]
-    [else
+  (define operands (dag:node-operands n))
+  (match (dag:node-instr n)
+    [(ir:i:const dst value) (machine! s "const" dst '() value) dst]
+    [(ir:i:str-const dst symbol) (machine! s "adr" dst '() 0 symbol) dst]
+    [(ir:i:bin dst op lhs rhs) (arithmetic! s n dst op lhs rhs) dst]
+    [(ir:i:cmp dst op lhs rhs)
+     (compare! s n op lhs rhs)
+     (machine! s "cset" dst '() 0 (mach:condition-of op))
+     dst]
+    [(ir:i:load dst base offset)
+     (define-values (pointer displaced) (address s (first operands) base offset))
+     (machine! s "ldr" dst (list pointer) displaced)
+     dst]
+    [(ir:i:store base offset src)
+     (define value (at s (second operands) src))
+     (define-values (pointer displaced) (address s (first operands) base offset))
+     (machine! s "str" #f (list pointer value) displaced "" #t)
+     src]
+    [i
      ;; Moves, calls, slot accesses and the terminator are machine instructions
      ;; already, and a phi is not in this list at all.  None of them folds
      ;; anything, so every operand that was left to be folded has to be computed
      ;; here instead.
-     (for ([index (in-list (dag:node-operands n))]) (force! s index))
-     (emit! s (if (and (ir:i:cbr? i) (unbox (selector-fused s)))
-                  (struct-copy ir:i:cbr i [code (unbox (selector-fused s))])
-                  i))
+     (for ([index (in-list operands)]) (force! s index))
+     (emit! s (match i
+                [(ir:i:cbr cnd then els _) #:when (unbox (selector-fused s))
+                 (ir:i:cbr cnd then els (unbox (selector-fused s)))]
+                [_ i]))
      (or (ir:defs i) 0)]))
 
 ;; -- the tiles ---------------------------------------------------------------
 
 (define (arithmetic! s n dst op lhs rhs)
-  (cond
-    [(member op '("+" "-")) (additive! s n dst op lhs rhs)]
-    [(string=? op "*") (multiply! s n dst lhs rhs)]
-    [(string=? op "/") (machine! s "sdiv" dst (both s n lhs rhs))]
-    [(member op '("shl" "shr")) (shift! s n dst op lhs rhs)]
-    [(member op '("and" "or" "xor")) (logical! s n dst op lhs rhs)]
-    [else (error 'select "no instruction for `~a`" op)]))
+  (match op
+    [(or "+" "-") (additive! s n dst op lhs rhs)]
+    ["*" (multiply! s n dst lhs rhs)]
+    ["/" (machine! s "sdiv" dst (both s n lhs rhs))]
+    [(or "shl" "shr") (shift! s n dst op lhs rhs)]
+    [(or "and" "or" "xor") (logical! s n dst op lhs rhs)]
+    [_ (error 'select "no instruction for `~a`" op)]))
 
 ;; Both operands in registers, which is what the plain forms want.
 (define (both s n lhs rhs)
@@ -309,15 +298,13 @@
 (define (fuse-comparison! s index)
   (define all (nodes s))
   (define n (vector-ref all index))
-  (define i (dag:node-instr n))
-  (define terminator (dag:node-instr (vector-ref all (sub1 (vector-length all)))))
-  (and (ir:i:cmp? i)
-       (= (add1 index) (sub1 (vector-length all)))
-       (ir:i:cbr? terminator)
-       (eqv? (ir:i:cbr-cond terminator) (ir:i:cmp-dst i))
-       (= (dag:node-users n) 1)
-       (not (dag:node-escapes? n))
-       (begin
-         (compare! s n (ir:i:cmp-op i) (ir:i:cmp-lhs i) (ir:i:cmp-rhs i))
-         (set-box! (selector-fused s) (mach:condition-of (ir:i:cmp-op i)))
-         #t)))
+  (match* ((dag:node-instr n) (dag:node-instr (vector-ref all (sub1 (vector-length all)))))
+    [((ir:i:cmp dst op lhs rhs) (ir:i:cbr cnd _ _ _))
+     #:when (and (= (add1 index) (sub1 (vector-length all)))
+                 (eqv? cnd dst)
+                 (= (dag:node-users n) 1)
+                 (not (dag:node-escapes? n)))
+     (compare! s n op lhs rhs)
+     (set-box! (selector-fused s) (mach:condition-of op))
+     #t]
+    [(_ _) #f]))

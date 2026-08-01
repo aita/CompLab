@@ -19,6 +19,7 @@
 ;; appends and the later passes replace by index.
 
 (require racket/list
+         racket/match
          racket/string
          data/gvector
          "diag.rkt")
@@ -89,94 +90,95 @@
 (struct i:machine (form dst srcs imm symbol effectful) #:transparent)
 
 ;; -- what every instruction of either set can be asked -----------------------
+;;
+;; Five questions, one `match` each.  A struct is a pattern in Racket, so an
+;; instruction is taken apart where it is asked about and there is no accessor
+;; named twice on one line.
 
 ;; The register it writes, or #f.
 (define (defs i)
-  (cond
-    [(i:const? i) (i:const-dst i)]
-    [(i:str-const? i) (i:str-const-dst i)]
-    [(i:move? i) (i:move-dst i)]
-    [(i:bin? i) (i:bin-dst i)]
-    [(i:cmp? i) (i:cmp-dst i)]
-    [(i:load? i) (i:load-dst i)]
-    [(i:load-slot? i) (i:load-slot-dst i)]
-    [(i:frame-addr? i) (i:frame-addr-dst i)]
-    [(i:call? i) (i:call-dst i)]
-    [(i:machine? i) (i:machine-dst i)]
-    [else #f]))
+  (match i
+    [(i:const dst _) dst]
+    [(i:str-const dst _) dst]
+    [(i:move dst _) dst]
+    [(i:bin dst _ _ _) dst]
+    [(i:cmp dst _ _ _) dst]
+    [(i:load dst _ _) dst]
+    [(i:load-slot dst _) dst]
+    [(i:frame-addr dst) dst]
+    [(i:call dst _ _) dst]
+    [(i:machine _ dst _ _ _ _) dst]
+    [_ #f]))
 
 ;; The registers it reads.  A phi's arguments are read on the edges, not where
 ;; the phi stands, so a phi is not an instruction here at all.
 (define (uses i)
-  (cond
-    [(i:move? i) (list (i:move-src i))]
-    [(i:bin? i) (list (i:bin-lhs i) (i:bin-rhs i))]
-    [(i:cmp? i) (list (i:cmp-lhs i) (i:cmp-rhs i))]
-    [(i:load? i) (list (i:load-base i))]
-    [(i:store? i) (list (i:store-base i) (i:store-src i))]
-    [(i:store-slot? i) (list (i:store-slot-src i))]
-    [(i:call? i) (i:call-args i)]
-    [(i:machine? i) (i:machine-srcs i)]
-    [(i:cbr? i) (if (string=? (i:cbr-code i) "") (list (i:cbr-cond i)) '())]
-    [(i:ret? i) (if (i:ret-value i) (list (i:ret-value i)) '())]
-    [else '()]))
+  (match i
+    [(i:move _ src) (list src)]
+    [(i:bin _ _ lhs rhs) (list lhs rhs)]
+    [(i:cmp _ _ lhs rhs) (list lhs rhs)]
+    [(i:load _ base _) (list base)]
+    [(i:store base _ src) (list base src)]
+    [(i:store-slot _ src) (list src)]
+    [(i:call _ _ args) args]
+    [(i:machine _ _ srcs _ _ _) srcs]
+    [(i:cbr cond _ _ "") (list cond)]
+    [(i:ret (? values value)) (list value)]
+    [_ '()]))
 
 ;; The same instruction with the registers it reads renamed.
+;;
+;; `f` allocates — renaming a variable that was never written invents a register
+;; for it — so the order the operands are rewritten in is the order they are
+;; numbered in.  Racket evaluates the arguments of an application from left to
+;; right and says so, which is what lets these be one expression each.
 (define (map-uses i f)
-  (cond
-    [(i:move? i) (i:move (i:move-dst i) (f (i:move-src i)))]
-    [(i:bin? i)
-     (define lhs (f (i:bin-lhs i)))
-     (i:bin (i:bin-dst i) (i:bin-op i) lhs (f (i:bin-rhs i)))]
-    [(i:cmp? i)
-     (define lhs (f (i:cmp-lhs i)))
-     (i:cmp (i:cmp-dst i) (i:cmp-op i) lhs (f (i:cmp-rhs i)))]
-    [(i:load? i) (i:load (i:load-dst i) (f (i:load-base i)) (i:load-offset i))]
-    [(i:store? i)
-     (define base (f (i:store-base i)))
-     (i:store base (i:store-offset i) (f (i:store-src i)))]
-    [(i:store-slot? i) (i:store-slot (i:store-slot-slot i) (f (i:store-slot-src i)))]
-    [(i:call? i) (i:call (i:call-dst i) (i:call-callee i) (map f (i:call-args i)))]
-    [(i:machine? i)
-     (struct-copy i:machine i [srcs (map f (i:machine-srcs i))])]
-    [(i:cbr? i)
-     (if (string=? (i:cbr-code i) "")
-         (struct-copy i:cbr i [cond (f (i:cbr-cond i))])
-         i)]
-    [(i:ret? i) (if (i:ret-value i) (i:ret (f (i:ret-value i))) i)]
-    [else i]))
+  (match i
+    [(i:move dst src) (i:move dst (f src))]
+    [(i:bin dst op lhs rhs) (i:bin dst op (f lhs) (f rhs))]
+    [(i:cmp dst op lhs rhs) (i:cmp dst op (f lhs) (f rhs))]
+    [(i:load dst base offset) (i:load dst (f base) offset)]
+    [(i:store base offset src) (i:store (f base) offset (f src))]
+    [(i:store-slot slot src) (i:store-slot slot (f src))]
+    [(i:call dst callee args) (i:call dst callee (map f args))]
+    [(i:machine form dst srcs imm symbol effectful)
+     (i:machine form dst (map f srcs) imm symbol effectful)]
+    [(i:cbr cond then els "") (i:cbr (f cond) then els "")]
+    [(i:ret (? values value)) (i:ret (f value))]
+    [_ i]))
 
 ;; The same instruction, writing `r` instead.  Only asked of one that writes.
 (define (with-def r i)
-  (cond
-    [(i:const? i) (struct-copy i:const i [dst r])]
-    [(i:str-const? i) (struct-copy i:str-const i [dst r])]
-    [(i:move? i) (struct-copy i:move i [dst r])]
-    [(i:bin? i) (struct-copy i:bin i [dst r])]
-    [(i:cmp? i) (struct-copy i:cmp i [dst r])]
-    [(i:load? i) (struct-copy i:load i [dst r])]
-    [(i:load-slot? i) (struct-copy i:load-slot i [dst r])]
-    [(i:frame-addr? i) (i:frame-addr r)]
-    [(i:call? i) (struct-copy i:call i [dst r])]
-    [(i:machine? i) (struct-copy i:machine i [dst r])]
-    [else (error 'with-def "this instruction defines nothing")]))
+  (match i
+    [(i:const _ value) (i:const r value)]
+    [(i:str-const _ symbol) (i:str-const r symbol)]
+    [(i:move _ src) (i:move r src)]
+    [(i:bin _ op lhs rhs) (i:bin r op lhs rhs)]
+    [(i:cmp _ op lhs rhs) (i:cmp r op lhs rhs)]
+    [(i:load _ base offset) (i:load r base offset)]
+    [(i:load-slot _ slot) (i:load-slot r slot)]
+    [(i:frame-addr _) (i:frame-addr r)]
+    [(i:call _ callee args) (i:call r callee args)]
+    [(i:machine form _ srcs imm symbol effectful)
+     (i:machine form r srcs imm symbol effectful)]
+    [_ (error 'with-def "this instruction defines nothing")]))
 
 ;; True when it has to be kept even if its result is dead.
 (define (has-effect? i)
-  (cond
-    [(i:machine? i) (i:machine-effectful i)]
-    [else (or (i:store? i) (i:store-slot? i) (i:call? i)
-              (i:jmp? i) (i:cbr? i) (i:ret? i))]))
+  (match i
+    [(i:machine _ _ _ _ _ effectful) effectful]
+    [(or (? i:store?) (? i:store-slot?) (? i:call?)
+         (? i:jmp?) (? i:cbr?) (? i:ret?))
+     #t]
+    [_ #f]))
 
 ;; The same terminator, with one of its targets renamed.
 (define (rename-target old fresh i)
-  (cond
-    [(i:jmp? i) (if (equal? (i:jmp-target i) old) (i:jmp fresh) i)]
-    [(i:cbr? i)
-     (struct-copy i:cbr i
-                  [then (if (equal? (i:cbr-then i) old) fresh (i:cbr-then i))]
-                  [els (if (equal? (i:cbr-els i) old) fresh (i:cbr-els i))])]
-    [else i]))
+  (define (swap label) (if (equal? label old) fresh label))
+  (match i
+    [(i:jmp target) (i:jmp (swap target))]
+    [(i:cbr cond then els code) (i:cbr cond (swap then) (swap els) code)]
+    [_ i]))
 
 ;; -- phis --------------------------------------------------------------------
 
@@ -282,14 +284,10 @@
   last)
 
 (define (succs b)
-  (define t (terminator b))
-  (cond
-    [(i:jmp? t) (list (i:jmp-target t))]
-    [(i:cbr? t)
-     (if (equal? (i:cbr-then t) (i:cbr-els t))
-         (list (i:cbr-then t))
-         (list (i:cbr-then t) (i:cbr-els t)))]
-    [else '()]))
+  (match (terminator b)
+    [(i:jmp target) (list target)]
+    [(i:cbr _ then els _) (if (equal? then els) (list then) (list then els))]
+    [_ '()]))
 
 ;; -- rewiring ----------------------------------------------------------------
 
@@ -346,48 +344,35 @@
 
 (define (show-instr name i)
   (define (joined rs) (string-join (map name rs) ", "))
-  (cond
-    [(i:const? i) (format "~a = ~a" (name (i:const-dst i)) (i:const-value i))]
-    [(i:str-const? i) (format "~a = &~a" (name (i:str-const-dst i)) (i:str-const-symbol i))]
-    [(i:move? i) (format "~a = ~a" (name (i:move-dst i)) (name (i:move-src i)))]
-    [(i:bin? i) (format "~a = ~a ~a ~a" (name (i:bin-dst i)) (name (i:bin-lhs i))
-                        (i:bin-op i) (name (i:bin-rhs i)))]
-    [(i:cmp? i) (format "~a = ~a ~a ~a" (name (i:cmp-dst i)) (name (i:cmp-lhs i))
-                        (i:cmp-op i) (name (i:cmp-rhs i)))]
-    [(i:load? i) (format "~a = [~a + ~a]" (name (i:load-dst i)) (name (i:load-base i))
-                         (i:load-offset i))]
-    [(i:store? i) (format "[~a + ~a] = ~a" (name (i:store-base i)) (i:store-offset i)
-                          (name (i:store-src i)))]
-    [(i:load-slot? i) (format "~a = slot~a" (name (i:load-slot-dst i))
-                              (i:load-slot-slot i))]
-    [(i:store-slot? i) (format "slot~a = ~a" (i:store-slot-slot i)
-                               (name (i:store-slot-src i)))]
-    [(i:frame-addr? i) (format "~a = frame" (name (i:frame-addr-dst i)))]
-    [(i:call? i)
-     (define call (format "~a(~a)" (i:call-callee i) (joined (i:call-args i))))
-     (if (i:call-dst i) (format "~a = ~a" (name (i:call-dst i)) call) call)]
-    [(i:jmp? i) (format "jmp ~a" (i:jmp-target i))]
-    [(i:cbr? i)
-     (define test (if (string=? (i:cbr-code i) "")
-                      (format "~a ?" (name (i:cbr-cond i)))
-                      (format "~a?" (i:cbr-code i))))
-     (format "br ~a ~a : ~a" test (i:cbr-then i) (i:cbr-els i))]
-    [(i:ret? i) (if (i:ret-value i) (format "ret ~a" (name (i:ret-value i))) "ret")]
-    [else
+  (match i
+    [(i:const dst value) (format "~a = ~a" (name dst) value)]
+    [(i:str-const dst symbol) (format "~a = &~a" (name dst) symbol)]
+    [(i:move dst src) (format "~a = ~a" (name dst) (name src))]
+    [(i:bin dst op lhs rhs) (format "~a = ~a ~a ~a" (name dst) (name lhs) op (name rhs))]
+    [(i:cmp dst op lhs rhs) (format "~a = ~a ~a ~a" (name dst) (name lhs) op (name rhs))]
+    [(i:load dst base offset) (format "~a = [~a + ~a]" (name dst) (name base) offset)]
+    [(i:store base offset src) (format "[~a + ~a] = ~a" (name base) offset (name src))]
+    [(i:load-slot dst slot) (format "~a = slot~a" (name dst) slot)]
+    [(i:store-slot slot src) (format "slot~a = ~a" slot (name src))]
+    [(i:frame-addr dst) (format "~a = frame" (name dst))]
+    [(i:call dst callee args)
+     (define call (format "~a(~a)" callee (joined args)))
+     (if dst (format "~a = ~a" (name dst) call) call)]
+    [(i:jmp target) (format "jmp ~a" target)]
+    [(i:cbr cond then els code)
+     (define test (if (string=? code "") (format "~a ?" (name cond)) (format "~a?" code)))
+     (format "br ~a ~a : ~a" test then els)]
+    [(i:ret #f) "ret"]
+    [(i:ret value) (format "ret ~a" (name value))]
+    [(i:machine form dst srcs imm symbol _)
      (define operands
-       (append (map name (i:machine-srcs i))
+       (append (map name srcs)
                (cond
-                 [(not (string=? (i:machine-symbol i) "")) (list (i:machine-symbol i))]
-                 [(or (not (zero? (i:machine-imm i)))
-                      (string=? (i:machine-form i) "const"))
-                  (list (format "#~a" (i:machine-imm i)))]
+                 [(not (string=? symbol "")) (list symbol)]
+                 [(or (not (zero? imm)) (string=? form "const")) (list (format "#~a" imm))]
                  [else '()])))
-     (define written
-       (string-trim (format "~a ~a" (i:machine-form i) (string-join operands ", "))
-                    #:left? #f))
-     (if (i:machine-dst i)
-         (format "~a = ~a" (name (i:machine-dst i)) written)
-         written)]))
+     (define written (string-trim (format "~a ~a" form (string-join operands ", ")) #:left? #f))
+     (if dst (format "~a = ~a" (name dst) written) written)]))
 
 (define (show-phi name p)
   (format "~a = phi [~a]" (name (phi-dst p))

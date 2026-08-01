@@ -14,6 +14,7 @@
 ;;     dead code        ->  anything computed and not used
 
 (require racket/list
+         racket/match
          racket/set
          "i64.rkt"
          (prefix-in ir: "ir.rkt"))
@@ -52,7 +53,9 @@
 (define (constants f)
   (define known (make-hash))
   (for* ([b (in-list (ir:walk f))] [i (in-list (ir:instrs b))])
-    (when (ir:i:const? i) (hash-set! known (ir:i:const-dst i) (ir:i:const-value i))))
+    (match i
+      [(ir:i:const dst value) (hash-set! known dst value)]
+      [_ (void)]))
   known)
 
 ;; -- the passes --------------------------------------------------------------
@@ -75,60 +78,59 @@
   changed)
 
 (define (fold-one i known)
-  (cond
-    [(ir:i:bin? i)
-     (define dst (ir:i:bin-dst i))
-     (define op (ir:i:bin-op i))
-     (define a (hash-ref known (ir:i:bin-lhs i) #f))
-     (define b (hash-ref known (ir:i:bin-rhs i) #f))
+  (define (known-value r) (hash-ref known r #f))
+  (match i
+    [(ir:i:bin dst op lhs rhs)
+     (define a (known-value lhs))
+     (define b (known-value rhs))
      (cond
        [(and a b) (let ([value (arith op a b)]) (and value (ir:i:const dst value)))]
        ;; The identities are worth having on their own: `x shl 0` and `x * 1`
        ;; come out of lowering an index, and folding them is what lets the
        ;; selector see one `add` where there were three instructions.
-       [(and (eqv? b 0) (member op '("+" "-" "or" "xor" "shl" "shr")))
-        (ir:i:move dst (ir:i:bin-lhs i))]
-       [(and (eqv? b 1) (member op '("*" "/"))) (ir:i:move dst (ir:i:bin-lhs i))]
-       [(and (eqv? a 0) (string=? op "+")) (ir:i:move dst (ir:i:bin-rhs i))]
+       [(and (eqv? b 0) (member op '("+" "-" "or" "xor" "shl" "shr"))) (ir:i:move dst lhs)]
+       [(and (eqv? b 1) (member op '("*" "/"))) (ir:i:move dst lhs)]
+       [(and (eqv? a 0) (string=? op "+")) (ir:i:move dst rhs)]
        [else #f])]
-    [(ir:i:cmp? i)
-     (define a (hash-ref known (ir:i:cmp-lhs i) #f))
-     (define b (hash-ref known (ir:i:cmp-rhs i) #f))
-     (and a b (ir:i:const (ir:i:cmp-dst i)
-                          (if (order (ir:i:cmp-op i) a b) 1 0)))]
-    [else #f]))
+    [(ir:i:cmp dst op lhs rhs)
+     (define a (known-value lhs))
+     (define b (known-value rhs))
+     (and a b (ir:i:const dst (if (order op a b) 1 0)))]
+    [_ #f]))
 
 ;; The arithmetic of the machine, done here rather than in the host's width.
 (define (arith op a b)
-  (cond
-    [(string=? op "+") (i64+ a b)]
-    [(string=? op "-") (i64- a b)]
-    [(string=? op "*") (i64* a b)]
-    [(string=? op "/") (and (not (zero? b)) (i64-quotient a b))]
-    [(string=? op "mod") (and (not (zero? b)) (i64-remainder a b))]
-    [(string=? op "and") (i64-and a b)]
-    [(string=? op "or") (i64-or a b)]
-    [(string=? op "xor") (i64-xor a b)]
-    [(string=? op "shl") (i64-shl a b)]
-    [(string=? op "shr") (i64-shr a b)]
-    [else #f]))
+  (match op
+    ["+" (i64+ a b)]
+    ["-" (i64- a b)]
+    ["*" (i64* a b)]
+    ["/" (and (not (zero? b)) (i64-quotient a b))]
+    ["mod" (and (not (zero? b)) (i64-remainder a b))]
+    ["and" (i64-and a b)]
+    ["or" (i64-or a b)]
+    ["xor" (i64-xor a b)]
+    ["shl" (i64-shl a b)]
+    ["shr" (i64-shr a b)]
+    [_ #f]))
 
 (define (order op a b)
-  (cond
-    [(string=? op "=") (= a b)]
-    [(string=? op "<>") (not (= a b))]
-    [(string=? op "<") (< a b)]
-    [(string=? op "<=") (<= a b)]
-    [(string=? op ">") (> a b)]
-    [(string=? op ">=") (>= a b)]
-    [(string=? op "u<") (< (unsigned a) (unsigned b))]
-    [(string=? op "u>=") (>= (unsigned a) (unsigned b))]
-    [else (error 'opt "unknown comparison ~a" op)]))
+  (match op
+    ["=" (= a b)]
+    ["<>" (not (= a b))]
+    ["<" (< a b)]
+    ["<=" (<= a b)]
+    [">" (> a b)]
+    [">=" (>= a b)]
+    ["u<" (< (unsigned a) (unsigned b))]
+    ["u>=" (>= (unsigned a) (unsigned b))]
+    [_ (error 'opt "unknown comparison ~a" op)]))
 
 (define (propagate-copies! f)
   (define mapping (make-hash))
   (for* ([b (in-list (ir:walk f))] [i (in-list (ir:instrs b))])
-    (when (ir:i:move? i) (hash-set! mapping (ir:i:move-dst i) (ir:i:move-src i))))
+    (match i
+      [(ir:i:move dst src) (hash-set! mapping dst src)]
+      [_ (void)]))
   (cond
     [(zero? (hash-count mapping)) #f]
     [else
@@ -160,14 +162,14 @@
   (define known (constants f))
   (define changed #f)
   (for ([b (in-list (ir:walk f))])
-    (define t (ir:terminator b))
-    (when (ir:i:cbr? t)
-      (define value (hash-ref known (ir:i:cbr-cond t) #f))
-      (when (or value (equal? (ir:i:cbr-then t) (ir:i:cbr-els t)))
-        (define taken
-          (if (or (not value) (not (zero? value))) (ir:i:cbr-then t) (ir:i:cbr-els t)))
-        (ir:set-instrs! b (append (drop-right (ir:instrs b) 1) (list (ir:i:jmp taken))))
-        (set! changed #t))))
+    (match (ir:terminator b)
+      [(ir:i:cbr cnd then els _)
+       (define value (hash-ref known cnd #f))
+       (when (or value (equal? then els))
+         (define taken (if (or (not value) (not (zero? value))) then els))
+         (ir:set-instrs! b (append (drop-right (ir:instrs b) 1) (list (ir:i:jmp taken))))
+         (set! changed #t))]
+      [_ (void)]))
   (when changed (ir:drop-unreachable! f))
   changed)
 

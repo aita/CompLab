@@ -2,7 +2,8 @@
 
 ;; An indented dump of the typed syntax tree, for `wolv emit -s ast`.
 
-(require racket/string
+(require racket/match
+         racket/string
          "types.rkt"
          (prefix-in ast: "ast.rkt"))
 
@@ -49,17 +50,15 @@
     (if (ast:exp-ty e) (string-append " : " (show-ty (ast:exp-ty e))) ""))
 
   (define (decl depth d)
-    (cond
-      [(ast:d:type? d)
-       (for ([b (in-list (ast:d:type-binds d))])
+    (match d
+      [(ast:d:type _ binds)
+       (for ([b (in-list binds)])
          (put depth (string-append "type " (ast:type-bind-name b))))]
-      [(ast:d:val? d)
-       (define keyword (if (ast:d:val-var? d) "var" "val"))
-       (define name (or (ast:d:val-name d) "()"))
-       (put depth (string-append keyword " " name (escapes (ast:d:val-sym d))))
-       (expr (add1 depth) (ast:d:val-init d))]
-      [else
-       (for ([b (in-list (ast:d:fun-binds d))])
+      [(ast:d:val _ name _ init var? sym)
+       (put depth (string-append (if var? "var" "val") " " (or name "()") (escapes sym)))
+       (expr (add1 depth) init)]
+      [(ast:d:fun _ binds)
+       (for ([b (in-list binds)])
          (define params
            (string-join
             (for/list ([p (in-list (ast:fun-bind-params b))])
@@ -71,59 +70,54 @@
          (expr (add1 depth) (ast:fun-bind-body b)))]))
 
   (define (expr depth e)
-    (define n (ast:exp-node e))
     (define (kids . es) (for ([k (in-list es)]) (expr (add1 depth) k)))
-    (cond
-      [(ast:e:int? n) (put depth (format "int ~a" (ast:e:int-value n)))]
-      [(ast:e:str? n) (put depth (string-append "string " (quoted (ast:e:str-value n))))]
-      [(ast:e:bool? n)
-       (put depth (string-append "bool " (if (ast:e:bool-value n) "true" "false")))]
-      [(ast:e:nil? n) (put depth "nil")]
-      [(ast:e:unit? n) (put depth "()")]
-      [(ast:e:var? n) (put depth (string-append "var " (ast:e:var-name n) (show-type e)))]
-      [(ast:e:call? n)
-       (put depth (string-append "call " (ast:e:call-callee n) (show-type e)))
-       (for ([a (in-list (ast:e:call-args n))]) (expr (add1 depth) a))]
-      [(ast:e:record? n)
-       (put depth (string-append "record " (ast:e:record-tyname n) (show-type e)))
-       (for ([f (in-list (ast:e:record-inits n))])
+    (match (ast:exp-node e)
+      [(ast:e:int value) (put depth (format "int ~a" value))]
+      [(ast:e:str value) (put depth (string-append "string " (quoted value)))]
+      [(ast:e:bool value) (put depth (string-append "bool " (if value "true" "false")))]
+      [(ast:e:nil) (put depth "nil")]
+      [(ast:e:unit) (put depth "()")]
+      [(ast:e:var name) (put depth (string-append "var " name (show-type e)))]
+      [(ast:e:call callee args)
+       (put depth (string-append "call " callee (show-type e)))
+       (for ([a (in-list args)]) (expr (add1 depth) a))]
+      [(ast:e:record tyname inits)
+       (put depth (string-append "record " tyname (show-type e)))
+       (for ([f (in-list inits)])
          (put (add1 depth) (string-append (ast:field-init-name f) " ="))
          (expr (+ 2 depth) (ast:field-init-value f)))]
-      [(ast:e:index? n)
+      [(ast:e:index array index)
        (put depth (string-append "index" (show-type e)))
-       (kids (ast:e:index-array n) (ast:e:index-index n))]
-      [(ast:e:field? n)
-       (put depth (string-append "field ." (ast:e:field-select n) (show-type e)))
-       (kids (ast:e:field-record n))]
-      [(ast:e:neg? n) (put depth "neg") (kids (ast:e:neg-operand n))]
-      [(ast:e:bin? n)
-       (put depth (string-append (ast:e:bin-op n) (show-type e)))
-       (kids (ast:e:bin-lhs n) (ast:e:bin-rhs n))]
-      [(ast:e:logic? n)
-       (put depth (string-append (ast:e:logic-op n) (show-type e)))
-       (kids (ast:e:logic-lhs n) (ast:e:logic-rhs n))]
-      [(ast:e:assign? n)
+       (kids array index)]
+      [(ast:e:field record select)
+       (put depth (string-append "field ." select (show-type e)))
+       (kids record)]
+      [(ast:e:neg operand) (put depth "neg") (kids operand)]
+      [(or (ast:e:bin op lhs rhs) (ast:e:logic op lhs rhs))
+       (put depth (string-append op (show-type e)))
+       (kids lhs rhs)]
+      [(ast:e:assign target value)
        (put depth ":=")
-       (kids (ast:e:assign-target n) (ast:e:assign-value n))]
-      [(ast:e:if? n)
+       (kids target value)]
+      [(ast:e:if cnd then els)
        (put depth (string-append "if" (show-type e)))
-       (kids (ast:e:if-cond n) (ast:e:if-then n))
-       (when (ast:e:if-els n) (expr (add1 depth) (ast:e:if-els n)))]
-      [(ast:e:while? n)
+       (kids cnd then)
+       (when els (expr (add1 depth) els))]
+      [(ast:e:while cnd body)
        (put depth "while")
-       (kids (ast:e:while-cond n) (ast:e:while-body n))]
-      [(ast:e:for? n)
-       (put depth (string-append "for " (ast:e:for-binder n) (escapes (ast:exp-sym e))))
-       (kids (ast:e:for-lo n) (ast:e:for-hi n) (ast:e:for-body n))]
-      [(ast:e:break? n) (put depth "break")]
-      [(ast:e:seq? n)
+       (kids cnd body)]
+      [(ast:e:for binder lo hi body)
+       (put depth (string-append "for " binder (escapes (ast:exp-sym e))))
+       (kids lo hi body)]
+      [(ast:e:break) (put depth "break")]
+      [(ast:e:seq items)
        (put depth (string-append "seq" (show-type e)))
-       (for ([item (in-list (ast:e:seq-items n))]) (expr (add1 depth) item))]
-      [else
+       (for ([item (in-list items)]) (expr (add1 depth) item))]
+      [(ast:e:let bound body)
        (put depth (string-append "let" (show-type e)))
-       (for ([d (in-list (ast:e:let-decls n))]) (decl (add1 depth) d))
+       (for ([d (in-list bound)]) (decl (add1 depth) d))
        (put depth "in")
-       (expr (add1 depth) (ast:e:let-body n))]))
+       (expr (add1 depth) body)]))
 
   (for ([d (in-list prog)]) (decl 0 d))
   (string-append (string-join (reverse lines) "\n") "\n"))

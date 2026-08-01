@@ -61,6 +61,31 @@ well as the other, chapter 7 aside.
 
 ## What Racket made different
 
+**A struct is a pattern, so nothing names an accessor twice.** Every question a
+pass asks an instruction is one `match`, and the instruction comes apart where it
+is asked about:
+
+```racket
+(define (uses i)
+  (match i
+    [(i:bin _ _ lhs rhs) (list lhs rhs)]
+    [(i:store base _ src) (list base src)]
+    [(i:cbr cond _ _ "") (list cond)]
+    ...))
+```
+
+`ir.rkt` alone has six of these — `defs`, `uses`, `map-uses`, `with-def`,
+`has-effect?` and the printer — and the tree walks in the checker, the lowering
+and the dump are the same shape. What went with the accessors is the class of
+mistake they invite: `(i:bin-lhs i)` beside `(i:cmp-rhs i)` typechecks.
+
+**`map-uses` is one expression per instruction, because Racket promises an
+order.** Renaming allocates — a variable read on a path that never wrote it
+invents a register — so the order the operands are rewritten in is the order they
+are numbered in. Racket evaluates the arguments of an application left to right
+and says so, which is why `(i:bin dst op (f lhs) (f rhs))` is safe here and the
+OCaml port has to write the same thing in two lines.
+
 **A struct is immutable unless it says otherwise, so an instruction is a value.**
 `(struct i:bin (dst op lhs rhs))` cannot be written to, so every rewrite answers
 with a new instruction and the caller puts it back where the old one was. That is
@@ -92,12 +117,12 @@ without renaming either. What the prefix cannot do is shadow: `if`, `let` and
 `e:while`, and `check` had to be brought in under `types:` in the tests because
 `rackunit` exports one too.
 
-**A hash has no order, and phis are printed in one.** Racket's `hash` iterates in
-an order nothing promises, which is exactly what the placement of a phi and the
-walk of a worklist must not depend on. So a phi's arguments are an association
-list — `(pred . reg)`, in the order they were put there — and every set the
-allocator walks goes out through `sorted` or `least` on the way. Go had to do the
-same; Python and TypeScript got it from the language.
+**A hash has no order, and phis are printed in one.** Racket's `hash` and
+`mutable-seteqv` iterate in an order nothing promises, which is exactly what the
+placement of a phi and the walk of a worklist must not depend on. So a phi's
+arguments are an association list — `(pred . reg)`, in the order they were put
+there — and the two places in the allocator that *choose* go through `sorted` or
+`least`. Go had to do the same; Python and TypeScript got it from the language.
 
 **Escape continuations are how the pipeline stops.** `compile-module` runs the
 whole pipeline and `stop-at?` returns out of it the moment the caller's stage has
@@ -116,4 +141,4 @@ IMMEDIATE))` says what Python needs two clauses for.
   configurations)
 - **94 tests, none skipped** — including the end-to-end runs under qemu and the
   random-program oracle
-- 4674 lines in 26 modules, and 1276 in the tests
+- 4602 lines in 26 modules (3353 of them code), and 1276 in the tests

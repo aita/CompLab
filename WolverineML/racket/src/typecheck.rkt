@@ -14,6 +14,7 @@
 ;; pass gives those a frame slot instead.
 
 (require racket/list
+         racket/match
          racket/string
          "diag.rkt"
          "types.rkt"
@@ -92,21 +93,20 @@
 ;; -- types as they are written -----------------------------------------------
 
 (define (resolve c t)
-  (cond
-    [(ast:t:name? t) (lookup-type c (ast:t:name-name t) (ast:t:name-at t))]
-    [(ast:t:array? t) (ty:array (resolve c (ast:t:array-elem t)))]
-    [else (type-error (ast:t:record-at t)
-                      "a record type has to be given a name by `type`")]))
+  (match t
+    [(ast:t:name at name) (lookup-type c name at)]
+    [(ast:t:array _ elem) (ty:array (resolve c elem))]
+    [(ast:t:record at _) (type-error at "a record type has to be given a name by `type`")]))
 
 ;; -- declarations ------------------------------------------------------------
 
 (define (decls c list) (for ([d (in-list list)]) (decl c d)))
 
 (define (decl c d)
-  (cond
-    [(ast:d:type? d) (type-decl c (ast:d:type-binds d))]
-    [(ast:d:val? d) (val-decl c d)]
-    [else (fun-decl c (ast:d:fun-binds d))]))
+  (match d
+    [(ast:d:type _ binds) (type-decl c binds)]
+    [(? ast:d:val?) (val-decl c d)]
+    [(ast:d:fun _ binds) (fun-decl c binds)]))
 
 ;; Records are bound before any field is resolved, so a group of `type`s may name
 ;; each other and itself.
@@ -191,58 +191,53 @@
   ty)
 
 (define (infer c e)
-  (define n (ast:exp-node e))
   (define at (ast:exp-at e))
-  (cond
-    [(ast:e:int? n) 'int]
-    [(ast:e:str? n) 'string]
-    [(ast:e:bool? n) 'bool]
-    [(ast:e:nil? n) 'nil]
-    [(ast:e:unit? n) 'unit]
-    [(ast:e:var? n) (variable c e n)]
-    [(ast:e:call? n) (call-exp c e n)]
-    [(ast:e:record? n) (record-lit c e n)]
-    [(ast:e:index? n) (index-exp c e n)]
-    [(ast:e:field? n) (field-exp c e n)]
-    [(ast:e:neg? n)
-     (unify 'int (infer-exp c (ast:e:neg-operand n)) at "in a negation")
+  (match (ast:exp-node e)
+    [(ast:e:int _) 'int]
+    [(ast:e:str _) 'string]
+    [(ast:e:bool _) 'bool]
+    [(ast:e:nil) 'nil]
+    [(ast:e:unit) 'unit]
+    [(ast:e:var name) (variable c e name)]
+    [(ast:e:call callee args) (call-exp c e callee args)]
+    [(ast:e:record tyname inits) (record-lit c e tyname inits)]
+    [(ast:e:index array index) (index-exp c e array index)]
+    [(ast:e:field record select) (field-exp c e record select)]
+    [(ast:e:neg operand)
+     (unify 'int (infer-exp c operand) at "in a negation")
      'int]
-    [(ast:e:bin? n) (binop c e n)]
-    [(ast:e:logic? n)
-     (define op (ast:e:logic-op n))
-     (unify 'bool (infer-exp c (ast:e:logic-lhs n)) (ast:exp-at (ast:e:logic-lhs n))
-            (format "on the left of `~a`" op))
-     (unify 'bool (infer-exp c (ast:e:logic-rhs n)) (ast:exp-at (ast:e:logic-rhs n))
-            (format "on the right of `~a`" op))
+    [(ast:e:bin op lhs rhs) (binop c e op lhs rhs)]
+    [(ast:e:logic op lhs rhs)
+     (unify 'bool (infer-exp c lhs) (ast:exp-at lhs) (format "on the left of `~a`" op))
+     (unify 'bool (infer-exp c rhs) (ast:exp-at rhs) (format "on the right of `~a`" op))
      'bool]
-    [(ast:e:assign? n) (assign c e n)]
-    [(ast:e:if? n) (if-exp c e n)]
-    [(ast:e:while? n)
-     (unify 'bool (infer-exp c (ast:e:while-cond n)) (ast:exp-at (ast:e:while-cond n))
-            "as a `while` condition")
+    [(ast:e:assign target v) (assign c e target v)]
+    [(ast:e:if cnd then els) (if-exp c e cnd then els)]
+    [(ast:e:while cnd body)
+     (unify 'bool (infer-exp c cnd) (ast:exp-at cnd) "as a `while` condition")
      (set-checker-loops! c (add1 (checker-loops c)))
-     (unify 'unit (infer-exp c (ast:e:while-body n)) (ast:exp-at (ast:e:while-body n))
-            "in a `while` body")
+     (unify 'unit (infer-exp c body) (ast:exp-at body) "in a `while` body")
      (set-checker-loops! c (sub1 (checker-loops c)))
      'unit]
-    [(ast:e:for? n) (for-exp c e n)]
-    [(ast:e:break? n)
+    [(ast:e:for binder lo hi body) (for-exp c e binder lo hi body)]
+    [(ast:e:break)
      (when (zero? (checker-loops c)) (type-error at "`break` is outside any loop"))
      'unit]
-    [(ast:e:seq? n)
-     (for/fold ([ty 'unit]) ([item (in-list (ast:e:seq-items n))]) (infer-exp c item))]
-    [else
+    [(ast:e:seq items)
+     (for/fold ([ty 'unit]) ([item (in-list items)]) (infer-exp c item))]
+    ;; The bound names are `bound` and not `decls`, because `decls` is the
+     ;; procedure that checks them and a pattern variable would shadow it.
+     [(ast:e:let bound body)
      (push! c)
-     (decls c (ast:e:let-decls n))
-     (define ty (infer-exp c (ast:e:let-body n)))
+     (decls c bound)
+     (define ty (infer-exp c body))
      (pop! c)
      ty]))
 
-(define (variable c e n)
-  (define sym (lookup-val c (ast:e:var-name n) (ast:exp-at e)))
+(define (variable c e name)
+  (define sym (lookup-val c name (ast:exp-at e)))
   (when (fun-sym? sym)
-    (type-error (ast:exp-at e) "`~a` is a function, and functions are not values"
-                (ast:e:var-name n)))
+    (type-error (ast:exp-at e) "`~a` is a function, and functions are not values" name))
   ;; Read from deeper than it was bound: it cannot live in a register.
   (when (< (var-sym-depth sym) (checker-depth c)) (set-var-sym-escapes?! sym #t))
   (ast:set-exp-sym! e sym)
@@ -253,9 +248,7 @@
     (type-error (ast:exp-at e) "`~a` takes ~a argument~a, given ~a"
                 callee want (if (= want 1) "" "s") (length args))))
 
-(define (call-exp c e n)
-  (define callee (ast:e:call-callee n))
-  (define args (ast:e:call-args n))
+(define (call-exp c e callee args)
   (define f (lookup-val c callee (ast:exp-at e)))
   (when (var-sym? f)
     (type-error (ast:exp-at e) "`~a` is a variable, not a function" callee))
@@ -288,12 +281,12 @@
      (fun-sym-result f)]))
 
 ;; The initialisers are put into declaration order, which is what lowering wants.
-(define (record-lit c e n)
-  (define found (lookup-type c (ast:e:record-tyname n) (ast:exp-at e)))
+(define (record-lit c e tyname inits)
+  (define found (lookup-type c tyname (ast:exp-at e)))
   (unless (ty:record? found)
-    (type-error (ast:exp-at e) "`~a` is not a record type" (ast:e:record-tyname n)))
+    (type-error (ast:exp-at e) "`~a` is not a record type" tyname))
   (define seen (make-hash))
-  (for ([f (in-list (ast:e:record-inits n))])
+  (for ([f (in-list inits)])
     (when (hash-ref seen (ast:field-init-name f) #f)
       (type-error (ast:field-init-at f) "field `~a` is given twice"
                   (ast:field-init-name f)))
@@ -302,7 +295,7 @@
                   (ty:record-name found) (ast:field-init-name f)))
     (hash-set! seen (ast:field-init-name f) f))
   (ast:set-e:record-inits!
-   n
+   (ast:exp-node e)
    (for/list ([want (in-list (ty:record-fields found))])
      (define init (hash-ref seen (car want) #f))
      (unless init (type-error (ast:exp-at e) "field `~a` is missing" (car want)))
@@ -311,29 +304,24 @@
      init))
   found)
 
-(define (index-exp c e n)
-  (define got (infer-exp c (ast:e:index-array n)))
+(define (index-exp c e array index)
+  (define got (infer-exp c array))
   (unless (ty:array? got)
     (type-error (ast:exp-at e) "`~a` is not an array" (show-ty got)))
-  (unify 'int (infer-exp c (ast:e:index-index n)) (ast:exp-at (ast:e:index-index n))
-         "as an array index")
+  (unify 'int (infer-exp c index) (ast:exp-at index) "as an array index")
   (ty:array-elem got))
 
-(define (field-exp c e n)
-  (define got (infer-exp c (ast:e:field-record n)))
+(define (field-exp c e record select)
+  (define got (infer-exp c record))
   (unless (ty:record? got)
     (type-error (ast:exp-at e) "`~a` is not a record" (show-ty got)))
-  (define ty (record-field-type got (ast:e:field-select n)))
+  (define ty (record-field-type got select))
   (unless ty
-    (type-error (ast:exp-at e) "`~a` has no field `~a`"
-                (ty:record-name got) (ast:e:field-select n)))
-  (ast:set-exp-offset! e (record-index got (ast:e:field-select n)))
+    (type-error (ast:exp-at e) "`~a` has no field `~a`" (ty:record-name got) select))
+  (ast:set-exp-offset! e (record-index got select))
   ty)
 
-(define (binop c e n)
-  (define op (ast:e:bin-op n))
-  (define lhs (ast:e:bin-lhs n))
-  (define rhs (ast:e:bin-rhs n))
+(define (binop c e op lhs rhs)
   (define l (infer-exp c lhs))
   (define r (infer-exp c rhs))
   (cond
@@ -358,22 +346,17 @@
      'bool]
     [else (type-error (ast:exp-at e) "unknown operator `~a`" op)]))
 
-(define (assign c e n)
-  (define target (ast:e:assign-target n))
+(define (assign c e target v)
   (define ty (infer-exp c target))
   (when (ast:e:var? (ast:exp-node target))
     (define sym (ast:exp-sym target))
     (unless (var-sym-mutable? sym)
       (type-error (ast:exp-at e) "`~a` is a `val`, so it cannot be assigned"
                   (var-sym-name sym))))
-  (unify ty (infer-exp c (ast:e:assign-value n)) (ast:exp-at (ast:e:assign-value n))
-         "in an assignment")
+  (unify ty (infer-exp c v) (ast:exp-at v) "in an assignment")
   'unit)
 
-(define (if-exp c e n)
-  (define cnd (ast:e:if-cond n))
-  (define then (ast:e:if-then n))
-  (define els (ast:e:if-els n))
+(define (if-exp c e cnd then els)
   (unify 'bool (infer-exp c cnd) (ast:exp-at cnd) "as an `if` condition")
   (define t (infer-exp c then))
   (cond
@@ -385,18 +368,15 @@
                    (show-ty t) (show-ty other)))
      (if (eq? t 'nil) other t)]))
 
-(define (for-exp c e n)
-  (define lo (ast:e:for-lo n))
-  (define hi (ast:e:for-hi n))
+(define (for-exp c e binder lo hi body)
   (unify 'int (infer-exp c lo) (ast:exp-at lo) "as a `for` bound")
   (unify 'int (infer-exp c hi) (ast:exp-at hi) "as a `for` bound")
-  (define sym (var-sym (ast:e:for-binder n) 'int #f (checker-depth c) #f #f))
+  (define sym (var-sym binder 'int #f (checker-depth c) #f #f))
   (ast:set-exp-sym! e sym)
   (push! c)
-  (bind-val! c (ast:e:for-binder n) sym)
+  (bind-val! c binder sym)
   (set-checker-loops! c (add1 (checker-loops c)))
-  (unify 'unit (infer-exp c (ast:e:for-body n)) (ast:exp-at (ast:e:for-body n))
-         "in a `for` body")
+  (unify 'unit (infer-exp c body) (ast:exp-at body) "in a `for` body")
   (set-checker-loops! c (sub1 (checker-loops c)))
   (pop! c)
   'unit)

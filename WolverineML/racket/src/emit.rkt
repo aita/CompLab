@@ -23,6 +23,7 @@
 ;; be reserved for it.
 
 (require racket/list
+         racket/match
          racket/string
          data/gvector
          "registers.rkt"
@@ -50,9 +51,9 @@
 (define (frame-of f alloc)
   (define stack-args
     (for*/fold ([most 0]) ([b (in-list (ir:walk f))] [i (in-list (ir:instrs b))])
-      (if (ir:i:call? i)
-          (max most (- (length (ir:i:call-args i)) (length ARGUMENT-REGS)))
-          most)))
+      (match i
+        [(ir:i:call _ _ args) (max most (- (length args) (length ARGUMENT-REGS)))]
+        [_ most])))
   (define saved (ir:allocation-saved alloc))
   (define raw (* ir:WORD (+ (ir:func-nslots f) (length saved) (max stack-args 0))))
   (frame (ir:func-nslots f) saved (max stack-args 0) (bitwise-and (+ raw 15) (bitwise-not 15))))
@@ -164,34 +165,29 @@
   (terminator! e b next))
 
 (define (terminator! e b next)
-  (define f (emitter-func e))
-  (define t (ir:terminator b))
-  (define (block-label-of name) (format ".L~a_~a" (ir:func-label f) name))
-  (cond
-    [(ir:i:jmp? t)
-     (edge! e (ir:block-label b) (ir:i:jmp-target t))
-     (unless (equal? (ir:i:jmp-target t) next)
-       (line! e (format "b ~a" (block-label-of (ir:i:jmp-target t)))))]
-    [(ir:i:cbr? t)
-     (define then (ir:i:cbr-then t))
-     (define els (ir:i:cbr-els t))
-     (define code (ir:i:cbr-code t))
+  (define (where name) (format ".L~a_~a" (ir:func-label (emitter-func e)) name))
+  (define (fall-through-to els)
+    (unless (equal? els next) (line! e (format "b ~a" (where els)))))
+  (match (ir:terminator b)
+    [(ir:i:jmp target)
+     (edge! e (ir:block-label b) target)
+     (fall-through-to target)]
+    ;; The flags are already set, so the branch reads them and no register.
+    [(ir:i:cbr _ then els code)
+     #:when (not (string=? code ""))
      (cond
-       [(not (string=? code ""))
-        (cond
-          [(equal? then next)
-           (line! e (format "b.~a ~a" (mach:opposite-of code) (block-label-of els)))]
-          [else
-           (line! e (format "b.~a ~a" code (block-label-of then)))
-           (unless (equal? els next) (line! e (format "b ~a" (block-label-of els))))])]
-       [(equal? then next)
-        (line! e (format "cbz x~a, ~a" (colour-of e (ir:i:cbr-cond t)) (block-label-of els)))]
+       [(equal? then next) (line! e (format "b.~a ~a" (mach:opposite-of code) (where els)))]
        [else
-        (line! e (format "cbnz x~a, ~a" (colour-of e (ir:i:cbr-cond t)) (block-label-of then)))
-        (unless (equal? els next) (line! e (format "b ~a" (block-label-of els))))])]
-    [else
-     (when (ir:i:ret-value t)
-       (mov! e (first ARGUMENT-REGS) (colour-of e (ir:i:ret-value t))))
+        (line! e (format "b.~a ~a" code (where then)))
+        (fall-through-to els)])]
+    [(ir:i:cbr cnd then els _)
+     (cond
+       [(equal? then next) (line! e (format "cbz x~a, ~a" (colour-of e cnd) (where els)))]
+       [else
+        (line! e (format "cbnz x~a, ~a" (colour-of e cnd) (where then)))
+        (fall-through-to els)])]
+    [(ir:i:ret value)
+     (when value (mov! e (first ARGUMENT-REGS) (colour-of e value)))
      ;; The epilogue follows the last block, so the last `ret` needs no branch.
      (when next (line! e (format "b ~a" (emitter-epilogue e))))]))
 
@@ -206,11 +202,9 @@
 
 (define (parallel! e moves)
   (for ([step (in-list (copies:sequentialize moves (borrowed e moves)))])
-    (cond
-      [(copies:mov? step) (mov! e (copies:mov-dst step) (copies:mov-src step))]
-      [else
-       (define a (copies:swap-a step))
-       (define b (copies:swap-b step))
+    (match step
+      [(copies:mov dst src) (mov! e dst src)]
+      [(copies:swap a b)
        (line! e (format "eor x~a, x~a, x~a" a a b))
        (line! e (format "eor x~a, x~a, x~a" b a b))
        (line! e (format "eor x~a, x~a, x~a" a a b))])))
@@ -235,45 +229,38 @@
 ;; -- one instruction ---------------------------------------------------------
 
 (define (instruction! e i)
-  (cond
-    [(ir:i:machine? i) (machine! e i)]
-    [(ir:i:move? i) (mov! e (colour-of e (ir:i:move-dst i)) (colour-of e (ir:i:move-src i)))]
-    [(ir:i:load-slot? i)
-     (access! e "ldr" (colour-of e (ir:i:load-slot-dst i)) 29
-              (ir:slot-offset (ir:i:load-slot-slot i)))]
-    [(ir:i:store-slot? i)
-     (access! e "str" (colour-of e (ir:i:store-slot-src i)) 29
-              (ir:slot-offset (ir:i:store-slot-slot i)))]
-    [(ir:i:frame-addr? i) (mov! e (colour-of e (ir:i:frame-addr-dst i)) 29)]
-    [(ir:i:call? i) (call! e (ir:i:call-dst i) (ir:i:call-callee i) (ir:i:call-args i))]
-    [else (error 'emit "cannot emit this instruction")]))
+  (define (colour r) (colour-of e r))
+  (match i
+    [(? ir:i:machine?) (machine! e i)]
+    [(ir:i:move dst src) (mov! e (colour dst) (colour src))]
+    [(ir:i:load-slot dst slot) (access! e "ldr" (colour dst) 29 (ir:slot-offset slot))]
+    [(ir:i:store-slot slot src) (access! e "str" (colour src) 29 (ir:slot-offset slot))]
+    [(ir:i:frame-addr dst) (mov! e (colour dst) 29)]
+    [(ir:i:call dst callee args) (call! e dst callee args)]
+    [_ (error 'emit "cannot emit this instruction")]))
 
 ;; Write down one selected instruction, or the sequence it stands for.
 (define (machine! e i)
-  (define srcs (for/list ([s (in-list (ir:i:machine-srcs i))]) (colour-of e s)))
-  (define form (ir:i:machine-form i))
-  (define imm (ir:i:machine-imm i))
-  (cond
-    [(string=? form "const") (immediate! e (colour-of e (ir:i:machine-dst i)) imm)]
-    [(string=? form "adr")
-     (define d (colour-of e (ir:i:machine-dst i)))
-     (line! e (format "adrp x~a, ~a" d (ir:i:machine-symbol i)))
-     (line! e (format "add x~a, x~a, :lo12:~a" d d (ir:i:machine-symbol i)))]
-    [(string=? form "ldr")
-     (access! e "ldr" (colour-of e (ir:i:machine-dst i)) (first srcs) imm)]
-    [(string=? form "str") (access! e "str" (second srcs) (first srcs) imm)]
-    [else
-     (define written
-       (for/fold ([text (mach:form-of form)])
-                 ([pair (in-list (append (for/list ([c (in-list srcs)] [n (in-naturals)])
-                                           (cons (format "{s~a}" n) (format "x~a" c)))
-                                         (list (cons "{imm}" (number->string imm))
-                                               (cons "{sym}" (ir:i:machine-symbol i))
-                                               (cons "{d}" (if (ir:i:machine-dst i)
-                                                               (format "x~a" (colour-of e (ir:i:machine-dst i)))
-                                                               "")))))])
-         (string-replace text (car pair) (cdr pair))))
-     (line! e written)]))
+  (match-define (ir:i:machine form dst srcs imm symbol _) i)
+  (define coloured (for/list ([s (in-list srcs)]) (colour-of e s)))
+  (match form
+    ["const" (immediate! e (colour-of e dst) imm)]
+    ["adr"
+     (define d (colour-of e dst))
+     (line! e (format "adrp x~a, ~a" d symbol))
+     (line! e (format "add x~a, x~a, :lo12:~a" d d symbol))]
+    ["ldr" (access! e "ldr" (colour-of e dst) (first coloured) imm)]
+    ["str" (access! e "str" (second coloured) (first coloured) imm)]
+    ;; Everything else is the table's line with its holes filled in.
+    [_
+     (define holes
+       (append (for/list ([c (in-list coloured)] [n (in-naturals)])
+                 (cons (format "{s~a}" n) (format "x~a" c)))
+               (list (cons "{imm}" (number->string imm))
+                     (cons "{sym}" symbol)
+                     (cons "{d}" (if dst (format "x~a" (colour-of e dst)) "")))))
+     (line! e (for/fold ([text (mach:form-of form)]) ([hole (in-list holes)])
+                (string-replace text (car hole) (cdr hole))))]))
 
 (define (call! e dst callee args)
   (define in-registers

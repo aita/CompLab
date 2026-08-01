@@ -8,6 +8,7 @@
 ;; `x2` on the way into a call, or out of `x0` on the way back from one.
 
 (require racket/list
+         racket/match
          data/gvector
          "registers.rkt"
          (prefix-in ir: "ir.rkt"))
@@ -21,11 +22,10 @@
         #:when (< i (length ARGUMENT-REGS)))
     (hash-set! wanted p (list-ref ARGUMENT-REGS i)))
   (for* ([b (in-list (ir:walk f))] [i (in-list (ir:instrs b))])
-    (cond
-      [(ir:i:call? i)
-       (for ([arg (in-list (ir:i:call-args i))] [reg (in-list ARGUMENT-REGS)])
-         (hash-set! wanted arg reg))
-       (when (ir:i:call-dst i) (hash-set! wanted (ir:i:call-dst i) (first ARGUMENT-REGS)))]
-      [(and (ir:i:ret? i) (ir:i:ret-value i))
-       (hash-set! wanted (ir:i:ret-value i) (first ARGUMENT-REGS))]))
+    (match i
+      [(ir:i:call dst _ args)
+       (for ([arg (in-list args)] [reg (in-list ARGUMENT-REGS)]) (hash-set! wanted arg reg))
+       (when dst (hash-set! wanted dst (first ARGUMENT-REGS)))]
+      [(ir:i:ret (? values value)) (hash-set! wanted value (first ARGUMENT-REGS))]
+      [_ (void)]))
   wanted)

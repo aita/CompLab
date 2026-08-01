@@ -32,6 +32,7 @@
 ;; that sum is what stands in for the degree everywhere below.
 
 (require racket/list
+         racket/match
          racket/set
          data/gvector
          "registers.rkt"
@@ -44,18 +45,18 @@
 
 ;; -- sets of small integers --------------------------------------------------
 ;;
-;; Every set here is walked in increasing order, because which node is simplified
-;; first and which copy is looked at first decide the colouring, and a colouring
-;; that depended on a hash's internal order would not be the same twice.
+;; `mutable-seteqv` is what every worklist here is.  What it does not promise is
+;; an order, and the order matters: which node is simplified first and which copy
+;; is looked at first decide the colouring, so the two places that choose go
+;; through `sorted` and `least` and a colouring is the same twice.
 
-(define (mkset) (make-hasheqv))
-(define (in? s x) (and (hash-ref s x #f) #t))
-(define (add! s x) (hash-set! s x #t))
-(define (rm! s x) (hash-remove! s x))
-(define (any? s) (positive? (hash-count s)))
-(define (sorted s) (sort (hash-keys s) <))
-(define (least s) (for/fold ([best #f]) ([k (in-hash-keys s)])
-                    (if (or (not best) (< k best)) k best)))
+(define (mkset) (mutable-seteqv))
+(define (in? s x) (set-member? s x))
+(define (add! s x) (set-add! s x))
+(define (rm! s x) (set-remove! s x))
+(define (any? s) (not (set-empty? s)))
+(define (sorted s) (sort (set->list s) <))
+(define (least s) (apply min (set->list s)))
 
 ;; -- the colouring -----------------------------------------------------------
 
@@ -88,7 +89,7 @@
     (define c (new-colouring f machine protected))
     (define spilled (run c))
     (cond
-      [(zero? (hash-count spilled))
+      [(set-empty? spilled)
        (define colours (colouring-colour c))
        (ir:allocation
         (for/hasheqv ([(r colour) (in-hash colours)]) (values r colour))
@@ -142,7 +143,7 @@
     (hash-update! (colouring-degree c) b add1)))
 
 ;; The degree, counting a forbidden colour as a neighbour holding it.
-(define (weight c r) (+ (degree c r) (hash-count (forbidden c r))))
+(define (weight c r) (+ (degree c r) (set-count (forbidden c r))))
 
 (define (build! c)
   (define f (colouring-func c))
@@ -158,15 +159,15 @@
     (define alive (mkset))
     (for ([r (in-list (live:sorted-regs (live:live-out l (ir:block-label b))))]) (add! alive r))
     (for ([i (in-list (reverse (ir:instrs b)))])
-      (when (ir:i:move? i)
-        (rm! alive (ir:i:move-src i))
-        (define index (gvector-count (colouring-moves c)))
-        (gvector-add! (colouring-moves c) (cons (ir:i:move-dst i) (ir:i:move-src i)))
-        (for ([end (in-list (list (ir:i:move-dst i) (ir:i:move-src i)))])
-          (unless (hash-ref (colouring-moves-of c) end #f)
-            (hash-set! (colouring-moves-of c) end (mkset)))
-          (add! (hash-ref (colouring-moves-of c) end) index))
-        (add! (colouring-worklist-moves c) index))
+      (match i
+        [(ir:i:move dst src)
+         (rm! alive src)
+         (define index (gvector-count (colouring-moves c)))
+         (gvector-add! (colouring-moves c) (cons dst src))
+         (for ([end (in-list (list dst src))])
+           (add! (hash-ref! (colouring-moves-of c) end mkset) index))
+         (add! (colouring-worklist-moves c) index)]
+        [_ (void)])
       (define defined (ir:defs i))
       (when defined
         (add! alive defined)
@@ -265,8 +266,8 @@
 ;; is barred from is one more thing standing in its way.
 (define (conservative? c u v)
   (define together (set-union (list->seteqv (neighbours c u)) (list->seteqv (neighbours c v))))
-  (define barred (set-count (set-union (list->seteqv (hash-keys (forbidden c u)))
-                                       (list->seteqv (hash-keys (forbidden c v))))))
+  (define barred (set-count (set-union (list->seteqv (set->list (forbidden c u)))
+                                       (list->seteqv (set->list (forbidden c v))))))
   (define significant
     (for/sum ([r (in-set together)]) (if (>= (weight c r) (k c)) 1 0)))
   (< (+ significant barred) (k c)))

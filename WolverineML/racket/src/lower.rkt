@@ -15,6 +15,7 @@
 ;; of static links from a nested one.
 
 (require racket/list
+         racket/match
          data/gvector
          "types.rkt"
          (prefix-in ast: "ast.rkt")
@@ -130,18 +131,18 @@
   (unless (or (< slot 0)
               (fl-children? me)
               (for*/or ([b (in-list (ir:walk f))] [i (in-list (ir:instrs b))])
-                (and (ir:i:load-slot? i) (= (ir:i:load-slot-slot i) slot))))
+                (match i [(ir:i:load-slot _ (== slot)) #t] [_ #f])))
     (for ([b (in-list (ir:walk f))])
       (ir:set-instrs!
        b
        (for/list ([i (in-list (ir:instrs b))]
-                  #:unless (and (ir:i:store-slot? i) (= (ir:i:store-slot-slot i) slot)))
-         (cond
-           [(ir:i:store-slot? i)
-            (ir:i:store-slot (moved (ir:i:store-slot-slot i)) (ir:i:store-slot-src i))]
-           [(ir:i:load-slot? i)
-            (ir:i:load-slot (ir:i:load-slot-dst i) (moved (ir:i:load-slot-slot i)))]
-           [else i]))))
+                  #:unless (match i
+                             [(ir:i:store-slot (== slot) _) #t]
+                             [_ #f]))
+         (match i
+           [(ir:i:store-slot n src) (ir:i:store-slot (moved n) src)]
+           [(ir:i:load-slot dst n) (ir:i:load-slot dst (moved n))]
+           [_ i]))))
     (ir:set-func-nslots! f (sub1 (ir:func-nslots f)))
     (ir:set-func-link-slot! f -1)))
 
@@ -149,12 +150,12 @@
 
 (define (lower-decls! me decls)
   (for ([d (in-list decls)])
-    (cond
-      [(ast:d:type? d) (void)]
-      [(ast:d:val? d) (val-decl! me d)]
-      [else
+    (match d
+      [(ast:d:type _ _) (void)]
+      [(? ast:d:val?) (val-decl! me d)]
+      [(ast:d:fun _ binds)
        (set-fl-children?! me #t)
-       (for ([b (in-list (ast:d:fun-binds d))])
+       (for ([b (in-list binds)])
          (define sym (ast:fun-bind-sym b))
          (function-body!
           (new-fl (fl-up me) (fun-sym-label sym) (fun-sym-name sym) (fun-sym-depth sym))
@@ -227,40 +228,36 @@
   (or (lower-exp me e) (error 'lower "expected a value here")))
 
 (define (lower-exp me e)
-  (define n (ast:exp-node e))
-  (cond
-    [(ast:e:int? n) (const! me (ast:e:int-value n))]
-    [(ast:e:bool? n) (const! me (if (ast:e:bool-value n) 1 0))]
-    [(ast:e:nil? n) (const! me 0)]
-    [(ast:e:unit? n) #f]
-    [(ast:e:str? n)
+  (match (ast:exp-node e)
+    [(ast:e:int value) (const! me value)]
+    [(ast:e:bool value) (const! me (if value 1 0))]
+    [(ast:e:nil) (const! me 0)]
+    [(ast:e:unit) #f]
+    [(ast:e:str text)
      (define r (reg! me))
-     (emit! me (ir:i:str-const r (intern! (fl-up me) (ast:e:str-value n))))
+     (emit! me (ir:i:str-const r (intern! (fl-up me) text)))
      r]
-    [(ast:e:var? n) (read-var me (ast:exp-sym e))]
-    [(ast:e:call? n) (call-exp me e n)]
-    [(ast:e:record? n) (record-lit me e n)]
-    [(ast:e:index? n)
-     (define addr (element-address me n))
+    [(ast:e:var _) (read-var me (ast:exp-sym e))]
+    [(ast:e:call _ args) (call-exp me e args)]
+    [(ast:e:record _ inits) (record-lit me e inits)]
+    [(ast:e:index array index)
+     (define addr (element-address me array index))
      (define r (reg! me))
      (emit! me (ir:i:load r addr ir:WORD))
      r]
-    [(ast:e:field? n) (field-exp me e n)]
-    [(ast:e:neg? n)
-     (define zero (const! me 0))
-     (binop! me "-" zero (value me (ast:e:neg-operand n)))]
-    [(ast:e:bin? n) (bin-exp me e n)]
-    [(ast:e:logic? n) (logic-exp me n)]
-    [(ast:e:assign? n) (assign! me n) #f]
-    [(ast:e:if? n) (if-exp me e n)]
-    [(ast:e:while? n) (while-exp! me n) #f]
-    [(ast:e:for? n) (for-exp! me e n) #f]
-    [(ast:e:break? n) (terminate! me (ir:i:jmp (car (fl-breaks me)))) #f]
-    [(ast:e:seq? n)
-     (for/fold ([last #f]) ([item (in-list (ast:e:seq-items n))]) (lower-exp me item))]
-    [else
-     (lower-decls! me (ast:e:let-decls n))
-     (lower-exp me (ast:e:let-body n))]))
+    [(ast:e:field record _) (field-exp me e record)]
+    [(ast:e:neg operand) (binop! me "-" (const! me 0) (value me operand))]
+    [(ast:e:bin op lhs rhs) (bin-exp me op lhs rhs)]
+    [(ast:e:logic op lhs rhs) (logic-exp me op lhs rhs)]
+    [(ast:e:assign target v) (assign! me target v) #f]
+    [(ast:e:if cnd then els) (if-exp me e cnd then els)]
+    [(ast:e:while cnd body) (while-exp! me cnd body) #f]
+    [(ast:e:for _ lo hi body) (for-exp! me e lo hi body) #f]
+    [(ast:e:break) (terminate! me (ir:i:jmp (car (fl-breaks me)))) #f]
+    [(ast:e:seq items) (for/fold ([last #f]) ([item (in-list items)]) (lower-exp me item))]
+    [(ast:e:let decls body)
+     (lower-decls! me decls)
+     (lower-exp me body)]))
 
 (define (binop! me op lhs rhs)
   (define r (reg! me))
@@ -277,10 +274,9 @@
   (emit! me (ir:i:call r name args))
   r)
 
-(define (bin-exp me e n)
-  (define op (ast:e:bin-op n))
-  (define lhs (value me (ast:e:bin-lhs n)))
-  (define rhs (value me (ast:e:bin-rhs n)))
+(define (bin-exp me op lhs-exp rhs-exp)
+  (define lhs (value me lhs-exp))
+  (define rhs (value me rhs-exp))
   (cond
     [(string=? op "^") (call-runtime! me "wol_concat" (list lhs rhs))]
     [(member op '("/" "mod"))
@@ -296,30 +292,29 @@
         (define product (binop! me "*" quotient rhs))
         (binop! me "-" lhs product)])]
     [(member op '("+" "-" "*")) (binop! me op lhs rhs)]
-    [(eq? (ast:exp-ty (ast:e:bin-lhs n)) 'string)
+    [(eq? (ast:exp-ty lhs-exp) 'string)
      (define order (call-runtime! me "wol_string_cmp" (list lhs rhs)))
      (compare! me op order (const! me 0))]
     [else (compare! me op lhs rhs)]))
 
 ;; `andalso` and `orelse` are branches, so the result needs a register.
-(define (logic-exp me n)
+(define (logic-exp me op lhs-exp rhs-exp)
   (define result (reg! me))
   (define rhs-block (fresh! me "logic"))
   (define join (fresh! me "logicjoin"))
-  (define lhs (value me (ast:e:logic-lhs n)))
+  (define lhs (value me lhs-exp))
   (emit! me (ir:i:move result lhs))
-  (if (string=? (ast:e:logic-op n) "andalso")
+  (if (string=? op "andalso")
       (branch! me lhs rhs-block join)
       (branch! me lhs join rhs-block))
   (set-fl-cur! me rhs-block)
-  (emit! me (ir:i:move result (value me (ast:e:logic-rhs n))))
+  (emit! me (ir:i:move result (value me rhs-exp)))
   (jump! me join)
   (set-fl-cur! me join)
   result)
 
-(define (call-exp me e n)
+(define (call-exp me e args)
   (define sym (ast:exp-sym e))
-  (define args (ast:e:call-args n))
   (case (fun-sym-builtin sym)
     [("not") (binop! me "xor" (value me (first args)) (const! me 1))]
     [("array")
@@ -344,11 +339,11 @@
         #f]
        [else (call-runtime! me (fun-sym-label sym) full)])]))
 
-(define (record-lit me e n)
+(define (record-lit me e inits)
   (define rec (ast:exp-ty e))
   (define size (const! me (* ir:WORD (max (length (ty:record-fields rec)) 1))))
   (define base (call-runtime! me "wol_alloc" (list size)))
-  (for ([f (in-list (ast:e:record-inits n))] [i (in-naturals)])
+  (for ([f (in-list inits)] [i (in-naturals)])
     (emit! me (ir:i:store base (* ir:WORD i) (value me (ast:field-init-value f)))))
   base)
 
@@ -357,50 +352,47 @@
 ;; The selector turns this into one `add` with a shifted operand, and the word is
 ;; the load's displacement, so the two instructions that come out are the two the
 ;; machine has.
-(define (element-address me n)
-  (define base (value me (ast:e:index-array n)))
-  (define idx (value me (ast:e:index-index n)))
+(define (element-address me array index)
+  (define base (value me array))
+  (define idx (value me index))
   (check-not-nil! me base)
   (check-bounds! me base idx)
   (binop! me "+" base (binop! me "shl" idx (const! me 3))))
 
-(define (field-exp me e n)
-  (define base (value me (ast:e:field-record n)))
+(define (field-exp me e record)
+  (define base (value me record))
   (check-not-nil! me base)
   (define r (reg! me))
   (emit! me (ir:i:load r base (* ir:WORD (ast:exp-offset e))))
   r)
 
-(define (assign! me n)
-  (define target (ast:e:assign-target n))
-  (define t (ast:exp-node target))
-  (cond
-    [(ast:e:var? t) (write-var! me (ast:exp-sym target) (value me (ast:e:assign-value n)))]
-    [(ast:e:index? t)
-     (define addr (element-address me t))
-     (emit! me (ir:i:store addr ir:WORD (value me (ast:e:assign-value n))))]
-    [else
-     (define base (value me (ast:e:field-record t)))
+(define (assign! me target v)
+  (match (ast:exp-node target)
+    [(ast:e:var _) (write-var! me (ast:exp-sym target) (value me v))]
+    [(ast:e:index array index)
+     (define addr (element-address me array index))
+     (emit! me (ir:i:store addr ir:WORD (value me v)))]
+    [(ast:e:field record _)
+     (define base (value me record))
      (check-not-nil! me base)
-     (emit! me (ir:i:store base (* ir:WORD (ast:exp-offset target))
-                           (value me (ast:e:assign-value n))))]))
+     (emit! me (ir:i:store base (* ir:WORD (ast:exp-offset target)) (value me v)))]))
 
-(define (if-exp me e n)
+(define (if-exp me e cnd then els)
   (define result (and (not (eq? (ast:exp-ty e) 'unit)) (reg! me)))
   (define yes (fresh! me "then"))
   (define no (fresh! me "else"))
   (define join (fresh! me "join"))
-  (branch! me (value me (ast:e:if-cond n)) yes no)
+  (define (copy-into branch)
+    (let ([value (lower-exp me branch)])
+      (when (and result value) (emit! me (ir:i:move result value)))))
+  (branch! me (value me cnd) yes no)
 
   (set-fl-cur! me yes)
-  (let ([value (lower-exp me (ast:e:if-then n))])
-    (when (and result value) (emit! me (ir:i:move result value))))
+  (copy-into then)
   (jump! me join)
 
   (set-fl-cur! me no)
-  (when (ast:e:if-els n)
-    (let ([value (lower-exp me (ast:e:if-els n))])
-      (when (and result value) (emit! me (ir:i:move result value)))))
+  (when els (copy-into els))
   (jump! me join)
 
   (set-fl-cur! me join)
@@ -411,23 +403,23 @@
   (thunk)
   (set-fl-breaks! me (cdr (fl-breaks me))))
 
-(define (while-exp! me n)
+(define (while-exp! me cnd body-exp)
   (define test (fresh! me "test"))
   (define body (fresh! me "body"))
   (define done (fresh! me "done"))
   (jump! me test)
   (set-fl-cur! me test)
-  (branch! me (value me (ast:e:while-cond n)) body done)
+  (branch! me (value me cnd) body done)
   (set-fl-cur! me body)
-  (in-loop! me done (λ () (lower-exp me (ast:e:while-body n))))
+  (in-loop! me done (λ () (lower-exp me body-exp)))
   (jump! me test)
   (set-fl-cur! me done))
 
 ;; `for i = lo to hi` counts up, and stops before overflowing at `hi`.
-(define (for-exp! me e n)
+(define (for-exp! me e lo-exp hi-exp body-exp)
   (define sym (ast:exp-sym e))
-  (define lo (value me (ast:e:for-lo n)))
-  (define hi-value (value me (ast:e:for-hi n)))
+  (define lo (value me lo-exp))
+  (define hi-value (value me hi-exp))
   (define hi (reg! me))
   (emit! me (ir:i:move hi hi-value))
   (bind! me sym lo)
@@ -437,7 +429,7 @@
   (branch! me (compare! me "<=" lo hi) body done)
 
   (set-fl-cur! me body)
-  (in-loop! me done (λ () (lower-exp me (ast:e:for-body n))))
+  (in-loop! me done (λ () (lower-exp me body-exp)))
   (branch! me (compare! me "<" (read-var me sym) hi) step done)
 
   (set-fl-cur! me step)
