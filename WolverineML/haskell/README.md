@@ -90,6 +90,21 @@ which is the seam that was implicit before.
 `CBr` says the same thing in its type: the condition code is a `Maybe Cond`
 rather than a `String` whose emptiness meant "test the register".
 
+**The four instructions the emitter expands are four constructors.** The machine
+instruction used to be a form-as-a-string with a symbol, an immediate and an
+"is it effectful" flag — enough fields for every shape, and a lookup that could
+fail. `MConst`, `MAdr`, `MLoad` and `MStore` are their own constructors now,
+which is what "not one instruction each" means, and what is left is uniform:
+
+```haskell
+Machine {mForm :: Form, mDst :: Maybe Reg, mSrcs :: [Reg], mImm :: Int64}
+```
+
+The symbol field and the effect flag are gone — the form says both — and the
+emitter's table is `template :: Form -> String`, a total function. `Mach.verify`
+had two things to check and has one: nothing can name an instruction that does
+not exist.
+
 **Identity is a number, because a value has none.** Whether a variable escapes
 is settled long after the node that mentions it was made, and where it ended up
 living is settled later still. So a `VarSym` carries an `Int` that is only ever
@@ -159,4 +174,4 @@ in is written down exactly once, and `emit -s opt` cannot drift from `build`.
 - **88 tests, none skipped** — including the end-to-end runs under qemu and the
   random-program oracle
 - **no warnings** at `-Wall`
-- 5275 lines in 26 modules (4027 of them code), and 1166 in the tests
+- 5317 lines in 26 modules (4051 of them code), and 1170 in the tests

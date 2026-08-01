@@ -145,9 +145,13 @@ log2 = fromIntegral . countTrailingZeros
 
 -- -- emitting -------------------------------------------------------------------
 
-machine :: String -> Maybe Reg -> [Reg] -> Int64 -> String -> Bool -> Sel ()
-machine form dst srcs imm symbol effect =
-  modify (\s -> s {sOut = Machine form dst srcs imm symbol effect : sOut s})
+-- | Put one chosen instruction down.  The four the emitter expands have
+-- constructors of their own and go through 'emit'.
+machine :: Form -> Maybe Reg -> [Reg] -> Int64 -> Sel ()
+machine form dst srcs imm = emit (Machine form dst srcs imm)
+
+emit :: Instr -> Sel ()
+emit i = modify (\s -> s {sOut = i : sOut s})
 
 -- | The register holding an operand, computing it here if it was deferred.
 --
@@ -180,21 +184,21 @@ force index = do
 
 tile :: Node -> Sel Reg
 tile n = case ndInstr n of
-  Const d v -> do machine "const" (Just d) [] v "" False; pure d
-  StrConst d symbol -> do machine "adr" (Just d) [] 0 symbol False; pure d
+  Const d v -> do emit (MConst d v); pure d
+  StrConst d symbol -> do emit (MAdr d symbol); pure d
   Bin d op lhs rhs -> do arithmetic n d op lhs rhs; pure d
   Cmp d op lhs rhs -> do
     compare' n op lhs rhs
-    machine "cset" (Just d) [] 0 (showCond (condition op)) False
+    machine (FCset (condition op)) (Just d) [] 0
     pure d
   Load d base offset -> do
     (pointer, off) <- address (operand 0 n) base offset
-    machine "ldr" (Just d) [pointer] (fromIntegral off) "" False
+    emit (MLoad d pointer (fromIntegral off))
     pure d
   Store base offset src -> do
     value <- at (operand 1 n) src
     (pointer, off) <- address (operand 0 n) base offset
-    machine "str" Nothing [pointer, value] (fromIntegral off) "" True
+    emit (MStore pointer value (fromIntegral off))
     pure src
   i -> do
     -- Moves, calls, slot accesses and the terminator are machine instructions
@@ -206,7 +210,7 @@ tile n = case ndInstr n of
     let written = case (i, fused) of
           (CBr cond t e _, Just code) -> CBr cond t e (Just code)
           _ -> i
-    modify (\s -> s {sOut = written : sOut s})
+    emit written
     pure (fromMaybe (Reg 0) (defs i))
 
 -- -- the tiles -------------------------------------------------------------
@@ -218,12 +222,12 @@ arithmetic n d op lhs rhs = case op of
   Add -> additive n d op lhs rhs
   Sub -> additive n d op lhs rhs
   Mul -> multiply n d lhs rhs
-  Div -> both n lhs rhs >>= \srcs -> machine "sdiv" (Just d) srcs 0 "" False
-  Shl -> shift n d "lsl" lhs rhs
-  Shr -> shift n d "asr" lhs rhs
-  And -> logic n d "and" False lhs rhs
-  Or -> logic n d "orr" False lhs rhs
-  Xor -> logic n d "eor" True lhs rhs
+  Div -> both n lhs rhs >>= \srcs -> machine FSdiv (Just d) srcs 0
+  Shl -> shift n d (FLsl, FLsli) lhs rhs
+  Shr -> shift n d (FAsr, FAsri) lhs rhs
+  And -> logic n d FAnd Nothing lhs rhs
+  Or -> logic n d FOrr Nothing lhs rhs
+  Xor -> logic n d FEor (Just FEori) lhs rhs
   Mod -> error "the remainder is spelled out in the IR"
 
 -- | Both operands in registers, which is what the plain forms want.
@@ -248,15 +252,15 @@ additive n d op lhs rhs = do
       case constant graph right of
         Just v | v >= 0 && v <= immediate -> do
           a <- at left lhs
-          machine (if op == Add then "addi" else "subi") (Just d) [a] v "" False
+          machine (if op == Add then FAddi else FSubi) (Just d) [a] v
         _ -> case (op, constant graph left) of
           -- Only addition may take its constant from the other side.
           (Add, Just v) | v >= 0 && v <= immediate -> do
             a <- at right rhs
-            machine "addi" (Just d) [a] v "" False
+            machine FAddi (Just d) [a] v
           _ -> do
             srcs <- both n lhs rhs
-            machine (if op == Add then "add" else "sub") (Just d) srcs 0 "" False
+            machine (if op == Add then FAdd else FSub) (Just d) srcs 0
 
 multiply :: Node -> Reg -> Reg -> Reg -> Sel ()
 multiply n d lhs rhs = do
@@ -264,34 +268,36 @@ multiply n d lhs rhs = do
   case constant graph (operand 1 n) of
     Just v | v > 0 && popCount v == 1 -> do
       a <- at (operand 0 n) lhs
-      machine "lsli" (Just d) [a] (log2 v) "" False
+      machine FLsli (Just d) [a] (log2 v)
     _ -> do
       srcs <- both n lhs rhs
-      machine "mul" (Just d) srcs 0 "" False
+      machine FMul (Just d) srcs 0
 
-shift :: Node -> Reg -> String -> Reg -> Reg -> Sel ()
-shift n d mnemonic lhs rhs = do
+-- | The pair is the form that shifts by a register and the one that shifts by an
+-- immediate.
+shift :: Node -> Reg -> (Form, Form) -> Reg -> Reg -> Sel ()
+shift n d (byRegister, byImmediate) lhs rhs = do
   graph <- gets sGraph
   case constant graph (operand 1 n) of
     Just v | v >= 0 && v < 64 -> do
       a <- at (operand 0 n) lhs
-      machine (mnemonic ++ "i") (Just d) [a] v "" False
+      machine byImmediate (Just d) [a] v
     _ -> do
       srcs <- both n lhs rhs
-      machine mnemonic (Just d) srcs 0 "" False
+      machine byRegister (Just d) srcs 0
 
--- | `flips` says whether an immediate 1 is worth a form of its own, which only
--- `eor` has, and which is how `not` arrives.
-logic :: Node -> Reg -> String -> Bool -> Reg -> Reg -> Sel ()
-logic n d mnemonic flips lhs rhs = do
+-- | Only `eor` has a form for an immediate 1 worth taking, and that is how `not`
+-- arrives.
+logic :: Node -> Reg -> Form -> Maybe Form -> Reg -> Reg -> Sel ()
+logic n d plain withOne lhs rhs = do
   graph <- gets sGraph
-  if flips && constant graph (operand 1 n) == Just 1
-    then do
+  case withOne of
+    Just form | constant graph (operand 1 n) == Just 1 -> do
       a <- at (operand 0 n) lhs
-      machine "eori" (Just d) [a] 1 "" False
-    else do
+      machine form (Just d) [a] 1
+    _ -> do
       srcs <- both n lhs rhs
-      machine mnemonic (Just d) srcs 0 "" False
+      machine plain (Just d) srcs 0
 
 -- | @a + b * c@ and @a - b * c@ are one instruction each.
 multiplyInto :: Node -> Reg -> Op -> Reg -> Sel Bool
@@ -302,7 +308,7 @@ multiplyInto n d op lhs = do
       x <- at (operand 0 p) pl
       y <- at (operand 1 p) pr
       z <- at (operand 0 n) lhs
-      machine (if op == Add then "madd" else "msub") (Just d) [x, y, z] 0 "" False
+      machine (if op == Add then FMadd else FMsub) (Just d) [x, y, z] 0
       pure True
     _ -> pure False
 
@@ -314,7 +320,7 @@ shiftInto n d op lhs = do
     Just (shifted, amount) | Bin _ _ sl _ <- ndInstr shifted -> do
       a <- at (operand 0 n) lhs
       b <- at (operand 0 shifted) sl
-      machine (if op == Add then "adds" else "subs") (Just d) [a, b] amount "" False
+      machine (if op == Add then FAdds else FSubs) (Just d) [a, b] amount
       pure True
     _ -> pure False
 
@@ -343,11 +349,11 @@ compare' n _ lhs rhs = do
   case constant graph right of
     Just v | v >= 0 && v <= immediate -> do
       a <- at left lhs
-      machine "cmpi" Nothing [a] v "" False
+      machine FCmpi Nothing [a] v
     _ -> do
       a <- at left lhs
       b <- at right rhs
-      machine "cmp" Nothing [a, b] 0 "" False
+      machine FCmp Nothing [a, b] 0
 
 -- | A comparison the branch below it is the only reader of sets the flags.
 fuseComparison :: Node -> Sel Bool

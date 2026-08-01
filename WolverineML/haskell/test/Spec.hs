@@ -4,7 +4,7 @@ module Main (main) where
 import Control.Monad (forM_, unless, when)
 import Data.List (isInfixOf, isPrefixOf, sort)
 import qualified Data.Map.Strict as Map
-import Data.Maybe (fromMaybe)
+import Data.Maybe (fromMaybe, mapMaybe)
 import qualified Data.Set as Set
 import System.Exit
 import System.IO
@@ -338,12 +338,18 @@ function :: String -> String
 function body =
   "fun f (a : int, b : int, c : int) : int = " ++ body ++ "\nval () = printInt (f (1, 2, 3))"
 
--- | The instruction forms chosen inside one function, the caller's aside.
+-- | The instruction forms chosen inside one function, the caller's aside, named
+-- the way a dump names them.
 formsOf :: String -> [String]
-formsOf source = [mForm i | i <- instructions (funcNamed (selected False source) "f"), isMachine i]
+formsOf source = mapMaybe chosen (instructions (funcNamed (selected False source) "f"))
   where
-    isMachine Machine {} = True
-    isMachine _ = False
+    chosen i = case i of
+      Machine {mForm = form} -> Just (takeWhile (/= ' ') (showForm form))
+      MConst _ _ -> Just "const"
+      MAdr _ _ -> Just "adr"
+      MLoad {} -> Just "ldr"
+      MStore {} -> Just "str"
+      _ -> Nothing
 
 middleTests :: Harness -> IO ()
 middleTests h = do

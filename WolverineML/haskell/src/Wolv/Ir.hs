@@ -17,6 +17,7 @@ module Wolv.Ir
     Op (..),
     Rel (..),
     Cond (..),
+    Form (..),
     showOp,
     showRel,
     showCond,
@@ -57,6 +58,7 @@ module Wolv.Ir
     showPhi,
     showFunc,
     showModule,
+    showForm,
     converge,
   )
 where
@@ -178,15 +180,37 @@ data Instr
     -- register at all — which is what the 'Just' says.
     CBr Reg Label Label (Maybe Cond)
   | Ret (Maybe Reg)
-  | -- | The machine instruction: a form, a register it writes and some it reads.
+  | -- | A constant, which is a `mov` or up to four `movz`/`movk`.
+    MConst Reg Int64
+  | -- | The address of a string, which is an `adrp` and an `add`.
+    MAdr Reg String
+  | -- | A load and a store, whose addressing mode depends on how far the offset
+    -- reaches.  The four above are the instructions the emitter expands, and
+    -- being four constructors is what says they are not one instruction each.
+    MLoad Reg Reg Int64
+  | MStore Reg Reg Int64
+  | -- | Everything else the machine can do in one: a form, the register it
+    -- writes if it writes one, the ones it reads, and an immediate.  No symbol
+    -- and no "does it have an effect": the form says both.
     Machine
-      { mForm :: String,
+      { mForm :: Form,
         mDst :: Maybe Reg,
         mSrcs :: [Reg],
-        mImm :: Int64,
-        mSymbol :: String,
-        mEffect :: Bool
+        mImm :: Int64
       }
+  deriving (Eq, Show)
+
+-- | The instruction set the selector can choose from, one constructor each, so
+-- that the emitter's table is a total function and `Mach.verify` has nothing to
+-- say about a form it does not know.
+data Form
+  = FAdd | FAddi | FAdds
+  | FSub | FSubi | FSubs
+  | FMul | FMadd | FMsub | FSdiv
+  | FAnd | FOrr | FEor | FEori
+  | FLsl | FLsli | FAsr | FAsri
+  | FCmp | FCmpi
+  | FCset Cond
   deriving (Eq, Show)
 
 -- | The register it writes, or nothing.
@@ -201,6 +225,9 @@ defs i = case i of
   LoadSlot d _ -> Just d
   FrameAddr d -> Just d
   Call d _ _ -> d
+  MConst d _ -> Just d
+  MAdr d _ -> Just d
+  MLoad d _ _ -> Just d
   Machine {mDst = d} -> d
   _ -> Nothing
 
@@ -215,6 +242,8 @@ uses i = case i of
   Store base _ src -> [base, src]
   StoreSlot _ src -> [src]
   Call _ _ args -> args
+  MLoad _ base _ -> [base]
+  MStore base value _ -> [base, value]
   Machine {mSrcs = srcs} -> srcs
   CBr cond _ _ Nothing -> [cond]
   Ret value -> maybe [] (: []) value
@@ -230,6 +259,8 @@ mapUses f i = case i of
   Store base off src -> Store (f base) off (f src)
   StoreSlot slot src -> StoreSlot slot (f src)
   Call d callee args -> Call d callee (map f args)
+  MLoad d base off -> MLoad d (f base) off
+  MStore base value off -> MStore (f base) (f value) off
   m@(Machine {}) -> m {mSrcs = map f (mSrcs m)}
   CBr cond t e Nothing -> CBr (f cond) t e Nothing
   Ret value -> Ret (fmap f value)
@@ -247,13 +278,16 @@ withDef r i = case i of
   LoadSlot _ slot -> LoadSlot r slot
   FrameAddr _ -> FrameAddr r
   Call _ callee args -> Call (Just r) callee args
+  MConst _ v -> MConst r v
+  MAdr _ symbol -> MAdr r symbol
+  MLoad _ base off -> MLoad r base off
   m@(Machine {}) -> m {mDst = Just r}
   _ -> error "this instruction defines nothing"
 
 -- | True when it has to be kept even if its result is dead.
 hasEffect :: Instr -> Bool
 hasEffect i = case i of
-  Machine {mEffect = e} -> e
+  MStore {} -> True
   Store {} -> True
   StoreSlot {} -> True
   Call {} -> True
@@ -441,16 +475,29 @@ showInstr name i = case i of
     let test = maybe (name cond ++ " ?") ((++ "?") . showCond) code
      in "br " ++ test ++ " " ++ t ++ " : " ++ e
   Ret value -> maybe "ret" (\r -> "ret " ++ name r) value
-  Machine form d srcs imm symbol _ ->
-    let operands =
-          map name srcs
-            ++ if not (null symbol)
-              then [symbol]
-              else ["#" ++ show imm | imm /= 0 || form == "const"]
-        written = trimEnd (form ++ " " ++ intercalate ", " operands)
+  MConst d v -> name d ++ " = const #" ++ show v
+  MAdr d symbol -> name d ++ " = adr " ++ symbol
+  MLoad d base off -> name d ++ " = " ++ trimEnd ("ldr " ++ intercalate ", " (name base : displacement off))
+  MStore base value off ->
+    trimEnd ("str " ++ intercalate ", " ([name base, name value] ++ displacement off))
+  Machine form d srcs imm ->
+    let written =
+          trimEnd (showForm form ++ " " ++ intercalate ", " (map name srcs ++ displacement imm))
      in maybe written (\r -> name r ++ " = " ++ written) d
   where
+    displacement imm = ["#" ++ show imm | imm /= 0]
     trimEnd = reverse . dropWhile (== ' ') . reverse
+
+-- | What a form is called in a dump, which is the mnemonic the table writes.
+showForm :: Form -> String
+showForm form = case form of
+  FAdd -> "add"; FAddi -> "addi"; FAdds -> "adds"
+  FSub -> "sub"; FSubi -> "subi"; FSubs -> "subs"
+  FMul -> "mul"; FMadd -> "madd"; FMsub -> "msub"; FSdiv -> "sdiv"
+  FAnd -> "and"; FOrr -> "orr"; FEor -> "eor"; FEori -> "eori"
+  FLsl -> "lsl"; FLsli -> "lsli"; FAsr -> "asr"; FAsri -> "asri"
+  FCmp -> "cmp"; FCmpi -> "cmpi"
+  FCset code -> "cset " ++ showCond code
 
 showPhi :: (Reg -> String) -> Phi -> String
 showPhi name (Phi d args) =

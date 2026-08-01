@@ -289,14 +289,16 @@ frameAt depth = do
           emit (Load next r (slotOffset 0))
           climb next (here - 1)
 
+-- | Where a variable lives is the whole answer: a register means it did not
+-- escape, and a slot means it did, so neither of these asks the escape set a
+-- second time and neither has a case that cannot happen.
 readVar :: VarSym -> M Reg
 readVar sym = do
-  away <- escapes sym
   home <- homeOf sym
   here <- gets (fnDepth . lFunc)
-  case (away, home) of
-    (False, InRegister r) -> pure r
-    (_, InFrame slot)
+  case home of
+    InRegister r -> pure r
+    InFrame slot
       | vsDepth sym == here -> do
           r <- newReg
           emit (LoadSlot r slot)
@@ -306,21 +308,18 @@ readVar sym = do
           r <- newReg
           emit (Load r base (slotOffset slot))
           pure r
-    _ -> error "a variable that escapes has no register"
 
 writeVar :: VarSym -> Reg -> M ()
 writeVar sym value = do
-  away <- escapes sym
   home <- homeOf sym
   here <- gets (fnDepth . lFunc)
-  case (away, home) of
-    (False, InRegister r) -> emit (Move r value)
-    (_, InFrame slot)
+  case home of
+    InRegister r -> emit (Move r value)
+    InFrame slot
       | vsDepth sym == here -> emit (StoreSlot slot value)
       | otherwise -> do
           base <- frameAt (vsDepth sym)
           emit (Store base (slotOffset slot) value)
-    _ -> error "a variable that escapes has no register"
 
 -- -- expressions ----------------------------------------------------------------
 

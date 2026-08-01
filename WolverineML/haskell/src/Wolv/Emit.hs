@@ -31,7 +31,7 @@ import qualified Data.Set as Set
 import Text.Printf (printf)
 import Wolv.Copies
 import Wolv.Ir
-import Wolv.Mach (forms)
+import Wolv.Mach (template)
 import Wolv.Registers (argumentRegs, callerSaved, resultRegister, spare)
 
 -- | Whether the emitter may borrow a register to untangle a cycle of copies.
@@ -234,6 +234,14 @@ emitFunc borrowing f alloc = steps
         touched = concat [[d, s] | (d, s) <- moves]
 
     instruction i = case i of
+      MConst d v -> immediate (colour d) v
+      MAdr d symbol ->
+        let x = colour d
+         in [ line (printf "adrp x%d, %s" x symbol),
+              line (printf "add x%d, x%d, :lo12:%s" x x symbol)
+            ]
+      MLoad d base off -> access "ldr" (colour d) (colour base) (fromIntegral off)
+      MStore base value off -> access "str" (colour value) (colour base) (fromIntegral off)
       Machine {} -> machine i
       Move d s -> mov (colour d) (colour s)
       LoadSlot d slot -> access "ldr" (colour d) 29 (slotOffset slot)
@@ -242,21 +250,12 @@ emitFunc borrowing f alloc = steps
       Call d callee args -> call d callee args
       _ -> error "cannot emit this instruction"
 
-    -- Write down one selected instruction, or the sequence it stands for.
-    machine i = case mForm i of
-      "const" -> immediate (colour (fromMaybe (error "no destination") (mDst i))) (mImm i)
-      "adr" ->
-        let d = colour (fromMaybe (error "no destination") (mDst i))
-         in [ line (printf "adrp x%d, %s" d (mSymbol i)),
-              line (printf "add x%d, x%d, :lo12:%s" d d (mSymbol i))
-            ]
-      "ldr" | (base : _) <- srcs ->
-        access "ldr" (colour (fromMaybe (error "no destination") (mDst i))) base (fromIntegral (mImm i))
-      "str" | (base : value : _) <- srcs -> access "str" value base (fromIntegral (mImm i))
-      form -> [line (fill (fromMaybe (error "no such form") (lookup form forms)))]
+    -- Write down one selected instruction: the table's line with its holes
+    -- filled in.
+    machine i = [line (fill (template (mForm i)))]
       where
         srcs = map colour (mSrcs i)
-        fill template = case template of
+        fill template' = case template' of
           [] -> []
           ('{' : rest) ->
             let (name, after) = span (/= '}') rest
@@ -264,7 +263,6 @@ emitFunc borrowing f alloc = steps
           (c : rest) -> c : fill rest
         value name
           | name == "imm" = show (mImm i)
-          | name == "sym" = mSymbol i
           | name == "d" = maybe "" (\d -> "x" ++ show (colour d)) (mDst i)
           | "s" `isPrefixOf` name, [(at, "")] <- reads (drop 1 name), at < length srcs =
               "x" ++ show (srcs !! at)

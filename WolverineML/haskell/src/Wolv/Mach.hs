@@ -12,46 +12,42 @@
 -- quietly kept an abstract instruction until the emitter would only find out
 -- there.
 --
--- Four forms are not one instruction each, and the emitter expands them:
---
--- >     const   a constant, which is a `mov` or up to four `movz`/`movk`
--- >     adr     the address of a string, which is `adrp` and an `add`
--- >     ldr     a load, whose addressing mode depends on how far the offset reaches
--- >     str     a store, likewise
-module Wolv.Mach (forms, expanded, verify, verifyModule) where
+-- Four of the machine's instructions are not one instruction each, and the
+-- emitter expands them.  They are 'MConst', 'MAdr', 'MLoad' and 'MStore' in
+-- "Wolv.Ir" — constructors of their own, which is what says so, and which is why
+-- this module has nothing left to check about a form.
+module Wolv.Mach (template, verify, verifyModule) where
 
 import Wolv.Ir
 
 -- | How each form is written down, once the registers have their colours.  @d@
 -- is the register written and @s0@, @s1@, @s2@ the ones read.
-forms :: [(String, String)]
-forms =
-  [ ("add", "add {d}, {s0}, {s1}"),
-    ("addi", "add {d}, {s0}, #{imm}"),
-    ("adds", "add {d}, {s0}, {s1}, lsl #{imm}"),
-    ("sub", "sub {d}, {s0}, {s1}"),
-    ("subi", "sub {d}, {s0}, #{imm}"),
-    ("subs", "sub {d}, {s0}, {s1}, lsl #{imm}"),
-    ("mul", "mul {d}, {s0}, {s1}"),
-    ("madd", "madd {d}, {s0}, {s1}, {s2}"),
-    ("msub", "msub {d}, {s0}, {s1}, {s2}"),
-    ("sdiv", "sdiv {d}, {s0}, {s1}"),
-    ("and", "and {d}, {s0}, {s1}"),
-    ("orr", "orr {d}, {s0}, {s1}"),
-    ("eor", "eor {d}, {s0}, {s1}"),
-    ("eori", "eor {d}, {s0}, #{imm}"),
-    ("lsl", "lsl {d}, {s0}, {s1}"),
-    ("lsli", "lsl {d}, {s0}, #{imm}"),
-    ("asr", "asr {d}, {s0}, {s1}"),
-    ("asri", "asr {d}, {s0}, #{imm}"),
-    ("cmp", "cmp {s0}, {s1}"),
-    ("cmpi", "cmp {s0}, #{imm}"),
-    ("cset", "cset {d}, {sym}")
-  ]
-
--- | The ones the emitter writes itself, because they are not one instruction.
-expanded :: [String]
-expanded = ["const", "adr", "ldr", "str"]
+--
+-- A total function and not a table to look a string up in: a 'Form' is one of
+-- these and the compiler is what says the list is complete.
+template :: Form -> String
+template form = case form of
+  FAdd -> "add {d}, {s0}, {s1}"
+  FAddi -> "add {d}, {s0}, #{imm}"
+  FAdds -> "add {d}, {s0}, {s1}, lsl #{imm}"
+  FSub -> "sub {d}, {s0}, {s1}"
+  FSubi -> "sub {d}, {s0}, #{imm}"
+  FSubs -> "sub {d}, {s0}, {s1}, lsl #{imm}"
+  FMul -> "mul {d}, {s0}, {s1}"
+  FMadd -> "madd {d}, {s0}, {s1}, {s2}"
+  FMsub -> "msub {d}, {s0}, {s1}, {s2}"
+  FSdiv -> "sdiv {d}, {s0}, {s1}"
+  FAnd -> "and {d}, {s0}, {s1}"
+  FOrr -> "orr {d}, {s0}, {s1}"
+  FEor -> "eor {d}, {s0}, {s1}"
+  FEori -> "eor {d}, {s0}, #{imm}"
+  FLsl -> "lsl {d}, {s0}, {s1}"
+  FLsli -> "lsl {d}, {s0}, #{imm}"
+  FAsr -> "asr {d}, {s0}, {s1}"
+  FAsri -> "asr {d}, {s0}, #{imm}"
+  FCmp -> "cmp {s0}, {s1}"
+  FCmpi -> "cmp {s0}, #{imm}"
+  FCset code -> "cset {d}, " ++ showCond code
 
 -- | Insist that selection left nothing of the three-address IR behind.
 verify :: Func -> Either String ()
@@ -59,10 +55,6 @@ verify f = mapM_ one [(blLabel b, i) | b <- walk f, i <- blInstrs b]
   where
     one (label, i)
       | abstract i = Left ("an abstract instruction survived selection in " ++ fnName f ++ ":" ++ label)
-      | Machine {mForm = form} <- i,
-        form `notElem` map fst forms,
-        form `notElem` expanded =
-          Left ("no such instruction as `" ++ form ++ "`")
       | otherwise = Right ()
     abstract i = case i of
       Const _ _ -> True
