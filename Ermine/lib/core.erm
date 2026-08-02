@@ -1,0 +1,591 @@
+: nip swap drop ;
+: immediate latest @ cell + dup c@ f_immediate or swap c! ;
+: compile-only latest @ cell + dup c@ f_compile or swap c! ;
+: \ source nip >in ! ; immediate
+
+\ ---------------------------------------------------------------------------
+\ Ermine's system, in Ermine.
+\
+\ The kernel that reads this file knows 83 words: 60 primitives and 23
+\ constants.  The other 210 are below, built out of them in order -- nothing
+\ here may use anything defined after it, which is why the file reads
+\ bottom-up: branches before loops, the dictionary before the compiler, the
+\ compiler before the interpreter, and printing last of all.
+\
+\ Two words are defined here that already exist: `:` and `;`.  The kernel's
+\ pair is what compiles the first two hundred lines; the pair below is what
+\ compiles the rest, and everything you define afterwards.
+\ ---------------------------------------------------------------------------
+
+\ --- data space ------------------------------------------------------------
+\
+\ Nothing above the definition of `(` can carry a stack comment, because `(`
+\ is a word like any other and has not been defined yet.
+
+: here dp @ ;
+: +! dup @ rot + swap ! ;
+: allot dp +! ;
+: , here ! cell allot ;
+: c, here c! 1 allot ;
+: 1+ 1 + ;
+: 1- 1 - ;
+: cells cell * ;
+: cell+ cell + ;
+: cell- cell - ;
+: aligned cell 1- + cell 1- invert and ;
+: align here aligned dp ! ;
+
+\ STATE is a single cell, and these two are the only words that write it.
+: [ 0 state ! ; immediate compile-only
+: ] 1 state ! ;
+
+\ --- branches --------------------------------------------------------------
+\
+\ A control structure is an immediate word that compiles a branch and leaves
+\ the address of its unfilled target on the stack; the word that closes the
+\ structure takes that address back and stores HERE into it.  The data stack
+\ is the compiler's only bookkeeping.  None of them can run at the prompt,
+\ because there is no definition there to patch.
+
+: if 	 '0branch , here 0 , ; immediate compile-only
+: then   here swap ! ; immediate compile-only
+: else   'branch , here 0 , swap here swap ! ; immediate compile-only
+: begin  here ; immediate compile-only
+: again  'branch , , ; immediate compile-only
+: until  '0branch , , ; immediate compile-only
+: while  '0branch , here 0 , ; immediate compile-only
+: repeat swap 'branch , , here swap ! ; immediate compile-only
+
+\ --- stack and logic -------------------------------------------------------
+
+: true -1 ;
+: false 0 ;
+: bl 32 ;
+: 2dup over over ;
+: 2drop drop drop ;
+: ?dup dup if dup then ;
+: -rot rot rot ;
+: tuck swap over ;
+: 2swap rot >r rot r> ;
+: 2over >r >r 2dup r> r> 2swap ;
+: pick 1+ cells sp@ + @ ;
+: 0<> 0= 0= ;
+: <> = 0= ;
+: > swap < ;
+: u> swap u< ;
+: <= > 0= ;
+: >= < 0= ;
+: 0< 0 < ;
+: 0> 0 > ;
+: negate invert 1+ ;
+: abs dup 0< if negate then ;
+: min 2dup > if swap then drop ;
+: max 2dup < if swap then drop ;
+: 2* 1 lshift ;
+: 2/ 1 rshift ;
+: within over - >r - r> u< ;
+: s>d dup 0< ;
+
+\ The kernel divides one way only: S/REM truncates towards zero.  Everything
+\ else is built from it and from the unsigned double-cell UM/MOD, including
+\ the floored division that /MOD and MOD are defined to use.
+
+: dnegate invert swap negate dup 0= if swap 1+ swap then swap ;
+: dabs dup 0< if dnegate then ;
+: sm/rem
+  2dup xor 0< >r over 0< >r
+  abs >r dabs r> um/mod
+  r> if swap negate swap then
+  r> if negate then ;
+: fm/mod
+  dup >r sm/rem
+  over 0<> if over 0< r@ 0< <> if 1- swap r@ + swap then then
+  r> drop ;
+: /mod >r s>d r> fm/mod ;
+: / /mod nip ;
+: mod /mod drop ;
+: m* 2dup xor 0< >r abs swap abs um* r> if dnegate then ;
+: */mod >r m* r> fm/mod ;
+: */ */mod nip ;
+
+: char+ 1+ ;
+: chars ;
+: bounds over + swap ;
+: 2@ dup cell+ @ swap @ ;
+: 2! swap over ! cell+ ! ;
+: erase 0 fill ;
+: blank bl fill ;
+
+\ --- text in the input buffer ----------------------------------------------
+\
+\ 41 is `)`.  [CHAR] would want POSTPONE, which wants a dictionary search,
+\ which is still four screens away.
+
+: source-left source nip >in @ - ;
+: source-char source drop >in @ + c@ ;
+: ( begin source-left 0> while source-char 1 >in +! 41 = if exit then repeat ; immediate
+
+( From here on, a definition can say what it does to the stack. )
+
+: skip-blanks begin source-left 0> while source-char bl > if exit then 1 >in +! repeat ;
+
+\ The blank that ends a name is consumed with it, so that `S"` and `."` see
+\ the character after their own name rather than the space in front of it.
+: parse-name ( -- c-addr u )
+  skip-blanks
+  source drop >in @ + 0
+  begin source-left 0> while
+    source-char bl <= if 1 >in +! exit then
+    1+ 1 >in +!
+  repeat ;
+
+: parse ( c -- c-addr u )
+  >r source drop >in @ + 0
+  begin source-left 0> while
+    source-char r@ = if 1 >in +! r> drop exit then
+    1+ 1 >in +!
+  repeat r> drop ;
+
+\ --- the dictionary --------------------------------------------------------
+\
+\ A header is
+\
+\     [ link ][ flags+length ][ name ][ padding ][ code field ][ ... ]
+\
+\ and an execution token is the address of the code field.  The name token is
+\ the address of the link.  These words are the only ones that know it, apart
+\ from the kernel, which has to build the same shape for its own words.  Three
+\ bits of the length byte are flags, so a name is at most 31 characters and
+\ HEADER, keeps the first 31 of a longer one.
+
+: nt>len ( nt -- u ) cell+ c@ f_lenmask and ;
+: nt>name ( nt -- c-addr u ) dup cell+ 1+ swap nt>len ;
+: nt>xt ( nt -- xt ) dup cell+ 1+ swap nt>len + aligned ;
+: nt-immediate? ( nt -- f ) cell+ c@ f_immediate and 0<> ;
+: nt-hidden? ( nt -- f ) cell+ c@ f_hidden and 0<> ;
+: nt-compile-only? ( nt -- f ) cell+ c@ f_compile and 0<> ;
+: >body ( xt -- a ) 2 cells + ;
+
+: str= ( a1 a2 u -- f )
+  begin dup 0> while
+    1- >r
+    over c@ over c@ = if
+      1+ swap 1+ swap r>
+    else
+      r> drop 2drop false exit
+    then
+  repeat drop 2drop true ;
+
+: nt-matches? ( c-addr u nt -- f )
+  dup nt-hidden? if drop 2drop false exit then
+  nt>name rot over =
+  if str= else drop 2drop false then ;
+
+: find-name ( c-addr u -- nt | 0 )
+  latest @
+  begin dup while
+    >r 2dup r@ nt-matches? if 2drop r> exit then r> @
+  repeat nip nip ;
+
+: ' ( "name" -- xt ) parse-name find-name nt>xt ;
+: literal ( x -- ) 'lit , , ; immediate compile-only
+
+\ --- redefining the compiler ------------------------------------------------
+\
+\ HEADER, lays down the shape described above, and `:` is HEADER, followed by
+\ a code field of DOCOL and a switch to compiling.  `;` compiles an EXIT and
+\ switches back.  Neither is a special form; both are words.
+
+: header, ( c-addr u -- )
+  f_lenmask min
+  align here >r
+  latest @ ,
+  dup c,
+  here swap dup allot move
+  align
+  r> latest ! ;
+
+: hide   latest @ cell+ dup c@ f_hidden or swap c! ;
+: reveal latest @ cell+ dup c@ f_hidden invert and swap c! ;
+
+\ `]` is an ordinary word and compiles into `:`.  `[` is immediate and would
+\ run while `;` was being compiled rather than when it runs, so `;` writes
+\ STATE itself.
+: : parse-name header, docol , hide ] ;
+: ; [ ' exit ] literal , reveal 0 state ! ; immediate compile-only
+
+: :noname ( -- xt ) align here docol , ] ;
+: recurse latest @ nt>xt , ; immediate compile-only
+: roll ( xu ... x0 u -- xu-1 ... x0 xu ) ?dup if swap >r 1- recurse r> swap then ;
+
+\ --- defining words ---------------------------------------------------------
+\
+\ Every word CREATE makes has the same three parts: a code field, a slot for
+\ DOES> to fill in, and a body.  Changing the code field is what turns one
+\ into a constant, a value, or a word with a run-time action of its own.
+
+: create parse-name header, dovar , 0 , ;
+
+\ (DOES>) runs inside the *defining* word.  R> is the address of the code that
+\ follows DOES> in it, which is exactly what the new word must jump to -- and
+\ having taken its own return address, the following EXIT returns from the
+\ defining word instead, so the code after DOES> is not run now.
+: (does>) r> latest @ nt>xt dodoes over ! cell+ ! ;
+: does> [ ' (does>) ] literal , ; immediate compile-only
+
+: variable create 0 , ;
+: constant create , docon latest @ nt>xt ! ;
+
+\ --- counted loops ---------------------------------------------------------
+\
+\ DO puts the limit and the index on the return stack, so I is a fetch from it
+\ and J a fetch one frame deeper.  LEAVE is a forward branch whose address is
+\ remembered here until LOOP can resolve it.
+
+: (do) ( limit index -- ) r> -rot swap >r >r >r ;
+: (?do) ( limit index -- f )
+  2dup = if 2drop 0 exit then
+  r> -rot swap >r >r -1 swap >r ;
+: (loop) ( -- f )
+  r> r> 1+ r>
+  2dup = if 2drop -1 else >r >r 0 then
+  swap >r ;
+: (+loop) ( n -- f )
+  r> swap r> r> >r
+  r@ - dup rot + 2dup xor 0<
+  if 2drop r> drop -1 else nip r@ + >r 0 then
+  swap >r ;
+: unloop r> r> r> 2drop >r ;
+: i rp@ cell+ @ ;
+: j rp@ 3 cells + @ ;
+
+create leaves 64 cells allot
+variable #leaves
+: +leave ( a -- ) leaves #leaves @ cells + ! 1 #leaves +! ;
+: resolve-leaves ( old -- )
+  dup
+  begin dup #leaves @ < while
+    dup cells leaves + @ here swap !
+    1+
+  repeat drop
+  #leaves ! ;
+
+: do  [ ' (do) ] literal ,  #leaves @ here ; immediate compile-only
+: ?do [ ' (?do) ] literal , #leaves @ '0branch , here 0 , +leave here ; immediate compile-only
+: leave [ ' unloop ] literal , 'branch , here 0 , +leave ; immediate compile-only
+: loop  [ ' (loop) ] literal ,  '0branch , , resolve-leaves ; immediate compile-only
+: +loop [ ' (+loop) ] literal , '0branch , , resolve-leaves ; immediate compile-only
+
+\ --- CATCH and THROW -------------------------------------------------------
+\
+\ A handler is a return-stack pointer, and the frame it points at holds the
+\ previous handler and the data-stack pointer to restore.  THROW puts both
+\ pointers back and returns from CATCH a second time.
+
+variable handler
+: catch ( xt -- exc | 0 )
+  sp@ >r handler @ >r rp@ handler !
+  execute
+  r> handler ! r> drop 0 ;
+: throw ( n -- )
+  ?dup if
+    handler @ 0= if (uncaught) then
+    handler @ rp! r> handler !
+    r> swap >r sp! drop r>
+  then ;
+: abort -1 throw ;
+
+: ?found ( nt -- nt ) dup 0= if -13 throw then ;
+: ' ( "name" -- xt ) parse-name find-name ?found nt>xt ;
+
+\ --- POSTPONE --------------------------------------------------------------
+\
+\ POSTPONE compiles what the named word would do at the next level down.  If
+\ the word is immediate, that means compiling it, so it runs when the word
+\ being defined is compiled; if it is not, it means compiling the code that
+\ will compile it.
+
+: postpone ( "name" -- )
+  parse-name find-name ?found
+  dup nt-immediate? swap nt>xt swap
+  if , else 'lit , , [ ' , ] literal , then ; immediate compile-only
+
+: ['] ' postpone literal ; immediate compile-only
+: char parse-name drop c@ ;
+: [char] char postpone literal ; immediate compile-only
+: [compile] ' , ; immediate compile-only
+
+\ CASE is IF written out N times, and the only thing it has to remember is how
+\ many THENs it still owes.  That count rides on the compiler's stack under
+\ the branch addresses, which is why OF and ENDOF have to lift it out of the
+\ way while IF and ELSE work.
+: case 0 ; immediate compile-only
+: of 1+ >r postpone over postpone = postpone if postpone drop r> ; immediate compile-only
+: endof >r postpone else r> ; immediate compile-only
+: endcase postpone drop 0 ?do postpone then loop ; immediate compile-only
+
+: value create , doval latest @ nt>xt ! ;
+: to ' >body state @ if postpone literal ['] ! , else ! then ; immediate
+: defer create ['] abort , does> @ execute ;
+: is ' >body state @ if postpone literal ['] ! , else ! then ; immediate
+
+\ MARKER remembers where the dictionary ended and who was latest, and puts
+\ both back -- taking itself with them.
+: marker here latest @ create , , does> dup @ latest ! cell+ @ dp ! ;
+
+: cr 10 emit ;
+: space bl emit ;
+: spaces 0 max 0 ?do space loop ;
+
+\ --- strings ---------------------------------------------------------------
+
+: count ( c-addr -- c-addr' u ) dup 1+ swap c@ ;
+: string, ( c-addr u -- ) dup c, here swap dup allot move align ;
+: /string ( a u n -- a' u' ) dup >r - swap r> + swap ;
+
+\ (S") is followed in the thread by a counted string; taking its own return
+\ address gives the string, and putting back the address past it skips it.
+: (s") r> count 2dup + aligned >r ;
+
+\ Interpreted, S" has nowhere to compile the text to, so it copies it into a
+\ scratch buffer -- two of them in turn, so that two strings can be compared
+\ without the second overwriting the first.
+create s-buf 512 allot
+variable s-turn
+: s-scratch ( -- a ) s-turn @ 256 * s-buf + s-turn @ 1 xor s-turn ! ;
+: s" [char] " parse
+  state @ if postpone (s") string,
+  else s-scratch dup >r swap dup >r move r> r> swap then ; immediate
+: ." postpone s" state @ if postpone type else type then ; immediate
+: (abort") rot if type cr -2 throw else 2drop then ;
+: abort" postpone s" postpone (abort") ; immediate compile-only
+: s= ( a1 u1 a2 u2 -- f ) rot over = if str= else drop 2drop false then ;
+
+\ --- numbers out -----------------------------------------------------------
+
+: hex 16 base ! ;
+: decimal 10 base ! ;
+
+create num-buf 66 allot
+: num-end num-buf 66 + ;
+variable hld
+: <# num-end hld ! ;
+: hold ( c -- ) hld @ 1- dup hld ! c! ;
+: sign ( n -- ) 0< if 45 hold then ;
+: digit ( n -- c ) dup 9 > if 7 + then 48 + ;
+: ud/mod ( ud u -- rem ud' ) >r 0 r@ um/mod rot rot r> um/mod rot ;
+: # ( ud -- ud' ) base @ ud/mod rot digit hold ;
+: #s ( ud -- 0 0 ) begin # 2dup or 0= until ;
+: #> ( ud -- c-addr u ) 2drop hld @ num-end over - ;
+
+: u. ( u -- ) 0 <# #s #> type space ;
+: . ( n -- ) dup >r abs 0 <# #s r> sign #> type space ;
+: u.r ( u width -- ) >r 0 <# #s #> r> over - spaces type ;
+: .r ( n width -- ) >r dup >r abs 0 <# #s r> sign #> r> over - spaces type ;
+: ? ( addr -- ) @ . ;
+
+\ --- numbers in ------------------------------------------------------------
+
+variable radix
+: digit? ( c -- n f )
+  dup 48 < if 0 exit then
+  dup 57 <= if 48 - -1 exit then
+  dup 97 >= if dup 122 <= if 87 - -1 exit then then
+  dup 65 >= if dup 90 <= if 55 - -1 exit then then
+  0 ;
+
+: (digits) ( acc a u -- acc' a' u' )
+  begin dup while
+    over c@ digit? 0= if drop exit then
+    dup radix @ < 0= if drop exit then
+    >r rot radix @ * r> + -rot
+    1 /string
+  repeat ;
+
+: radix-prefix ( a u -- a' u' )
+  base @ radix !
+  dup 1 <= if exit then
+  over c@
+  dup [char] $ = if drop 16 radix ! 1 /string exit then
+  dup [char] # = if drop 10 radix ! 1 /string exit then
+  dup [char] % = if drop  2 radix ! 1 /string exit then
+  drop ;
+
+: ?number ( c-addr u -- n -1 | 0 )
+  dup 3 = if
+    over c@ [char] ' = if
+      over 2 + c@ [char] ' = if drop 1+ c@ -1 exit then
+    then
+  then
+  dup 0= if 2drop 0 exit then
+  over c@ [char] - = dup >r if 1 /string then
+  dup 0= if 2drop r> drop 0 exit then
+  radix-prefix
+  dup 0= if 2drop r> drop 0 exit then
+  0 -rot (digits) nip
+  if drop r> drop 0 else r> if negate then -1 then ;
+
+\ --- the outer interpreter --------------------------------------------------
+\
+\ Two lines of it: find the name and either run it or compile it; failing
+\ that, read it as a number.  STATE is the whole difference between the two
+\ halves of the language.
+
+create err-word 64 allot
+variable err-word#
+: !err-word ( c-addr u -- ) 63 min dup err-word# ! err-word swap move ;
+: (undefined) ( c-addr u -- ) !err-word -13 throw ;
+: (compile-only) ( nt -- ) nt>name !err-word -14 throw ;
+
+: interpret
+  begin
+    parse-name dup 0= if 2drop exit then
+    2dup find-name ?dup if
+      >r 2drop r>
+      dup nt-immediate? state @ 0= or if
+        dup nt-compile-only? state @ 0= and if (compile-only) then
+        nt>xt execute
+      else nt>xt , then
+    else
+      2dup ?number if
+        >r 2drop r> state @ if postpone literal then
+      else
+        (undefined)
+      then
+    then
+  again ;
+
+\ Where an error happened has to be recorded before the source it happened in
+\ is popped, because after that there is nothing left to ask.
+create err-file 256 allot
+variable err-file#
+variable err-line
+: note-where source-line err-line ! source-name dup err-file# ! err-file swap move ;
+: .where err-file err-file# @ type [char] : emit err-line @ 0 .r ." : " ;
+
+: run-source begin interpret refill 0= until ;
+: included ( c-addr u -- )
+  (push-file) throw
+  ['] run-source catch ?dup if note-where (pop-source) throw then
+  (pop-source) ;
+: evaluate ( c-addr u -- )
+  (push-string)
+  ['] run-source catch ?dup if note-where (pop-source) throw then
+  (pop-source) ;
+: include parse-name included ;
+
+: .throw ( n -- )
+  dup  -1 = if drop ." aborted" exit then
+  dup  -2 = if drop exit then
+  dup  -3 = if drop ." stack overflow" exit then
+  dup  -4 = if drop ." stack underflow" exit then
+  dup  -5 = if drop ." return stack overflow" exit then
+  dup  -6 = if drop ." return stack underflow" exit then
+  dup  -9 = if drop ." invalid memory address" exit then
+  dup -10 = if drop ." division by zero" exit then
+  dup -11 = if drop ." result out of range" exit then
+  dup -13 = if drop ." undefined word: " err-word err-word# @ type exit then
+  dup -14 = if drop ." compile only: " err-word err-word# @ type exit then
+  dup -38 = if drop ." file not found" exit then
+  ." throw " . ;
+
+: error ( n -- ) cr .throw cr s0 sp! 0 state ! ;
+
+: quit
+  r0 rp! 0 state !
+  begin refill while
+    ['] interpret catch ?dup if error then
+    tty? if state @ 0= if ."  ok" cr then then
+  repeat
+  bye ;
+
+\ --- tools -----------------------------------------------------------------
+
+: unused ( -- n ) limit here - ;
+\ SP@ runs with S0 already pushed, so it counts one item that is not there.
+: depth ( -- n ) s0 sp@ - cell / 1- ;
+
+: .s ( -- )
+  [char] < emit depth 0 .r [char] > emit space
+  depth 0 ?do depth i - 1- pick . loop ;
+
+: words ( -- )
+  0 latest @
+  begin dup while
+    dup nt-hidden? 0= if dup nt>name type space swap 1+ swap then
+    @
+  repeat drop
+  cr . ." words" cr ;
+
+: xt>nt ( xt -- nt | 0 )
+  latest @
+  begin dup while
+    2dup nt>xt = if nip exit then
+    @
+  repeat nip ;
+
+: .xt ( xt -- )
+  dup xt>nt ?dup if nip nt>name type else ." <" u. ." >" then ;
+
+: dump ( addr u -- )
+  base @ >r hex
+  over + swap
+  begin 2dup > while
+    cr dup 0 <# # # # # # # #> type ." : "
+    dup 16 0 do dup i + c@ 0 <# # # #> type space loop drop
+    16 +
+  repeat 2drop
+  r> base ! cr ;
+
+\ SEE walks the thread back out.  Nothing is reconstructed: a colon definition
+\ *is* a list of execution tokens, and the only cells that are not tokens are
+\ the ones the four inline words leave behind them.
+: .offset ( start target -- ) swap - cell / 0 .r ;
+
+: see-cell ( start a -- start a' )
+  dup @
+  dup 'lit = if drop cell+ dup @ . cell+ exit then
+  dup 'branch = if drop cell+ ." branch>" over over @ .offset space cell+ exit then
+  dup '0branch = if drop cell+ ." 0branch>" over over @ .offset space cell+ exit then
+  dup ['] (s") = if
+    drop cell+ [char] s emit [char] " emit space
+    dup count 2dup type [char] " emit space + aligned nip exit
+  then
+  .xt space cell+ ;
+
+: see ( "name" -- )
+  ' dup @ docol <> if drop ." not a colon definition" cr exit then
+  ." : " dup xt>nt nt>name type space
+  cell+ dup
+  begin dup @ ['] exit <> while see-cell repeat
+  2drop ." ;" cr ;
+
+: save-image ( c-addr u -- ) (save-image) throw ;
+
+\ --- start-up ---------------------------------------------------------------
+
+create arg-buf 512 allot
+variable arg#
+: next-arg ( -- c-addr u )
+  arg# @ arg 1 arg# +!
+  dup >r arg-buf swap move arg-buf r> ;
+
+: banner
+  ." Ermine Forth" cr
+  ."   " unused . ." bytes free, dispatch " (dispatch) if ." threaded" else ." switched" then
+  cr ;
+
+: run-arg
+  next-arg 2dup s" -e" s= if 2drop next-arg evaluate else included then ;
+
+\ COLD runs both at the end of a fresh boot and at the start of a saved image,
+\ so it may not assume anything it set last time.
+: cold
+  0 arg# !
+  begin arg# @ argc < while
+    ['] run-arg catch ?dup if cr .where .throw cr 1 (die) then
+  repeat
+  tty? if banner then
+  quit ;
+
+' cold boot-vector !

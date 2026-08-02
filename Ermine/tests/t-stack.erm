@@ -1,0 +1,35 @@
+\ The stack, the return stack, and the words that only move cells about.
+
+T{ 1 2 3 -> 1 2 3 }T
+T{ 1 dup -> 1 1 }T
+T{ 1 2 drop -> 1 }T
+T{ 1 2 swap -> 2 1 }T
+T{ 1 2 over -> 1 2 1 }T
+T{ 1 2 3 rot -> 2 3 1 }T
+T{ 1 2 3 -rot -> 3 1 2 }T
+T{ 1 2 nip -> 2 }T
+T{ 1 2 tuck -> 2 1 2 }T
+T{ 0 ?dup -> 0 }T
+T{ 7 ?dup -> 7 7 }T
+T{ 1 2 3 4 2swap -> 3 4 1 2 }T
+T{ 1 2 3 4 2over -> 1 2 3 4 1 2 }T
+T{ 1 2 2dup -> 1 2 1 2 }T
+T{ 1 2 2drop -> }T
+
+T{ 1 2 3 0 pick -> 1 2 3 3 }T
+T{ 1 2 3 2 pick -> 1 2 3 1 }T
+T{ 1 2 3 4 0 roll -> 1 2 3 4 }T
+T{ 1 2 3 4 1 roll -> 1 2 4 3 }T
+T{ 1 2 3 4 3 roll -> 2 3 4 1 }T
+
+T{ depth -> 0 }T
+T{ 1 2 depth -> 1 2 2 }T
+
+: rs1 5 >r r@ r> + ;
+T{ rs1 -> 10 }T
+: rs2 1 2 >r >r r> r> ;
+T{ rs2 -> 1 2 }T
+
+\ SP@ and SP! are how CATCH puts the stack back, so they had better agree.
+: sp-round 1 2 3 sp@ >r 9 9 9 r> sp! ;
+T{ sp-round -> 1 2 3 }T

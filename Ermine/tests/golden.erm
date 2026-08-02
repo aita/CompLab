@@ -1,0 +1,44 @@
+\ Things whose value is what they print.  The expected output is in
+\ tests/golden.out and must match to the byte.
+
+: square dup * ;
+: signum dup 0< if drop -1 else 0> if 1 else 0 then then ;
+: greet ." hello" cr ;
+: classify case 1 of ." one" endof 2 of ." two" endof ." many" endcase ;
+: countdown 5 0 do 4 i - . loop cr ;
+
+see square
+see signum
+see greet
+see classify
+
+." --- printing" cr
+1 2 3 .s cr
+2drop drop
+-1 . 0 . 1 . 1000000 . cr
+255 u. -1 u. cr
+255 hex . decimal cr
+7 4 .r cr
+-7 4 .r cr
+." |" 0 3 .r ." |" 12345 3 .r ." |" cr
+countdown
+
+." --- strings" cr
+s" a string" type cr
+." a literal" cr
+: emits [char] < emit 3 0 do [char] - emit loop [char] > emit cr ;
+emits
+
+." --- errors" cr
+: show ( xt -- ) catch ?dup if .throw else ." no error" then cr ;
+' greet show
+:noname 1 0 / ; show
+:noname -1 @ ; show
+:noname abort ; show
+:noname 1 abort" the message" ; show
+:noname 7 throw ; show
+
+." --- classification" cr
+1 classify cr 2 classify cr 3 classify cr
+-5 signum . 0 signum . 5 signum . cr
+bye

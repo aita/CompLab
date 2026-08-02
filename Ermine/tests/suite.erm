@@ -1,0 +1,10 @@
+include tests/tester.erm
+include tests/t-stack.erm
+include tests/t-arith.erm
+include tests/t-control.erm
+include tests/t-defining.erm
+include tests/t-compiler.erm
+include tests/t-strings.erm
+include tests/t-errors.erm
+report
+bye

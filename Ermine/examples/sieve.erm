@@ -1,0 +1,40 @@
+\ The sieve of Eratosthenes, over a byte array in the dictionary.
+\
+\ Inside the inner loop I is the multiple being struck out and J is the prime
+\ doing the striking, because DO puts its limit and index on the return stack
+\ and the inner loop simply covers the outer one up.
+
+8192 constant size
+create flags size allot
+
+\ ?DO only declines to run when the limit and the index are equal, so striking
+\ out has to be skipped when i*i is already past the end rather than left to
+\ the loop to notice.
+: sieve ( -- n-primes )
+  flags size 1 fill
+  0
+  size 2 do
+    flags i + c@ if
+      1+
+      i dup * size < if
+        size i dup * ?do 0 flags i + c! j +loop
+      then
+    then
+  loop ;
+
+: .first ( wanted -- )
+  0 swap                                   ( count wanted )
+  size 2 do
+    flags i + c@ if
+      i 6 .r
+      swap 1+ swap
+      2dup = if 2drop unloop cr exit then
+      over 10 mod 0= if cr then
+    then
+  loop
+  2drop cr ;
+
+sieve . ." primes below " size . cr
+." the first forty:" cr
+40 .first
+bye

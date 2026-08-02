@@ -1,0 +1,18 @@
+\ How fast one word reaches the next.  The two builds of the kernel differ in
+\ nothing but that, so the difference between them is the dispatch.
+
+variable t0
+: start ticks t0 ! ;
+: report ( c-addr u -- ) dup >r type 26 r> - spaces ticks t0 @ - 8 .r ."  us" cr ;
+
+: sum ( -- ) 0 3000000 0 do i + loop drop ;
+: fib ( n -- n ) dup 2 < if exit then dup 1- recurse swap 2 - recurse + ;
+: fib28 ( -- ) 28 fib drop ;
+: churn ( -- ) 0 2000000 0 do dup 1+ over 2 * drop swap drop loop drop ;
+
+: .dispatch (dispatch) if ." computed goto" else ." switch" then ;
+." dispatch: " .dispatch cr
+start sum    s" 3M iterations of DO" report
+start fib28  s" fib 28, recursively" report
+start churn  s" 2M stack shuffles" report
+bye

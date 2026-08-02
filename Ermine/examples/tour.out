@@ -1,0 +1,31 @@
+--- 1. a definition is a list of execution tokens
+: square dup * ;
+4 square = 16 
+the third cell of `square` is *
+
+--- 2. a defining word
+c = 299792458 
+: my-constant create , (does>) @ ;
+
+--- 3. a data structure with a run-time action
+   0   0   0
+   0   1   2
+   0   2   4
+
+--- 4. a control structure
+negative
+not negative
+
+--- 5. errors are values
+5 -> 2 
+0 -> threw division by zero
+
+--- 6. the dictionary is a linked list
+the newest word is try
+the one before it is risky
+`square` is 6 characters long,
+and a token and a name token convert both ways: -1 
+
+--- 7. the whole system is one array
+one word reaches the next through a computed goto
+save-image writes the array out; --image starts a new run from it

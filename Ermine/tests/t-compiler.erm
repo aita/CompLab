@@ -1,0 +1,57 @@
+\ The compiler is words, so it can be tested like any other words.
+
+T{ state @ -> 0 }T
+: in-compile? state @ ;
+T{ in-compile? -> 0 }T
+: state-now state @ ; immediate
+: was-compiling state-now literal ;
+T{ was-compiling -> 1 }T
+
+\ [ and ] are the only two words that write STATE.
+: bracketed [ 2 3 + ] literal ;
+T{ bracketed -> 5 }T
+
+T{ ' + ' + = -> -1 }T
+: quoted ['] + ;
+T{ 2 3 quoted execute -> 5 }T
+
+\ POSTPONE on an ordinary word compiles the code that compiles it; on an
+\ immediate word it compiles the word itself.
+: compiles-a-plus postpone + ; immediate
+: uses-it 2 3 compiles-a-plus ;
+T{ uses-it -> 5 }T
+
+: compiles-an-if postpone if ; immediate
+: uses-if compiles-an-if 1 else 2 then ;
+T{ -1 uses-if -> 1 }T
+T{ 0 uses-if -> 2 }T
+
+T{ s" dup" find-name nt-immediate? -> 0 }T
+T{ s" if" find-name nt-immediate? -> -1 }T
+
+\ A colon definition is a list of execution tokens and nothing else.
+: three-adds 1 + 1 + 1 + ;
+T{ ' three-adds @ docol = -> -1 }T
+T{ ' three-adds cell+ @ 'lit = -> -1 }T
+T{ ' three-adds 2 cells + @ -> 1 }T
+T{ ' three-adds 3 cells + @ ' + = -> -1 }T
+
+\ ...which is why a name can be found from a token and back again.
+T{ ' dup xt>nt nt>xt ' dup = -> -1 }T
+T{ s" dup" find-name nt>xt ' dup = -> -1 }T
+
+\ CHAR and [CHAR] read the same character at different times.
+T{ char A -> 65 }T
+: bracket-char [char] A ;
+T{ bracket-char -> 65 }T
+
+\ Numbers are read by the same word the interpreter uses.
+T{ s" 42" ?number -> 42 -1 }T
+T{ s" -42" ?number -> -42 -1 }T
+T{ s" $ff" ?number -> 255 -1 }T
+T{ s" %1011" ?number -> 11 -1 }T
+T{ s" 'z'" ?number -> 122 -1 }T
+T{ s" 12x" ?number -> 0 }T
+T{ s" " ?number -> 0 }T
+\ A number after `hex` is read in hex, `10` included -- hence DECIMAL.
+T{ hex s" ff" ?number decimal -> 255 -1 }T

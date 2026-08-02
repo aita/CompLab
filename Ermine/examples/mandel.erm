@@ -1,0 +1,41 @@
+\ The Mandelbrot set in fixed point.  ONE is 1.0, so a multiply is a multiply
+\ followed by a divide -- and */ does exactly that, keeping the intermediate
+\ product in two cells so that it cannot overflow on the way.
+
+1024 constant one
+: f* ( a b -- a*b ) one */ ;
+: sq ( a -- a*a ) dup f* ;
+
+variable zx  variable zy  variable cx  variable cy
+60 constant limit
+
+: escaped? ( -- f ) zx @ sq zy @ sq + 4 one * > ;
+: step ( -- )
+  zx @ sq zy @ sq - cx @ +
+  zx @ zy @ f* 2* cy @ +
+  zy ! zx ! ;
+
+: iterate ( -- n )
+  0 zx ! 0 zy ! 0
+  begin dup limit < while
+    escaped? if exit then
+    step 1+
+  repeat ;
+
+: shade ( n -- c )
+  dup limit = if drop [char] # exit then
+  dup 12 > if drop [char] + exit then
+  dup 5 > if drop [char] . exit then
+  drop bl ;
+
+: mandel ( -- )
+  1230 -1230 do
+    i cy !
+    620 -2050 do
+      i cx ! iterate shade emit
+    34 +loop
+    cr
+  102 +loop ;
+
+mandel
+bye

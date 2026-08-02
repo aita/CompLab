@@ -1,0 +1,53 @@
+\ Conway's life on a wrapping board.  MOD floors, so -1 20 MOD is 19 and the
+\ edges join up without a single conditional.
+
+24 constant w
+16 constant h
+create board w h * allot
+create next w h * allot
+
+: ix ( x y -- offset ) h mod w * swap w mod + ;
+: get ( x y -- 0|1 ) ix board + c@ ;
+: on ( x y -- ) ix board + 1 swap c! ;
+
+variable px  variable py
+: neighbours ( x y -- n )
+  py ! px ! 0
+  2 -1 do
+    2 -1 do
+      i 0= j 0= and 0= if px @ i + py @ j + get + then
+    loop
+  loop ;
+
+: step ( -- )
+  h 0 do
+    w 0 do
+      i j neighbours
+      i j get if dup 2 = swap 3 = or else 3 = then
+      if 1 else 0 then
+      i j ix next + c!
+    loop
+  loop
+  next board w h * move ;
+
+: show ( -- )
+  h 0 do
+    w 0 do i j get if [char] # else [char] . then emit loop
+    cr
+  loop ;
+
+: glider 1 0 on 2 1 on 0 2 on 1 2 on 2 2 on ;
+: blinker 10 5 on 11 5 on 12 5 on ;
+
+\ DO ... LOOP compiles a branch, so it needs a definition to compile it into.
+: run ( n -- )
+  0 do
+    ." generation " i . cr
+    show cr
+    step
+  loop ;
+
+board w h * erase
+glider blinker
+5 run
+bye

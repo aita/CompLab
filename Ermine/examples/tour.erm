@@ -1,0 +1,59 @@
+\ A tour of the things that are peculiar to Forth: that the compiler is a
+\ handful of ordinary words, that a definition is a list of tokens you can
+\ read back, and that new defining words and new control structures are the
+\ same kind of thing as new arithmetic.
+
+." --- 1. a definition is a list of execution tokens" cr
+: square dup * ;
+see square
+." 4 square = " 4 square . cr
+." the third cell of `square` is " ' square 2 cells + @ .xt cr
+cr
+
+." --- 2. a defining word" cr
+\ CONSTANT is not built in.  This is all of it.
+: my-constant create , does> @ ;
+299792458 my-constant c
+." c = " c . cr
+see my-constant
+cr
+
+." --- 3. a data structure with a run-time action" cr
+: matrix ( w h "name" -- )
+  create over , * cells allot
+  does> ( x y a -- addr ) dup @ rot * rot + cells swap cell+ + ;
+3 3 matrix m
+: fill-m 3 0 do 3 0 do i j * i j m ! loop loop ;
+: show-m 3 0 do 3 0 do i j m @ 4 .r loop cr loop ;
+fill-m show-m
+cr
+
+." --- 4. a control structure" cr
+\ UNLESS is IF with the condition reversed.  It compiles by handing the work
+\ to IF, which is the only way anything ever compiles here.
+: unless postpone 0= postpone if ; immediate compile-only
+: classify ( n -- ) dup 0< unless ." not " then ." negative" cr ;
+-1 classify
+1 classify
+cr
+
+." --- 5. errors are values" cr
+: risky ( n -- n ) 10 swap / ;
+: try ( n -- ) dup . ." -> " ['] risky catch ?dup if ." threw " .throw else . then cr ;
+5 try
+0 try
+cr
+
+." --- 6. the dictionary is a linked list" cr
+." the newest word is " latest @ nt>name type cr
+." the one before it is " latest @ @ nt>name type cr
+." `square` is " ' square xt>nt nt>name nip . ." characters long," cr
+." and a token and a name token convert both ways: "
+' square xt>nt nt>xt ' square = . cr
+cr
+
+." --- 7. the whole system is one array" cr
+: .dispatch (dispatch) if ." a computed goto" else ." a switch" then ;
+." one word reaches the next through " .dispatch cr
+." save-image writes the array out; --image starts a new run from it" cr
+bye

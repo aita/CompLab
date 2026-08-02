@@ -1,0 +1,60 @@
+\ Arithmetic, comparison, and the two divisions.
+
+T{ 2 3 + -> 5 }T
+T{ 2 3 - -> -1 }T
+T{ 2 3 * -> 6 }T
+T{ -5 negate -> 5 }T
+T{ -5 abs -> 5 }T
+T{ 3 4 min -> 3 }T
+T{ 3 4 max -> 4 }T
+T{ 6 2* -> 12 }T
+T{ 6 2/ -> 3 }T
+T{ 1 5 lshift -> 32 }T
+T{ 32 5 rshift -> 1 }T
+T{ 12 10 and -> 8 }T
+T{ 12 10 or -> 14 }T
+T{ 12 10 xor -> 6 }T
+T{ 0 invert -> -1 }T
+
+T{ 1 1 = -> -1 }T
+T{ 1 2 = -> 0 }T
+T{ 1 2 < -> -1 }T
+T{ 2 1 < -> 0 }T
+T{ 2 1 > -> -1 }T
+T{ 0 0= -> -1 }T
+T{ 1 0= -> 0 }T
+T{ -1 0< -> -1 }T
+T{ 1 0> -> -1 }T
+T{ -1 0 u< -> 0 }T
+T{ 5 0 10 within -> -1 }T
+T{ 15 0 10 within -> 0 }T
+
+\ S/REM truncates towards zero, /MOD floors.  Ermine gets the second from the
+\ first, so the four sign combinations are the thing worth checking.
+T{ 7 3 s/rem -> 1 2 }T
+T{ -7 3 s/rem -> -1 -2 }T
+T{ 7 -3 s/rem -> 1 -2 }T
+T{ -7 -3 s/rem -> -1 2 }T
+
+T{ 7 3 /mod -> 1 2 }T
+T{ -7 3 /mod -> 2 -3 }T
+T{ 7 -3 /mod -> -2 -3 }T
+T{ -7 -3 /mod -> -1 2 }T
+
+T{ 7 3 / -> 2 }T
+T{ -7 3 / -> -3 }T
+T{ 7 3 mod -> 1 }T
+T{ -7 3 mod -> 2 }T
+
+T{ 2 3 um* -> 6 0 }T
+T{ -1 -1 um* -> 1 -2 }T
+T{ 6 0 4 um/mod -> 2 1 }T
+T{ 2 3 m* -> 6 0 }T
+T{ -2 3 m* -> -6 -1 }T
+
+T{ 10 3 2 */ -> 15 }T
+T{ 10 3 2 */mod -> 0 15 }T
+
+T{ 5 s>d -> 5 0 }T
+T{ -5 s>d -> -5 -1 }T
+T{ 1 0 dnegate -> -1 -1 }T

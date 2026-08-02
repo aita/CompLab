@@ -1,0 +1,40 @@
+\ Strings, memory moves, and the pictured numeric output.
+
+create buf 64 allot
+
+T{ s" abc" nip -> 3 }T
+T{ s" abc" drop c@ -> 97 }T
+T{ s" abc" 1 /string nip -> 2 }T
+T{ s" abc" s" abc" s= -> -1 }T
+T{ s" abc" s" abd" s= -> 0 }T
+T{ s" abc" s" ab" s= -> 0 }T
+
+: literal-string s" hello" ;
+T{ literal-string nip -> 5 }T
+T{ literal-string s" hello" s= -> -1 }T
+
+T{ buf 8 65 fill buf c@ buf 7 + c@ -> 65 65 }T
+T{ buf 8 erase buf c@ -> 0 }T
+T{ s" xyz" buf swap move buf 3 s" xyz" s= -> -1 }T
+
+T{ 5 buf ! buf @ -> 5 }T
+T{ 65 buf c! buf c@ -> 65 }T
+T{ 1 2 buf 2! buf 2@ -> 1 2 }T
+
+: counted here s" pear" string, ;
+T{ counted count s" pear" s= -> -1 }T
+
+\ <# ... #> builds the digits backwards into a buffer, which is why SIGN can
+\ be placed after the digits it belongs in front of.
+T{ 0 0 <# #s #> s" 0" s= -> -1 }T
+T{ 123 0 <# #s #> s" 123" s= -> -1 }T
+T{ 123 0 <# #s 45 hold #> s" -123" s= -> -1 }T
+T{ 123 0 <# #s -1 sign #> s" -123" s= -> -1 }T
+\ Digits above 9 come out in upper case, as they go in in either.
+T{ 255 0 hex <# #s #> s" FF" s= decimal -> -1 }T
+T{ 255 0 <# # # #> s" 55" s= -> -1 }T
+
+T{ 9 digit -> 57 }T
+T{ 10 digit -> 65 }T
+T{ 65 digit? -> 10 -1 }T
+T{ 33 digit? -> 33 0 }T

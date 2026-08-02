@@ -1,0 +1,54 @@
+\ Every control structure is an immediate word that patches an address.  These
+\ check that the addresses come out right, including when they nest.
+
+: c1 if 111 else 222 then ;
+T{ -1 c1 -> 111 }T
+T{ 0 c1 -> 222 }T
+
+: c2 if 1 else 2 then ;
+: c3 if c2 else 0 then ;
+T{ -1 -1 c3 -> 1 }T
+T{ -1 0 c3 -> -1 0 }T
+
+: c4 0 swap begin dup while dup rot + swap 1- repeat drop ;
+T{ 4 c4 -> 10 }T
+
+: c5 begin 1- dup 0= until ;
+T{ 3 c5 -> 0 }T
+
+: c6 0 begin over 0> while over + swap 1- swap repeat nip ;
+T{ 4 c6 -> 10 }T
+
+: sum-to 0 swap 1+ 0 do i + loop ;
+T{ 5 sum-to -> 15 }T
+
+: nested 0 3 0 do 3 0 do 1+ loop loop ;
+T{ nested -> 9 }T
+
+: ij 0 3 0 do 3 0 do i j * + loop loop ;
+T{ ij -> 9 }T
+
+: with-leave 0 10 0 do dup 4 > if leave then 1+ loop ;
+T{ with-leave -> 5 }T
+
+: never 0 0 0 ?do 1+ loop ;
+T{ never -> 0 }T
+: once 0 1 0 ?do 1+ loop ;
+T{ once -> 1 }T
+
+: by-two 0 10 0 do 1+ 2 +loop ;
+T{ by-two -> 5 }T
+: down 0 0 10 do 1+ -1 +loop ;
+T{ down -> 11 }T
+
+: pick-one case 1 of 11 endof 2 of 22 endof 99 swap endcase ;
+T{ 1 pick-one -> 11 }T
+T{ 2 pick-one -> 22 }T
+T{ 7 pick-one -> 99 }T
+
+: early dup 3 > if drop 0 exit then 1+ ;
+T{ 1 early -> 2 }T
+T{ 9 early -> 0 }T
+
+: fib dup 2 < if exit then dup 1- recurse swap 2 - recurse + ;
+T{ 10 fib -> 55 }T

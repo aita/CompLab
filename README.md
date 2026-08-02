@@ -51,6 +51,18 @@
   comparison between the two allocators is in the Python one. The book is in
   [`WolverineML/doc/`](WolverineML/doc/index.md), a chapter per pass, in
   Japanese.
+- [`Ermine/`](Ermine) — a Forth. The kernel in C is 60 primitives, an inner
+  interpreter, and just enough of an outer one to read one file; the other 210
+  words of the system are Forth, in that file — the compiler, every control
+  structure, `CREATE ... DOES>`, `CATCH`, the number formatter, the decompiler,
+  and the outer interpreter you type at. `:` is defined twice, once in C so
+  that the file can start and once in the file so that the rest of it, and
+  everything you type afterwards, is compiled by Forth. The whole system is one
+  flat array, so saving it is one `fwrite` and restarting from the image reads
+  no source at all. Two builds differ only in how one word reaches the next —
+  a computed goto pasted in at the end of every primitive, or a switch — and
+  `make bench` measures them against each other. The book is in
+  [`Ermine/doc/`](Ermine/doc/index.md), a chapter per concern, in Japanese.
 - [`PolecatML/`](PolecatML) — a small strict ML compiled to a stack machine, in
   OCaml: Hindley-Milner inference, and then a machine whose state is an operand
   stack, a frame stack and a program counter — CEK's continuation with the

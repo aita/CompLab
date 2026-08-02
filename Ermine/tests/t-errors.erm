@@ -1,0 +1,55 @@
+\ CATCH and THROW, and the errors the kernel raises on its own.
+
+: ok-word 6 7 * ;
+T{ ' ok-word catch -> 42 0 }T
+
+: thrower 5 throw ;
+T{ ' thrower catch -> 5 }T
+T{ 1 2 ' thrower catch -> 1 2 5 }T
+
+\ THROW puts the stack back to where it was when CATCH ran, not to empty.
+: deep-thrower 1 2 3 4 5 9 throw ;
+T{ 7 ' deep-thrower catch -> 7 9 }T
+
+: nested-catch ['] thrower catch ;
+T{ ' nested-catch catch -> 5 0 }T
+
+: rethrower ['] thrower catch throw ;
+T{ ' rethrower catch -> 5 }T
+
+T{ 0 throw -> }T
+: no-throw 0 throw 3 ;
+T{ ' no-throw catch -> 3 0 }T
+
+: div0 1 0 / ;
+T{ ' div0 catch -> -10 }T
+: mod0 1 0 mod ;
+T{ ' mod0 catch -> -10 }T
+
+: bad-address -1 @ ;
+T{ ' bad-address catch -> -9 }T
+: bad-store 5 -1 ! ;
+T{ ' bad-store catch -> -9 }T
+variable not-a-token  99999 not-a-token !
+: not-a-word not-a-token execute ;
+T{ ' not-a-word catch -> -13 }T
+
+: underflows drop drop drop drop ;
+T{ ' underflows catch -> -4 }T
+
+: overflows begin 1 again ;
+T{ ' overflows catch -> -3 }T
+
+: r-overflows recurse ;
+T{ ' r-overflows catch -> -5 }T
+
+: aborts abort ;
+T{ ' aborts catch -> -1 }T
+: aborts-with 1 abort" this message" ;
+T{ ' aborts-with catch -> -2 }T
+: aborts-not 0 abort" not this one" ;
+T{ ' aborts-not catch -> 0 }T
+
+T{ s" 3 4 +" evaluate -> 7 }T
+: eval-throw s" 1 0 /" evaluate ;
+T{ ' eval-throw catch -> -10 }T

@@ -1,0 +1,53 @@
+\ CREATE, DOES>, and the words that are only a code field away from each other.
+
+variable vv
+T{ 5 vv ! vv @ -> 5 }T
+T{ 3 vv +! vv @ -> 8 }T
+
+99 constant ninety-nine
+T{ ninety-nine -> 99 }T
+
+5 value five
+T{ five -> 5 }T
+T{ 6 to five five -> 6 }T
+: retarget 7 to five ;
+T{ retarget five -> 7 }T
+
+create three-cells 3 cells allot
+T{ 1 three-cells ! 2 three-cells cell+ ! three-cells @ three-cells cell+ @ -> 1 2 }T
+T{ three-cells 2 cells + 3 swap ! three-cells 2 cells + @ -> 3 }T
+
+\ A defining word: the code after DOES> is what the *new* word runs, with the
+\ address of its own body already on the stack.
+: doubler create , does> @ 2 * ;
+21 doubler forty-two
+T{ forty-two -> 42 }T
+
+: array create cells allot does> swap cells + ;
+5 array a5
+T{ 11 0 a5 ! 22 3 a5 ! 0 a5 @ 3 a5 @ -> 11 22 }T
+
+\ >BODY and the body a DOES> word hands over are the same address.
+: peeker create 1234 , does> ;
+peeker peek
+T{ peek @ -> 1234 }T
+T{ peek ' peek >body = -> -1 }T
+
+defer later
+T{ :noname 17 ; is later later -> 17 }T
+:noname 18 ; is later
+T{ later -> 18 }T
+
+\ MARKER puts the dictionary back where it was, itself included.
+marker undo
+: gone-soon 1 ;
+T{ ' gone-soon >body drop -> }T
+undo
+T{ s" gone-soon" find-name -> 0 }T
+T{ s" undo" find-name -> 0 }T
+
+\ A word that is hidden while it is being compiled, so that RECURSE is the
+\ only way to reach it and a redefinition can use the old one.
+: shadowed 1 ;
+: shadowed shadowed 1 + ;
+T{ shadowed -> 2 }T

@@ -1,0 +1,31 @@
+: square dup * ;
+: signum dup 0< 0branch>9 drop -1 branch>18 0> 0branch>16 1 branch>18 0 ;
+: greet s" hello" type cr ;
+: classify 1 over = 0branch>12 drop s" one" type branch>28 2 over = 0branch>24 drop s" two" type branch>28 s" many" type drop ;
+--- printing
+<3> 1 2 3 
+-1 0 1 1000000 
+255 18446744073709551615 
+FF 
+   7
+  -7
+|  0|12345|
+4 3 2 1 0 
+--- strings
+a string
+a literal
+<--->
+--- errors
+hello
+no error
+division by zero
+invalid memory address
+aborted
+the message
+
+throw 7 
+--- classification
+one
+two
+many
+-1 0 1 
