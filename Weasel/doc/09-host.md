@@ -105,6 +105,8 @@ $ weasel run tests/wat/06-wasi.wat
 hello, weasel
 ```
 
+![WASI が線形メモリを渡す形](./figures/iovec.png)
+
 実装側は、その組をたどってバイトを流すだけです。
 
 ```cpp

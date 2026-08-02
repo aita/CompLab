@@ -123,6 +123,8 @@ bool trunc_checked(f64 x, Int& out) {
 ```
 （`exec.cppm:134`）
 
+![切り捨ての境界と、2つの族](./figures/trunc.png)
+
 2つ、気をつけるところがあります。
 
 **すべて `double` で比べている。** f32 の入力も `double` に広げてから同じ比較を

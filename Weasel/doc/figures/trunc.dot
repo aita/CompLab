@@ -1,0 +1,57 @@
+// Where float-to-int truncation stops, and what the two families do about it.
+// Every bound is exact in double, which is why the check is written in double.
+// See doc/08-float.md §8.4.  Render with ./render.sh (needs graphviz).
+digraph trunc {
+  rankdir = TB;
+  bgcolor = "transparent";
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10];
+
+  t [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                     COLOR="#57606a">
+    <TR><TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="9">trunc(x) が</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="9">下限</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="9">上限</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="9">double で厳密か</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">→ i32</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">≧ -2147483648.0</FONT></TD>
+        <TD BGCOLOR="#dafbe1"><FONT FACE="Courier" POINT-SIZE="9">≦ 2147483647.0</FONT></TD>
+        <TD><FONT POINT-SIZE="8">両端とも厳密</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">→ u32</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">≧ 0.0</FONT></TD>
+        <TD BGCOLOR="#dafbe1"><FONT FACE="Courier" POINT-SIZE="9">≦ 4294967295.0</FONT></TD>
+        <TD><FONT POINT-SIZE="8">両端とも厳密</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">→ i64</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">≧ -2^63</FONT></TD>
+        <TD BGCOLOR="#ffebe9"><FONT FACE="Courier" POINT-SIZE="9">&lt; 2^63</FONT></TD>
+        <TD><FONT POINT-SIZE="8">2^63−1 は double で表せない</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">→ u64</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">≧ 0.0</FONT></TD>
+        <TD BGCOLOR="#ffebe9"><FONT FACE="Courier" POINT-SIZE="9">&lt; 2^64</FONT></TD>
+        <TD><FONT POINT-SIZE="8">2^64−1 は double で表せない</FONT></TD></TR>
+  </TABLE>>];
+
+  b [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                     COLOR="#57606a">
+    <TR><TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="9">x が</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT FACE="Courier" POINT-SIZE="9">i32.trunc_f64_s</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT FACE="Courier" POINT-SIZE="9">i32.trunc_sat_f64_s</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="9">範囲内</FONT></TD>
+        <TD BGCOLOR="#dafbe1"><FONT POINT-SIZE="9">切り捨てた値</FONT></TD>
+        <TD BGCOLOR="#dafbe1"><FONT POINT-SIZE="9">切り捨てた値</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="9">上に外れる</FONT></TD>
+        <TD BGCOLOR="#ffebe9"><FONT POINT-SIZE="9">Trap::IntegerOverflow</FONT></TD>
+        <TD BGCOLOR="#fff8c5"><FONT FACE="Courier" POINT-SIZE="9">2147483647</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="9">下に外れる</FONT></TD>
+        <TD BGCOLOR="#ffebe9"><FONT POINT-SIZE="9">Trap::IntegerOverflow</FONT></TD>
+        <TD BGCOLOR="#fff8c5"><FONT FACE="Courier" POINT-SIZE="9">-2147483648</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="9">NaN</FONT></TD>
+        <TD BGCOLOR="#ffebe9"><FONT POINT-SIZE="9">Trap::InvalidConversion</FONT></TD>
+        <TD BGCOLOR="#fff8c5"><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD></TR>
+  </TABLE>>];
+
+  t -> b [style = invis];
+
+  note [shape = plaintext, fontcolor = "#57606a", fontsize = 9,
+        label = <f32 の入力も double に広げてから同じ比較を通す。f32 → double は情報を失わないので、<BR ALIGN="LEFT"/>比較を1組で済ませられる。<BR ALIGN="LEFT"/>飽和する側が C や Rust の <FONT FACE="Courier" POINT-SIZE="9">as</FONT> の意味論なので、コンパイラは実際にはそちらを使う。<BR ALIGN="LEFT"/>>];
+  b -> note [style = invis];
+}

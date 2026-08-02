@@ -1,0 +1,48 @@
+// The polymorphic stack: what `unreachable` does to the checker's state, and
+// why `i32.add` after it is legal.  See doc/03-validate.md §3.3.
+// Render with ./render.sh (needs graphviz).
+digraph unreachable {
+  rankdir = LR;
+  bgcolor = "transparent";
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10];
+  edge [color = "#0969da", fontcolor = "#0969da",
+        fontname = "Helvetica", fontsize = 9];
+
+  a [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                     COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa"><FONT FACE="Courier">unreachable</FONT> の直前</TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">1</FONT></TD>
+        <TD><FONT FACE="Courier">f32</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD>
+        <TD><FONT FACE="Courier">i64</FONT></TD></TR>
+    <TR><TD COLSPAN="2" ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">
+        unreachable = false, height = 0</FONT></TD></TR>
+  </TABLE>>];
+
+  b [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                     COLOR="#57606a">
+    <TR><TD BGCOLOR="#f6f8fa">直後</TD></TR>
+    <TR><TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="9" COLOR="#57606a">（空）</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">
+        opds.resize(height) で切り、<BR ALIGN="LEFT"/>unreachable = <B>true</B> にする<BR ALIGN="LEFT"/></FONT></TD></TR>
+  </TABLE>>];
+
+  c [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                     COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa"><FONT FACE="Courier">i32.add</FONT> が i32 を2つ降ろす</TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">pop</FONT></TD>
+        <TD BGCOLOR="#fff8c5"><FONT FACE="Courier" POINT-SIZE="9">Unknown</FONT>
+            <FONT POINT-SIZE="8" COLOR="#57606a"> — 何とでも一致</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">pop</FONT></TD>
+        <TD BGCOLOR="#fff8c5"><FONT FACE="Courier" POINT-SIZE="9">Unknown</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">push</FONT></TD>
+        <TD BGCOLOR="#dafbe1"><FONT FACE="Courier" POINT-SIZE="9">i32</FONT></TD></TR>
+  </TABLE>>];
+
+  a -> b [label = "  unreachable\l"];
+  b -> c [label = "  底なし — 何個でも降ろせる\l"];
+
+  why [shape = plaintext, fontcolor = "#57606a", fontsize = 9,
+       label = <この規則が無いと、コンパイラは<B>死んだコードのためにスタックのつじつまを合わせ</B>なければならない。<BR ALIGN="LEFT"/>実行されない命令のために生きたコードを歪めることになる。<BR ALIGN="LEFT"/>>];
+  c -> why [style = invis];
+}

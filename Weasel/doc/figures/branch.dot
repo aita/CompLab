@@ -1,0 +1,44 @@
+// What a branch does to the operand stack: keep values move down to height.
+// The example is the one in doc/04-plan.md §4.1, which really runs.
+// Render with ./render.sh (needs graphviz).
+digraph branch {
+  rankdir = LR;
+  bgcolor = "transparent";
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10];
+  edge [color = "#0969da", fontcolor = "#0969da",
+        fontname = "Helvetica", fontsize = 9];
+
+  before [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                          COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa">br の直前</TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">base+2</FONT></TD>
+        <TD PORT="v3" BGCOLOR="#dafbe1"><FONT FACE="Courier">3</FONT>
+            <FONT POINT-SIZE="8" COLOR="#57606a"> ← 上から keep=1 個</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">base+1</FONT></TD>
+        <TD BGCOLOR="#ffebe9"><FONT FACE="Courier">2</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">base+0</FONT></TD>
+        <TD PORT="h" BGCOLOR="#ffebe9"><FONT FACE="Courier">1</FONT>
+            <FONT POINT-SIZE="8" COLOR="#57606a"> ← height=0 はここ</FONT></TD></TR>
+  </TABLE>>];
+
+  after [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                         COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa">br の直後</TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">base+0</FONT></TD>
+        <TD PORT="v3" BGCOLOR="#dafbe1"><FONT FACE="Courier">3</FONT></TD></TR>
+    <TR><TD COLSPAN="2" ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">
+        1 と 2 は捨てられ、pc は 4 になる</FONT></TD></TR>
+  </TABLE>>];
+
+  before:v3 -> after:v3 [label = "  keep 個を height へ写す\l"];
+
+  code [shape = plaintext, fontcolor = "#57606a", fontsize = 9,
+        label = <<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9" COLOR="#1f2328">(block $out (result i32)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9" COLOR="#1f2328">  (i32.const 1) (i32.const 2) (i32.const 3)</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9" COLOR="#1f2328">  (br $out))</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT POINT-SIZE="8">↓ weasel plan</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9" COLOR="#0969da">3  br -&gt; 4 keep=1 height=0</FONT></TD></TR>
+  </TABLE>>];
+  code -> before [style = invis];
+}

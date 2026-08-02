@@ -1,0 +1,45 @@
+// One std::vector<Value>, and two frames inside it.  A call allocates nothing:
+// the arguments are already there.  See doc/06-exec.md §6.2.
+//
+// The moment drawn is fac(5) having just executed `call 4`, which is the line
+//     9 call 4    | 0x5 0x4
+// in `weasel run tests/wat/01-control.wat --invoke fac --arg 5 --trace`.
+// Render with ./render.sh (needs graphviz).
+digraph frame {
+  rankdir = TB;
+  bgcolor = "transparent";
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10];
+
+  s [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6"
+                     COLOR="#57606a">
+    <TR><TD COLSPAN="4" BGCOLOR="#f6f8fa" ALIGN="LEFT">Machine::stack — 1本きり。上が新しい</TD></TR>
+    <TR><TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">添字</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">値</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">誰の何か</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">フレームの印</FONT></TD></TR>
+
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">3</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#dafbe1"><FONT POINT-SIZE="9" COLOR="#57606a">（まだ空）</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#dafbe1"><FONT POINT-SIZE="9">fac(4) のオペランドはここから</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9" COLOR="#0969da">stack_base = 3</FONT></TD></TR>
+
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">2</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT FACE="Courier">4</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT POINT-SIZE="9">fac(4) の local 0 — 呼ぶ側が積んだ引数</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9" COLOR="#0969da">locals_base = 2</FONT></TD></TR>
+
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">1</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#fff8c5"><FONT FACE="Courier">5</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#fff8c5"><FONT POINT-SIZE="9">fac(5) が i64.mul のために積んだ値</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9" COLOR="#57606a">stack_base = 1</FONT></TD></TR>
+
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT FACE="Courier">5</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT POINT-SIZE="9">fac(5) の local 0 — 最初の invoke が積んだ引数</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9" COLOR="#57606a">locals_base = 0</FONT></TD></TR>
+  </TABLE>>];
+
+  note [shape = plaintext, fontcolor = "#57606a", fontsize = 9,
+        label = <呼び出しは<B>何も確保しない</B>。引数はもうスタックにあるので、呼ばれた側は<BR ALIGN="LEFT"/>「ここから先は自分の局所変数だ」と宣言し、自分で宣言した局所変数の分だけ 0 を積み、<BR ALIGN="LEFT"/>その上を自分のオペランドスタックにする。<FONT FACE="Courier" POINT-SIZE="9">fac</FONT> は局所変数を宣言していないので、<BR ALIGN="LEFT"/>この図では <FONT FACE="Courier" POINT-SIZE="9">locals_base + 1 = stack_base</FONT> になっている。<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>戻るときは結果を <FONT FACE="Courier" POINT-SIZE="9">locals_base</FONT> へ写して、そこで切る。<BR ALIGN="LEFT"/>呼び出し側から見れば、<B>引数があった場所に結果が現れた</B>だけ。<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="9">--trace</FONT> がフレームごとに <FONT FACE="Courier" POINT-SIZE="9">stack_base</FONT> から表示するのは、この窓を見せるため。<BR ALIGN="LEFT"/>>];
+  s -> note [style = invis];
+}

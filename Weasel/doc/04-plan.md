@@ -3,27 +3,44 @@
 前の章の型検査は、可否を返すものとして書かれています。この章は同じ走査を別の側から
 見ます。**その走査が終わったとき、実行に必要なものはもう全部そろっている。**
 
+![検証が残すもの](./figures/plan.png)
+
 ## 4.1 分岐が実行時に必要とする3つの数
 
 `br` を実装するのに何が要るかを、先に決めておきます。
 
 ```wasm
-(block $out (result i32)
-  (i32.const 1)
-  (i32.const 2)
-  (i32.const 3)
-  (br $out)          ;; ← ここ
-  ...)
+(module (func (export "f") (result i32)
+  (block $out (result i32)
+    (i32.const 1)
+    (i32.const 2)
+    (i32.const 3)
+    (br $out))))          ;; ← ここ
 ```
 
 `br $out` が起きたとき、スタックには 1 2 3 が積まれています。ブロックの結果は i32 が
 1つなので、**3 だけを残して 1 と 2 は捨てる**。そして `$out` の `end` の次へ飛ぶ。
+
+```
+$ weasel plan br3.wat
+func[0] : () -> (i32)
+  max operand stack 3
+     0  i32.const 1
+     1  i32.const 2
+     2  i32.const 3
+     3  br -> 4 keep=1 height=0
+     4  return
+$ weasel run br3.wat --invoke f
+3
+```
 
 つまり必要なのは3つです。
 
 - **`keep`** — 上から何個の値を持っていくか（ラベルの型の個数）
 - **`height`** — 持っていった先のスタックの高さ（ラベルを開いた位置の高さ）
 - **`pc`** — 飛び先
+
+![分岐がスタックにすること](./figures/branch.png)
 
 `keep` はラベルの型から、`height` は `Ctrl::height` から、そのまま出ます。前の章で
 型検査のために持っていた数です。残るのは `pc` だけです。

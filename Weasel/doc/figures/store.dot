@@ -1,0 +1,69 @@
+// Module / Instance / Store: the three things the spec keeps apart, and why a
+// funcref is a store address.  See doc/05-instantiate.md §5.1.
+// Render with ./render.sh (needs graphviz).
+digraph store {
+  rankdir = LR;
+  bgcolor = "transparent";
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10];
+  edge [color = "#57606a", fontcolor = "#57606a",
+        fontname = "Helvetica", fontsize = 9];
+
+  mod [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                       COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa">Module — 読んだもの、不変</TD></TR>
+    <TR><TD PORT="f0" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">func 0</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">輸入</FONT></TD></TR>
+    <TR><TD PORT="f1" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">func 1</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">この module が定義</FONT></TD></TR>
+    <TR><TD PORT="m0" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">memory 0</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">1ページ、上限2</FONT></TD></TR>
+  </TABLE>>];
+
+  ia [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                      COLOR="#0969da">
+    <TR><TD COLSPAN="2" BGCOLOR="#ddf4ff">Instance A — 対応表</TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">funcs[0]</FONT></TD>
+        <TD PORT="f0" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">→ 3</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">funcs[1]</FONT></TD>
+        <TD PORT="f1" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">→ 4</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">mems[0]</FONT></TD>
+        <TD PORT="m0" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">→ 0</FONT></TD></TR>
+  </TABLE>>];
+
+  ib [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                      COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa">Instance B — 同じ Module の別のインスタンス</TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">funcs[1]</FONT></TD>
+        <TD PORT="f1" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">→ 5</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">mems[0]</FONT></TD>
+        <TD PORT="m0" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">→ 1</FONT></TD></TR>
+  </TABLE>>];
+
+  st [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                      COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa">Store — 走っている世界の状態</TD></TR>
+    <TR><TD PORT="m0" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">mems[0]</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#dafbe1"><FONT POINT-SIZE="8">65536 バイト</FONT></TD></TR>
+    <TR><TD PORT="m1" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">mems[1]</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#dafbe1"><FONT POINT-SIZE="8">65536 バイト — A とは別物</FONT></TD></TR>
+    <TR><TD PORT="f3" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">funcs[3]</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8">ホスト関数</FONT></TD></TR>
+    <TR><TD PORT="f4" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">funcs[4]</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8">A の Code を指す</FONT></TD></TR>
+    <TR><TD PORT="f5" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">funcs[5]</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8">B の Code を指す（同じ Code）</FONT></TD></TR>
+  </TABLE>>];
+
+  mod:f1 -> ia [style = dashed, label = "  instantiate\l"];
+  mod:f1 -> ib [style = dashed];
+
+  ia:f0 -> st:f3 [color = "#0969da"];
+  ia:f1 -> st:f4 [color = "#0969da"];
+  ia:m0 -> st:m0 [color = "#0969da"];
+  ib:f1 -> st:f5;
+  ib:m0 -> st:m1;
+
+  note [shape = plaintext, fontcolor = "#57606a", fontsize = 9,
+        label = <命令の中の添字は<B>2回引かれる</B>。<FONT FACE="Courier" POINT-SIZE="9">call 1</FONT> の 1 はモジュールの添字、<BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="9">inst-&gt;funcs[1]</FONT> がストアの番地。<BR ALIGN="LEFT"/>だから <FONT FACE="Courier" POINT-SIZE="9">funcref</FONT> はストアの番地でなければならない —<BR ALIGN="LEFT"/>そうでなければインスタンスの外へ渡せない。<BR ALIGN="LEFT"/>>];
+  st -> note [style = invis];
+}

@@ -1,0 +1,35 @@
+// How a memory access is checked, and why the sum is computed in 64 bits.
+// See doc/07-memory.md §7.1.  Render with ./render.sh (needs graphviz).
+digraph address {
+  rankdir = TB;
+  bgcolor = "transparent";
+  node [shape = box, style = "rounded,filled", fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 10, margin = "0.16,0.08"];
+  edge [color = "#57606a", fontcolor = "#57606a",
+        fontname = "Helvetica", fontsize = 9];
+
+  dyn  [label = "スタックから降ろした i32\n0 … 4294967295", fillcolor = "#ffffff"];
+  off  [label = "命令に埋まった offset\n0 … 4294967295", fillcolor = "#ffffff"];
+  sum  [label = "u64 で足す", fillcolor = "#ddf4ff", color = "#0969da"];
+  chk  [shape = diamond, style = "filled", fillcolor = "#fff8c5",
+        label = "addr + 幅 ≦ bytes.size() ?"];
+  ok   [label = "memcpy — つねにリトルエンディアン\nアラインメントは見ない", fillcolor = "#dafbe1"];
+  bad  [label = "Trap::OutOfBoundsMemory", fillcolor = "#ffebe9"];
+
+  dyn -> sum;
+  off -> sum;
+  sum -> chk [label = "  addr\l"];
+  chk -> ok  [label = "  はい"];
+  chk -> bad [label = "  いいえ"];
+
+  why [shape = plaintext, style = "", fillcolor = "transparent",
+       fontcolor = "#57606a", fontsize = 9,
+       label = <32ビットで足すと<B>回り込む</B>。回り込んだ番地は小さいので境界検査を素通りする。<BR ALIGN="LEFT"/>64ビットで足せば、和は必ず範囲外になる。<BR ALIGN="LEFT"/>>];
+  sum -> why [style = dotted, arrowhead = none, color = "#8c959f"];
+
+  hint [shape = plaintext, style = "", fillcolor = "transparent",
+        fontcolor = "#57606a", fontsize = 9,
+        label = <アラインメントは<B>助言</B>で、機械は完全に無視する。<BR ALIGN="LEFT"/>検証だけが「アクセスの幅より大きくないか」を見る。<BR ALIGN="LEFT"/>>];
+  ok -> hint [style = dotted, arrowhead = none, color = "#8c959f"];
+}

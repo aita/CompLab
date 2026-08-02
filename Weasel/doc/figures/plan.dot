@@ -1,0 +1,78 @@
+// What validation leaves behind: the structured body of gcd on the left, the
+// flat plan on the right, and the branch-target table that joins them.
+// See doc/04-plan.md.  Render with ./render.sh (needs graphviz).
+digraph plan {
+  rankdir = LR;
+  bgcolor = "transparent";
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10];
+  edge [color = "#0969da", fontcolor = "#0969da",
+        fontname = "Helvetica", fontsize = 9];
+
+  src [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4"
+                       COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa" ALIGN="LEFT">Module — 構造化されたまま</TD></TR>
+    <TR><TD ALIGN="LEFT" BGCOLOR="#fff8c5"><FONT FACE="Courier">block</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">ラベル $done を開く</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT" BGCOLOR="#fff8c5"><FONT FACE="Courier">  loop</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">ラベル $again を開く</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier">    local.get 1</FONT></TD><TD></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier">    i32.eqz</FONT></TD><TD></TD></TR>
+    <TR><TD PORT="brif" ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT FACE="Courier">    br_if 1</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#0969da">1つ外のラベルへ</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier">    …8命令…</FONT></TD><TD></TD></TR>
+    <TR><TD PORT="br" ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT FACE="Courier">    br 0</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#0969da">いちばん内のラベルへ</FONT></TD></TR>
+    <TR><TD ALIGN="LEFT" BGCOLOR="#fff8c5"><FONT FACE="Courier">  end</FONT></TD><TD></TD></TR>
+    <TR><TD ALIGN="LEFT" BGCOLOR="#fff8c5"><FONT FACE="Courier">end</FONT></TD><TD></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier">local.get 0</FONT></TD><TD></TD></TR>
+    <TR><TD ALIGN="LEFT" BGCOLOR="#fff8c5"><FONT FACE="Courier">end</FONT></TD><TD></TD></TR>
+  </TABLE>>];
+
+  plan [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4"
+                        COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa" ALIGN="LEFT">Code::instrs — 平坦</TD></TR>
+    <TR><TD PORT="p0" ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#dafbe1"><FONT FACE="Courier">local.get 1</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">1</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier">i32.eqz</FONT></TD></TR>
+    <TR><TD PORT="p2" ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">2</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT FACE="Courier">br_if  brs[0]</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">3–10</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier">…8命令…</FONT></TD></TR>
+    <TR><TD PORT="p11" ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">11</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT FACE="Courier">br     brs[1]</FONT></TD></TR>
+    <TR><TD PORT="p12" ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">12</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#dafbe1"><FONT FACE="Courier">local.get 0</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">13</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier">return</FONT></TD></TR>
+  </TABLE>>];
+
+  brs [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4"
+                       COLOR="#57606a">
+    <TR><TD COLSPAN="4" BGCOLOR="#f6f8fa" ALIGN="LEFT">Code::brs — 分岐先の表</TD></TR>
+    <TR><TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8"> </FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">pc</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">keep</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">height</FONT></TD></TR>
+    <TR><TD PORT="b0" ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">[0]</FONT></TD>
+        <TD PORT="b0pc"><FONT FACE="Courier" POINT-SIZE="9">12</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD></TR>
+    <TR><TD PORT="b1" ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">[1]</FONT></TD>
+        <TD PORT="b1pc"><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD></TR>
+  </TABLE>>];
+
+  src -> plan [label = "  検証が1回歩くあいだに\l"];
+
+  plan:p2  -> brs:b0 [style = dashed, label = "  添字\l"];
+  plan:p11 -> brs:b1 [style = dashed];
+
+  brs:b0pc -> plan:p12 [label = "  前向き — end で埋める\l", constraint = false];
+  brs:b1pc -> plan:p0  [label = "  後ろ向き — 開いた時点で分かる\l", constraint = false];
+
+  note [shape = plaintext, fontcolor = "#57606a", fontsize = 9,
+        label = <黄色の4命令は実行時に消える。<BR ALIGN="LEFT"/>ラベルは位置になり、深さは表への添字になる。<BR ALIGN="LEFT"/>>];
+  brs -> note [style = invis];
+}

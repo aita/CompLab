@@ -1,0 +1,58 @@
+// The two stacks the type checker keeps, at the moment it reaches `br $out`.
+// `height` is a fact the checker needs anyway -- and the same number the branch
+// needs at run time.  See doc/03-validate.md.
+// Render with ./render.sh (needs graphviz).
+digraph stacks {
+  rankdir = LR;
+  bgcolor = "transparent";
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10];
+  edge [color = "#0969da", fontcolor = "#0969da",
+        fontname = "Helvetica", fontsize = 9];
+
+  opds [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                        COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa">opds — オペランドの<B>型</B></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">2</FONT></TD>
+        <TD BGCOLOR="#dafbe1"><FONT FACE="Courier">i32</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">1</FONT></TD>
+        <TD><FONT FACE="Courier">i32</FONT></TD></TR>
+    <TR><TD PORT="zero" ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD>
+        <TD><FONT FACE="Courier">i32</FONT></TD></TR>
+  </TABLE>>];
+
+  ctrls [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                         COLOR="#57606a">
+    <TR><TD COLSPAN="4" BGCOLOR="#f6f8fa">ctrls — 開いているラベル</TD></TR>
+    <TR><TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">深さ</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">種類</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">label_types()</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">height</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD>
+        <TD BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">block $out</FONT></TD>
+        <TD BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">[i32]</FONT></TD>
+        <TD PORT="h0" BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">1</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">関数そのもの</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">[i32]</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD></TR>
+  </TABLE>>];
+
+  ctrls:h0 -> opds:zero [label = "  このラベルに戻ったとき\l  スタックはこの高さ\l", dir = back];
+
+  out [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                       COLOR="#0969da">
+    <TR><TD COLSPAN="3" BGCOLOR="#ddf4ff">br $out がここから作る BrTarget</TD></TR>
+    <TR><TD><FONT POINT-SIZE="8">pc</FONT></TD>
+        <TD><FONT POINT-SIZE="8">keep</FONT></TD>
+        <TD><FONT POINT-SIZE="8">height</FONT></TD></TR>
+    <TR><TD><FONT FACE="Courier" POINT-SIZE="9">end で埋める</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">|[i32]| = 1</FONT></TD>
+        <TD><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD></TR>
+  </TABLE>>];
+
+  ctrls -> out [label = "  型検査に要る2つが、\l  そのまま実行時の2つ\l"];
+
+  note [shape = plaintext, fontcolor = "#57606a", fontsize = 9,
+        label = <<FONT FACE="Courier" POINT-SIZE="9">(block $out (result i32) (i32.const 1) (i32.const 2) (i32.const 3) (br $out))</FONT><BR ALIGN="LEFT"/>の <FONT FACE="Courier" POINT-SIZE="9">br</FONT> に着いたところ。<BR ALIGN="LEFT"/>>];
+  note -> opds [style = invis];
+}

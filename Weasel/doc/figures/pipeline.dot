@@ -1,0 +1,45 @@
+// The whole runtime: two front ends into one module, validation into a plan,
+// instantiation into state, and the loop.  See doc/index.md and doc/00-overview.md.
+// Render with ./render.sh (needs graphviz).
+digraph pipeline {
+  rankdir = TB;
+  bgcolor = "transparent";
+  node [shape = box, style = "rounded,filled", fillcolor = "#f6f8fa",
+        color = "#57606a", fontcolor = "#1f2328",
+        fontname = "Helvetica", fontsize = 11, margin = "0.18,0.10"];
+  edge [color = "#57606a", fontcolor = "#57606a",
+        fontname = "Helvetica", fontsize = 9];
+
+  { rank = same; wat; wasm; }
+  wat  [label = "file.wat\nS式のテキスト", fillcolor = "#ffffff"];
+  wasm [label = "file.wasm\n\\0asm のバイト列", fillcolor = "#ffffff"];
+
+  module [label = "Module（types.cppm）\l構造化制御フローのまま。block / loop / if / end は命令で、\l分岐はラベルの「深さ」を持つ\l"];
+
+  code [label = "Code — 平坦な Instr 配列 ＋ BrTarget の表（validate.cppm）\lblock も end も無い。br は表への添字\l",
+        fillcolor = "#ddf4ff", color = "#0969da"];
+
+  inst [label = "Instance ＋ Store（store.cppm）\lモジュールの添字 → ストアの番地\l"];
+
+  out [label = "結果、またはトラップ", fillcolor = "#ffffff"];
+
+  wat  -> module [label = "  text.cppm     2パス（名前 → 本体）\l  省略記法をここで展開する\l"];
+  wasm -> module [label = "  binary.cppm   マジック → セクション列\l  LEB128・ベクタ・インデックス空間\l"];
+
+  module -> code [label = "  validate.cppm  スタック型体系で1回走査する。\l  そのついでに位置・keep・height が確定する\l",
+                  color = "#0969da", fontcolor = "#0969da", penwidth = 2];
+
+  code -> inst [label = "  instantiate.cppm  輸入を解決し、メモリ・表・大域変数を作り、\l  セグメントを写し、start を呼ぶ\l"];
+
+  inst -> out [label = "  exec.cppm  1本の std::vector<Value>。\l  フレームは印であって領域ではない\l"];
+
+  note [shape = plaintext, style = "", fillcolor = "transparent",
+        fontcolor = "#57606a", fontsize = 9,
+        label = "どちらの入口から入っても Module は1文字も違ってはいけない。\lテストは weasel dump の出力を突き合わせて、それを毎回確かめる。\l"];
+  module -> note [style = dotted, arrowhead = none, color = "#8c959f"];
+
+  claim [shape = plaintext, style = "", fillcolor = "transparent",
+         fontcolor = "#0969da", fontsize = 9,
+         label = "この矢印がこの本の主題。検証は可否を返さず、計画を返す。\l"];
+  code -> claim [style = dotted, arrowhead = none, color = "#0969da"];
+}

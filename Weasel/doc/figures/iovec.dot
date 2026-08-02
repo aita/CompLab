@@ -1,0 +1,51 @@
+// The bytes of tests/wat/06-wasi.wat's linear memory, and what fd_write reads
+// out of them.  Everything that is not 32 or 64 bits crosses as an address into
+// the caller's memory; this is the whole of WASI's calling convention.
+// See doc/09-host.md §9.3.  Render with ./render.sh (needs graphviz).
+digraph iovec {
+  rankdir = LR;
+  bgcolor = "transparent";
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10];
+  edge [color = "#0969da", fontcolor = "#0969da",
+        fontname = "Helvetica", fontsize = 9];
+
+  call [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                        COLOR="#57606a">
+    <TR><TD COLSPAN="2" BGCOLOR="#f6f8fa"><FONT FACE="Courier">fd_write</FONT> の引数（すべて i32）</TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">fd = 1</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">標準出力</FONT></TD></TR>
+    <TR><TD PORT="iovs" ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">iovs = 0</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">組の配列の<B>番地</B></FONT></TD></TR>
+    <TR><TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">count = 1</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">組は1つ</FONT></TD></TR>
+    <TR><TD PORT="ret" ALIGN="LEFT" BGCOLOR="#fff8c5"><FONT FACE="Courier" POINT-SIZE="9">nwritten = 100</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">結果を<B>書き込む先</B>の番地</FONT></TD></TR>
+  </TABLE>>];
+
+  mem [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                       COLOR="#57606a">
+    <TR><TD COLSPAN="3" BGCOLOR="#f6f8fa">線形メモリ（このモジュールのもの）</TD></TR>
+    <TR><TD PORT="p0" ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">08 00 00 00</FONT></TD>
+        <TD PORT="ptr" ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">iovec.ptr = 8</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">4</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">0e 00 00 00</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">iovec.len = 14</FONT></TD></TR>
+    <TR><TD PORT="p8" ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">8</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#dafbe1"><FONT FACE="Courier" POINT-SIZE="9">68 65 6c 6c 6f 2c 20 …</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">"hello, weasel\n"</FONT></TD></TR>
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">22</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="9" COLOR="#57606a">…</FONT></TD><TD></TD></TR>
+    <TR><TD PORT="p100" ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">100</FONT></TD>
+        <TD ALIGN="LEFT" BGCOLOR="#fff8c5"><FONT FACE="Courier" POINT-SIZE="9">0e 00 00 00</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="8" COLOR="#57606a">ホストが書き戻した 14</FONT></TD></TR>
+  </TABLE>>];
+
+  call:iovs -> mem:p0   [label = "  組の配列はここ\l"];
+  mem:ptr   -> mem:p8   [label = "  本文はここ\l"];
+  call:ret  -> mem:p100 [label = "  戻り値の置き場\l", style = dashed];
+
+  note [shape = plaintext, fontcolor = "#57606a", fontsize = 9,
+        label = <wasm の値は32ビットか64ビットしかない。だから構造体も文字列も、<BR ALIGN="LEFT"/><B>呼び出し側の線形メモリへの番地</B>として渡すしかない。POSIX が<BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="9">struct iovec*</FONT> と <FONT FACE="Courier" POINT-SIZE="9">ssize_t</FONT> を使うところが、全部 i32 になっている。<BR ALIGN="LEFT"/><BR ALIGN="LEFT"/>番地はすべてプログラムから来るので、ホスト側は<B>1回残らず境界を検査する</B>。<BR ALIGN="LEFT"/>>];
+  mem -> note [style = invis];
+}

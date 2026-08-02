@@ -28,6 +28,8 @@ struct Instance {
 ```
 （`store.cppm:83`）
 
+![モジュール・インスタンス・ストア](./figures/store.png)
+
 だから命令の中の添字は**2回引かれます**。`call 3` の 3 はモジュールの関数添字で、
 `f->inst->funcs[3]` がストアの番地です。
 

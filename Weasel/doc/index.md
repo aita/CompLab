@@ -118,32 +118,7 @@ node tests/compare-with-v8.mjs         # 同じ期待値を V8 でも確かめ�
 
 ## 全体像
 
-```
-文字列 (.wat)                     バイト列 (.wasm)
-  │  text.cppm                      │  binary.cppm
-  │  字句 → 2パス（名前 → 本体）    │  マジック → セクション列
-  │  省略記法をここで展開する        │  LEB128・ベクタ・インデックス空間
-  ▼                                 ▼
-        Module (types.cppm)
-        構造化制御フローのまま。block / loop / if / end は命令。
-        分岐はラベルの「深さ」を持つ
-  │
-  │  validate.cppm   スタック型体系で1回走査する。
-  │                  そのついでに位置・keep・height が確定する
-  ▼
-  Code — 平坦な Instr 配列 + BrTarget の表 (validate.cppm)
-        block も end も無い。br は表への添字
-  │
-  │  instantiate.cppm  輸入を解決し、メモリ・表・大域変数を作り、
-  │                    セグメントを写し、start を呼ぶ
-  ▼
-  Instance + Store (store.cppm)
-        モジュールの添字 → ストアの番地
-  │
-  │  exec.cppm   1本の std::vector<Value>。フレームは印であって領域ではない
-  ▼
-  結果、またはトラップ
-```
+![全体像](./figures/pipeline.png)
 
 | ファイル | 行数 | 役割 |
 |---|---|---|
@@ -160,6 +135,12 @@ node tests/compare-with-v8.mjs         # 同じ期待値を V8 でも確かめ�
 | `src/wasi.cppm` | 263 | 小さな `wasi_snapshot_preview1` |
 | `src/host.cppm` | 78 | Ferret が輸入する `env` |
 | `src/main.cpp` | 192 | コマンドライン |
+
+## 図について
+
+図は `figures/` の `.dot` から生成しています。編集したら `figures/render.sh` を走らせて、
+`.png` も一緒にコミットしてください（graphviz が要ります）。読むべきは `.dot` のほうで、
+`.png` はそれをラスタライズしただけの成果物です。
 
 ## 各章の作り
 

@@ -1,0 +1,64 @@
+// The 68 bytes of gcd.wasm, split the way the decoder splits them.
+// The bytes are the real output of `wat2wasm gcd.wat`; see doc/01-binary.md.
+// Render with ./render.sh (needs graphviz).
+digraph sections {
+  rankdir = TB;
+  bgcolor = "transparent";
+  node [shape = plaintext, fontname = "Helvetica", fontsize = 10];
+
+  m [label = <<TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="5"
+                     COLOR="#57606a">
+    <TR><TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">位置</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">id</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">長さ</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">中身</FONT></TD>
+        <TD BGCOLOR="#f6f8fa"><FONT POINT-SIZE="8">読み方</FONT></TD></TR>
+
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0x00</FONT></TD>
+        <TD COLSPAN="3" BGCOLOR="#eaeef2"><FONT FACE="Courier" POINT-SIZE="9">00 61 73 6d &nbsp; 01 00 00 00</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="9">マジック <FONT FACE="Courier">\0asm</FONT> とバージョン 1</FONT></TD></TR>
+
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0x08</FONT></TD>
+        <TD BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">01</FONT></TD>
+        <TD BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">07</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">01 60 02 7f 7f 01 7f</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="9">型 — 1個、関数型(0x60)、引数 i32 i32、結果 i32</FONT></TD></TR>
+
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0x11</FONT></TD>
+        <TD BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">03</FONT></TD>
+        <TD BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">02</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">01 00</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="9">関数 — 1個、その型は型0</FONT></TD></TR>
+
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0x15</FONT></TD>
+        <TD BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">07</FONT></TD>
+        <TD BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">07</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">01 03 67 63 64 00 00</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="9">輸出 — 1個、名前3文字 "gcd"、種類 func、添字 0</FONT></TD></TR>
+
+    <TR><TD ALIGN="RIGHT"><FONT FACE="Courier" POINT-SIZE="9">0x1e</FONT></TD>
+        <TD BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">0a</FONT></TD>
+        <TD BGCOLOR="#ddf4ff"><FONT FACE="Courier" POINT-SIZE="9">24</FONT></TD>
+        <TD ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">01 22 …34バイト…</FONT></TD>
+        <TD ALIGN="LEFT"><FONT POINT-SIZE="9">コード — 本体1つ、その本体は34バイト</FONT></TD></TR>
+
+    <TR><TD></TD>
+        <TD COLSPAN="4" BGCOLOR="#fff8c5" ALIGN="LEFT"><FONT FACE="Courier" POINT-SIZE="9">
+            01 01 7f</FONT><FONT POINT-SIZE="8">  局所変数は「i32 が1つ」の組が1つ</FONT>
+            <BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="9">
+            02 40</FONT><FONT POINT-SIZE="8">  block（結果なし）</FONT>
+            <BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="9">
+            03 40</FONT><FONT POINT-SIZE="8">  loop（結果なし）</FONT>
+            <BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="9">
+            20 01  45  0d 01</FONT><FONT POINT-SIZE="8">  local.get 1 / i32.eqz / br_if 1</FONT>
+            <BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="9">
+            20 00 20 01 70 21 02 …</FONT><FONT POINT-SIZE="8">  local.get / i32.rem_u / local.set</FONT>
+            <BR ALIGN="LEFT"/><FONT FACE="Courier" POINT-SIZE="9">
+            0c 00  0b 0b  20 00  0b</FONT><FONT POINT-SIZE="8">  br 0 / end / end / local.get 0 / end</FONT>
+            <BR ALIGN="LEFT"/></TD></TR>
+  </TABLE>>];
+
+  note [shape = plaintext, fontcolor = "#57606a", fontsize = 9,
+        label = <長さが書いてあるので、各セクションを<B>独立したリーダ</B>で読める。<BR ALIGN="LEFT"/>長さについて嘘をついているセクションは、そのセクションの終わりで捕まる。<BR ALIGN="LEFT"/>>];
+  m -> note [style = invis];
+}

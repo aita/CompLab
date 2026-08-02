@@ -108,6 +108,8 @@ local.get 0    local.get 1    i32.add        ;; 素
 
 展開の規則は1つ、**オペランドを先に出してから演算子**。
 
+![畳み込みをほどく](./figures/fold.png)
+
 ```cpp
 Inst in;
 in.op = op;

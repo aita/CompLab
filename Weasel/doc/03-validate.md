@@ -54,6 +54,8 @@ void push_ctrl(Op op, std::vector<ValType> in, std::vector<ValType> out) {
 ```
 （`validate.cppm:275`）
 
+![検証が持っている2つのスタック](./figures/stacks.png)
+
 `c.height` が、この本の主役です。**このラベルに戻ってきたとき、オペランドスタックは
 この高さになっていなければならない**。型検査はこの数を、ブロックの終わりで残った値が
 多すぎないかを見るために持っています。
@@ -100,6 +102,8 @@ $ echo $?
 合わせろと言われたら、**死んだコードのために生きたコードを歪める**ことになります。
 
 仕様の答えは、到達不能になった時点でスタックを「底なし」にすることです。
+
+![到達不能コードの多相スタック](./figures/unreachable.png)
 
 ```cpp
 void mark_unreachable() {
