@@ -10,6 +10,18 @@
 - [`Ferret/`](Ferret) — a node-based visual editor in React Flow, and an OCaml
   compiler that turns the graph into WebAssembly bytes. The compiler runs in
   the browser through js_of_ocaml, so the page compiles and runs what you draw.
+- [`Weasel/`](Weasel) — a WebAssembly runtime in C++23: the binary format, the
+  text format, the validator, and an interpreter. The point it is arranged
+  around is that validation is not a safety pass before execution but the
+  compiler itself — type checking a function requires knowing the operand stack
+  depth and every label's arity at each instruction, which is exactly what a
+  branch needs at run time, so what the checker hands back is not a verdict but
+  a flat instruction array in which `block`, `loop` and `end` no longer exist
+  and every branch is a position, a count and a height. Two front ends read into
+  one module and are required to print identically, `wat2wasm` being the
+  referee; the expectations in the tests are checked against V8 as well as
+  against Weasel. It runs what `Ferret` compiles. The book is in
+  [`Weasel/doc/`](Weasel/doc/index.md), a chapter per concern, in Japanese.
 - [`MinkML/`](MinkML) — one small ML with six interchangeable type systems:
   Hindley-Milner, higher-rank polymorphism, row polymorphism, refinement types
   with a solver, linear and session types, and dependent types. The syntax and
