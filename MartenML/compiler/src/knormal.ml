@@ -28,7 +28,7 @@
 
    A-normal form asks for one more condition on top of this: a conditional
    appears only in tail position.  That one is not met and does not need to be
-   -- selection emits a join block (doc/knormal.md §1). *)
+   -- selection emits a join block (doc/05-knormal.md §1). *)
 
 type binop = Add | Sub | Mul | Div | Rem
 

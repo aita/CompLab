@@ -1,5 +1,5 @@
 // What a closure is on the heap, and why a mutually recursive pair cannot be
-// built one block at a time.  See doc/closure.md.
+// built one block at a time.  See doc/06-closure.md.
 //
 // Each block carries a header row naming its words, so the contents below can
 // be read without a legend somewhere else.

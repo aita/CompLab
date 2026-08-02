@@ -26,7 +26,7 @@
 
    What does not change is the shape of the data.  Every value is still one
    64-bit word: an integer, or an address.  Tuples, constructor blocks, strings
-   and closures have byte-for-byte the layout doc/emit.md describes, in linear
+   and closures have byte-for-byte the layout doc/09-emit.md describes, in linear
    memory instead of a process heap.  Addresses are 32 bits wide here and the
    words that hold them are 64, which is why loads and stores wrap.
 

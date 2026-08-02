@@ -25,5 +25,5 @@ The compiler is in [`compiler/`](compiler) and the book is in [`doc/`](doc/index
 see [`compiler/README.md`](compiler/README.md) for the language and how to build
 it, and [`doc/index.md`](doc/index.md) for a chapter per pass.  Two to start with,
 in Japanese:
-[パイプライン解説](doc/pipeline.md) と
-[レジスタ割り付け解説](doc/regalloc.md)。
+[パイプライン解説](doc/00-pipeline.md) と
+[レジスタ割り付け解説](doc/08-regalloc.md)。

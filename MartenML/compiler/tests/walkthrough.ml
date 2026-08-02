@@ -1,4 +1,4 @@
-(* The worked example in doc/regalloc.md.
+(* The worked example in doc/08-regalloc.md.
 
    The document walks one basic block through the whole allocator, and every
    step it describes -- every simplify, the coalesce that passes and the one

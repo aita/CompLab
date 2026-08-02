@@ -1,4 +1,4 @@
-# クロージャ変換 — `closure.ml`
+# 6. クロージャ変換 — `closure.ml`
 
 ## 1. 何を解決するパスか
 
@@ -38,7 +38,7 @@ print_int (f 5)
 
 呼ぶ側（`Call_closure`）は先頭からコードポインタを読んで飛び、**ブロック自体を専用レジスタ
 `t6` で渡します**。呼ばれた側はそこから捕獲を読みます。`t6` を割り付けから外してあるのは
-このためです（[レジスタ割り付け §1](regalloc.md#1-問題)）。
+このためです（[レジスタ割り付け §1](08-regalloc.md#1-問題)）。
 
 ![クロージャのヒープ表現](./figures/closure-block.png)
 
@@ -162,4 +162,4 @@ let f = make 7 in print_int (f 4)
 
 ---
 
-[← 5. K正規化とその後](knormal.md) ／ [目次](index.md) ／ [7. 線形IRと命令選択 →](selection.md)
+[← 5. K正規化とその後](05-knormal.md) ／ [目次](index.md) ／ [7. 線形IRと命令選択 →](07-selection.md)

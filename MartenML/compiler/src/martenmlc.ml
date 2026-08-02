@@ -94,7 +94,7 @@ let compile_riscv path converted channel =
     (fun func ->
       (* The back end reads a cycle-free graph in two places: liveness is done
          in one pass, and the spill cost counts uses without weighting them by
-         loop depth (doc/regalloc.md §11).  Nothing in the language can produce
+         loop depth (doc/08-regalloc.md §11).  Nothing in the language can produce
          a loop inside a function -- a loop in the source is a recursive call,
          which leaves it -- and this is what says so out loud. *)
       if !check_cfg && not (Cfg.is_acyclic (Riscv.cfg func)) then
@@ -154,7 +154,7 @@ let compile path =
   let target = Toolchain.target_of_string !target_name in
   (* The two back ends part company here.  WebAssembly has structured control
      flow and unlimited locals, so the tree needs neither a control-flow graph
-     nor a register allocator and goes straight out; see doc/wasm.md. *)
+     nor a register allocator and goes straight out; see doc/10-wasm.md. *)
   let write_to file =
     let channel = if file = "-" then stdout else open_out file in
     (match target with

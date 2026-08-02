@@ -15,7 +15,7 @@
      Riscv   instructions, physical registers, `a0`, callee-saved, `t6`.
 
    Everything above the line is where an SSA form belongs; everything below is
-   where the ABI belongs.  See doc/selection.md.
+   where the ABI belongs.  See doc/07-selection.md.
 
    "Linear" is the shape of a block's contents: instructions in a row, each
    naming its operands, rather than the tree Closure hands over.  The blocks
@@ -333,7 +333,7 @@ let check (f : func) =
       if not reached then broken "%s: block `%s' cannot be reached" where (Cfg.block g i).label)
     g.Cfg.reachable;
   (* Loops are recursive calls, which leave the function, so this graph has no
-     cycles -- and the back end reads it that way (doc/regalloc.md §11).  The
+     cycles -- and the back end reads it that way (doc/08-regalloc.md §11).  The
      property starts here, so it is checked here as well as where it is used. *)
   if not (Cfg.is_acyclic g) then broken "%s: the control-flow graph has a cycle" where;
   (* Defined anywhere in the function, or coming in as a parameter. *)

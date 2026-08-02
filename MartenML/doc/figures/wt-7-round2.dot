@@ -1,4 +1,4 @@
-// One state of the second round of the worked example, doc/regalloc.md
+// One state of the second round of the worked example, doc/08-regalloc.md
 // section 7.  K is 3.  Straight out of tests/walkthrough.exe.
 //
 // v0 is not here: it lives at 0(sp) from the rewrite onwards and appears in no

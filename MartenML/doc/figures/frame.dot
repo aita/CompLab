@@ -1,4 +1,4 @@
-// The stack frame emit.ml lays out.  See doc/emit.md.
+// The stack frame emit.ml lays out.  See doc/09-emit.md.
 // Render with ./render.sh (needs graphviz).
 digraph frame {
   rankdir = TB;

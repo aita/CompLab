@@ -1,4 +1,4 @@
-// One state of the worked example in doc/regalloc.md section 7.  K is 3.
+// One state of the worked example in doc/08-regalloc.md section 7.  K is 3.
 // The graph, the degrees and the order of the steps all come from
 // tests/walkthrough.exe; nothing here was worked out by hand.
 //

@@ -1,5 +1,5 @@
 // The control-flow graph of `sum`, straight out of --dump-riscv.
-// See doc/selection.md.
+// See doc/07-selection.md.
 // Render with ./render.sh (needs graphviz).
 digraph cfg {
   rankdir = TB;

@@ -1,5 +1,5 @@
 // Why the type variables the parser attaches to binders are written and never
-// unified against.  See doc/typing.md.
+// unified against.  See doc/03-typing.md.
 // Render with ./render.sh (needs graphviz).
 digraph levels {
   rankdir = TB;

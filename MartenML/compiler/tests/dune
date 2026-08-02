@@ -167,7 +167,7 @@
   (diff functors.expected functors.out)))
 
 ; The program the pipeline walkthrough is written around; the dumps quoted in
-; doc/pipeline.md come from it, so it has to keep compiling.
+; doc/00-pipeline.md come from it, so it has to keep compiling.
 
 (rule
  (with-stdout-to
@@ -246,7 +246,7 @@
  (action
   (diff errors.expected errors.out)))
 
-; The worked example in doc/regalloc.md.  Not part of `dune test`: it exists so
+; The worked example in doc/08-regalloc.md.  Not part of `dune test`: it exists so
 ; the document can be regenerated, and it drives the allocator directly rather
 ; than through the compiler, with a machine too small for the command line.
 (executable

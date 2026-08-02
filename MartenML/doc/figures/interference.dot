@@ -1,5 +1,5 @@
 // The interference graph around v16 in sum's .Lelse block, worked out in
-// doc/regalloc.md.  An edge drawn to a box stands for an edge to each of its
+// doc/08-regalloc.md.  An edge drawn to a box stands for an edge to each of its
 // members: v16 interferes with all 12 and all 13, which is what takes its
 // degree to 28.
 // Render with ./render.sh (needs graphviz).

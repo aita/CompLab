@@ -42,7 +42,7 @@ type report = {
 let no_report () =
   { rounds = 0; moves_total = 0; moves_coalesced = 0; spill_slots = 0; spilled = [] }
 
-(* Set by a tool that wants to watch the loop run.  doc/regalloc.md walks
+(* Set by a tool that wants to watch the loop run.  doc/08-regalloc.md walks
    through one function step by step out of this, and tests/walkthrough.ml is
    what produces it. *)
 let trace : (string -> unit) ref = ref (fun _ -> ())
@@ -180,7 +180,7 @@ let allocate ?(report = no_report ()) (func : Riscv.func) =
       func.Riscv.blocks;
     let moves = Array.of_list (List.rev !moves) in
     (* The graph itself, for whoever is watching: the figures in
-       doc/regalloc.md are drawn from this rather than worked out by hand. *)
+       doc/08-regalloc.md are drawn from this rather than worked out by hand. *)
     for u = Riscv.num_physical to n - 1 do
       let ns = Bitset.fold (fun r acc -> name r :: acc) interfere.(u) [] in
       say "graph %s degree %d: %s" (name u) degree.(u)

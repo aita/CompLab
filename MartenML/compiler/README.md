@@ -20,7 +20,7 @@ turn that into something runnable — `riscv64-linux-gnu-gcc` and `qemu-riscv64`
 for RISC-V, `wat2wasm` and node for wasm — in a scratch directory it throws away
 afterwards. Both paths are in `src/toolchain.ml`, and the golden tests use the
 same code. See [Two back ends](#two-back-ends) below and
-[the write-up](../doc/wasm.md).
+[the write-up](../doc/10-wasm.md).
 
 Run it from `compiler/`, or say where the runtime is with `-runtime`.
 
@@ -56,18 +56,18 @@ output that was actually produced.
 
 | | |
 |---|---|
-| [../doc/pipeline.md](../doc/pipeline.md) | 1本のプログラムを端から端まで |
-| [../doc/syntax.md](../doc/syntax.md) | 構文解析。1つの言語、2つの書き方 |
-| [../doc/modules.md](../doc/modules.md) | モジュールとファンクタを名前解決だけで済ませる |
-| [../doc/typing.md](../doc/typing.md) | 型推論。単一化、レベル方式の一般化、値制限、rigid な型変数 |
-| [../doc/matching.md](../doc/matching.md) | パターンマッチ。網羅性・到達不能の判定、決定木、合流点 |
-| [../doc/knormal.md](../doc/knormal.md) | K正規化、α変換、インライン展開、最適化 |
-| [../doc/closure.md](../doc/closure.md) | クロージャ変換 |
-| [../doc/selection.md](../doc/selection.md) | 線形IR、制御フローグラフ、命令選択、生存解析 |
-| [../doc/regalloc.md](../doc/regalloc.md) | レジスタ割り付け。干渉グラフの実例、融合・スピル・callee-saved |
-| [../doc/emit.md](../doc/emit.md) | のぞき穴最適化、アセンブリ出力、呼び出し規約、実行時表現 |
-| [../doc/wasm.md](../doc/wasm.md) | もう1つのバックエンド。WebAssembly へ、木のまま |
-| [../doc/language.md](../doc/language.md) | 付録A. 言語リファレンス — 書ける形の一覧 |
+| [../doc/00-pipeline.md](../doc/00-pipeline.md) | 1本のプログラムを端から端まで |
+| [../doc/01-syntax.md](../doc/01-syntax.md) | 構文解析。1つの言語、2つの書き方 |
+| [../doc/02-modules.md](../doc/02-modules.md) | モジュールとファンクタを名前解決だけで済ませる |
+| [../doc/03-typing.md](../doc/03-typing.md) | 型推論。単一化、レベル方式の一般化、値制限、rigid な型変数 |
+| [../doc/04-matching.md](../doc/04-matching.md) | パターンマッチ。網羅性・到達不能の判定、決定木、合流点 |
+| [../doc/05-knormal.md](../doc/05-knormal.md) | K正規化、α変換、インライン展開、最適化 |
+| [../doc/06-closure.md](../doc/06-closure.md) | クロージャ変換 |
+| [../doc/07-selection.md](../doc/07-selection.md) | 線形IR、制御フローグラフ、命令選択、生存解析 |
+| [../doc/08-regalloc.md](../doc/08-regalloc.md) | レジスタ割り付け。干渉グラフの実例、融合・スピル・callee-saved |
+| [../doc/09-emit.md](../doc/09-emit.md) | のぞき穴最適化、アセンブリ出力、呼び出し規約、実行時表現 |
+| [../doc/10-wasm.md](../doc/10-wasm.md) | もう1つのバックエンド。WebAssembly へ、木のまま |
+| [../doc/A-language.md](../doc/A-language.md) | 付録A. 言語リファレンス — 書ける形の一覧 |
 
 ## Two forms
 
@@ -234,7 +234,7 @@ around a condition, commas where it has spaces.
 
 `bitset.ml` holds the sets the allocator lives on -- the worklists and the
 interference itself, a bit per pair. It is the one data-structure choice that
-shows up in the wall clock: see [the write-up](../doc/regalloc.md), section 11.
+shows up in the wall clock: see [the write-up](../doc/08-regalloc.md), section 11.
 
 There are two control-flow graphs, and the line between them is the line
 between the language and the machine. `linear.ml` holds the first: blocks, values
@@ -315,7 +315,7 @@ compared against the same `.expected` files the RISC-V build uses, output,
 stderr and exit status alike. It needs `wat2wasm` (wabt) and `node`; tail calls
 are `return_call`, so `--enable-tail-call` is not optional.
 
-Two things genuinely differ, and both are in [the write-up](../doc/wasm.md).
+Two things genuinely differ, and both are in [the write-up](../doc/10-wasm.md).
 Recursion that is *not* a tail call runs out of stack sooner — the host decides
 that, and V8's default leaves room for only a few thousand frames, which is why
 the driver raises `--stack-size`. And dividing the most negative integer by −1

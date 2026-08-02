@@ -1,6 +1,6 @@
 // The two fates of the copy instruction selection emits for a callee-saved
 // register, and why neither of them needed any code in the allocator.
-// See doc/regalloc.md §6.
+// See doc/08-regalloc.md §6.
 // Render with ./render.sh (needs graphviz).
 digraph calleesaved {
   rankdir = TB;

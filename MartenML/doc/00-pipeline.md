@@ -1,4 +1,4 @@
-# プログラムが機械語になるまで
+# 0. プログラムが機械語になるまで
 
 1本のプログラムが全パスを通り抜けるまでを、各パス1段落ずつで追います。ここで全体の形を
 つかんでから、1章以降でパスごとの中身に入ります（[目次](index.md)）。
@@ -25,19 +25,19 @@ print_int (sum (Cons (1, Cons (2, Nil))));
 print_newline ()
 ```
 
-**構文解析**（[詳説](syntax.md)）。`type` 宣言は本体より前にまとめて置くので、本体を読む
+**構文解析**（[詳説](01-syntax.md)）。`type` 宣言は本体より前にまとめて置くので、本体を読む
 時点でコンストラクタ表が完成しています。`Cons (1, rest)` は「`Cons` を1個の括弧付きタプルに
 適用したもの」として読み、アクションでコンストラクタに畳み直します。
 
-**名前解決**（[詳説](modules.md)）。この例にモジュールはないので素通りします。
+**名前解決**（[詳説](02-modules.md)）。この例にモジュールはないので素通りします。
 
-**型推論**（[詳説](typing.md)）。`sum : chain -> int` が付きます。`chain` は公称型なので、
+**型推論**（[詳説](03-typing.md)）。`sum : chain -> int` が付きます。`chain` は公称型なので、
 `match` のコンストラクタがどの型のものかもここで決まります。
 
-**パターンマッチ**（[詳説](matching.md)）。`match` が決定木になります。網羅されているので
+**パターンマッチ**（[詳説](04-matching.md)）。`match` が決定木になります。網羅されているので
 警告は出ません。
 
-**K正規化**（[詳説](knormal.md)）。`match` はもう存在せず、タグの読み出しと比較と分岐です。
+**K正規化**（[詳説](05-knormal.md)）。`match` はもう存在せず、タグの読み出しと比較と分岐です。
 
 ```
 $ martenmlc --dump-knf -o /dev/null examples/sum.mml
@@ -64,11 +64,11 @@ let rec sum.18 l.19 =
 in
 ```
 
-**インライン展開**（[詳説](knormal.md#3-インライン展開--inlineml)）。ここでは何も起きません。
+**インライン展開**（[詳説](05-knormal.md#3-インライン展開--inlineml)）。ここでは何も起きません。
 `sum` は自分を呼ぶので対象外です。展開されるのは小さな非再帰関数だけで、この題材には1つも
 ありません。
 
-**クロージャ変換**（[詳説](closure.md)）。`sum` は何も捕獲しないので、再帰呼び出しは
+**クロージャ変換**（[詳説](06-closure.md)）。`sum` は何も捕獲しないので、再帰呼び出しは
 ラベルへの直接呼び出しです。クロージャは1つも作られません。
 
 ```
@@ -77,7 +77,7 @@ $ martenmlc --dump-closure -o /dev/null examples/sum.mml
       call martenml_sum_18 (fld.7.24)   ← 直接呼び出し
 ```
 
-**線形IR**（[詳説](selection.md)）。木がブロックになります。ここまでは対象機械を
+**線形IR**（[詳説](07-selection.md)）。木がブロックになります。ここまでは対象機械を
 何も知りません。
 
 ```
@@ -88,7 +88,7 @@ $ martenmlc --dump-linear -o /dev/null examples/sum.mml
     if t.8.21 = t.9.22 then .Lthen36 else .Lelse37   ← 枝が2つのブロックに
 ```
 
-**命令選択**（[詳説](selection.md)）。同じグラフが RISC-V になります。入口で callee-saved
+**命令選択**（[詳説](07-selection.md)）。同じグラフが RISC-V になります。入口で callee-saved
 12本を仮想レジスタへ写し、各 `ret` の直前で書き戻すコードが入ります。
 
 ```
@@ -103,7 +103,7 @@ function martenml_sum_18 (20 registers, 0 spill slots)
     beq v13, zero, .Lthen36 else .Lelse37
 ```
 
-**レジスタ割り付け**（[詳説](regalloc.md)）。41個の `mv` が41個とも融合で消え、代わりに
+**レジスタ割り付け**（[詳説](08-regalloc.md)）。41個の `mv` が41個とも融合で消え、代わりに
 呼び出しをまたいで生きる `x` がスタックに落ちます。
 
 ```
@@ -111,7 +111,7 @@ $ martenmlc --dump-regalloc -o /dev/null examples/sum.mml
 martenml_sum_18: 2 round(s), 41/41 moves coalesced, 1 spill slot(s) [spilled v16]
 ```
 
-**のぞき穴最適化とアセンブリ出力**（[詳説](emit.md)）。17命令になりました。
+**のぞき穴最適化とアセンブリ出力**（[詳説](09-emit.md)）。17命令になりました。
 
 ```
 martenml_sum_18:
@@ -142,7 +142,7 @@ martenml_sum_18:
 ## もう1つの出口
 
 図の分岐に気づいたかもしれません。**クロージャ変換のあと、WebAssembly へ抜ける道が
-あります**（[詳説](wasm.md)）。線形IRも命令選択もレジスタ割り付けも通りません。wasm は
+あります**（[詳説](10-wasm.md)）。線形IRも命令選択もレジスタ割り付けも通りません。wasm は
 制御フローが構造化されていて `if` が `if` のまま書け、ローカルをいくらでも宣言できるので、
 **上の4段が丸ごと不要になる**からです。同じ `sum` がこうなります。
 
@@ -173,4 +173,4 @@ $ martenmlc -target wasm examples/sum.mml
 
 ---
 
-[目次](index.md) ／ [1. 構文解析 →](syntax.md) ／ [10. もう1つのバックエンド](wasm.md)
+[目次](index.md) ／ [1. 構文解析 →](01-syntax.md) ／ [10. もう1つのバックエンド](10-wasm.md)

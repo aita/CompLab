@@ -1,4 +1,4 @@
-# 構文解析 — 1つの言語、2つの書き方
+# 1. 構文解析 — 1つの言語、2つの書き方
 
 ML 形式（`.mml`）を読むのが `lexer.mll` と `parser.mly`、brace 形式（`.mmb`）を読むのが
 `brace_lexer.mll`・`brace_parser.mly`・`brace_build.ml` です。**2つは同じ抽象構文
@@ -53,4 +53,4 @@ brace 形式には `and` にあたる語がないので、隣り合う `fun` は
 
 ---
 
-[← プログラムが機械語になるまで](pipeline.md) ／ [目次](index.md) ／ [2. 名前解決 →](modules.md)
+[← 0. プログラムが機械語になるまで](00-pipeline.md) ／ [目次](index.md) ／ [2. 名前解決 →](02-modules.md)

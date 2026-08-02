@@ -1,7 +1,7 @@
 // What spilling does to a live range.  The code is `sum`'s .Lelse block,
 // verbatim: the left is what round 1 sees, the right is what `rewrite`
 // produces and round 2 sees.  The rule beside a run of lines is the range a
-// value is live over.  See doc/regalloc.md §5.
+// value is live over.  See doc/08-regalloc.md §5.
 //
 // A live range is one cell with a left border holding a nested table of its
 // lines, not one bordered cell per line: per-line borders come out as a column

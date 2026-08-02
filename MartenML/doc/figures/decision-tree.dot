@@ -1,4 +1,4 @@
-// The decision tree for `score` in doc/matching.md.  A multiway test is
+// The decision tree for `score` in doc/04-matching.md.  A multiway test is
 // emitted as a chain of two-way tests; drawn here as one node per column so
 // that the shape is visible.
 // Render with ./render.sh (needs graphviz).
