@@ -1,0 +1,88 @@
+-- val swap : 'a * 'b -> 'b * 'a
+let swap : '_7 * '_6 -> '_6 * '_7 = fn a1.19 : '_7 * '_6 =>
+  let p.57 : '_7 = #1 a1.19
+  let p.58 : '_6 = #2 a1.19
+  let a : '_7 = p.57
+  let b : '_6 = p.58
+  let t.60 : '_6 * '_7 = (b, a)
+  ret t.60
+ret swap
+-- val pick : bool * int -> string
+let pick : bool * int -> string = fn a1.20 : bool * int =>
+  join arm () =
+    ret "two"
+  join arm.2 () =
+    ret "no"
+  let p.59 : bool = #1 a1.20
+  let p.60 : int = #2 a1.20
+  switch p.59 of
+  | true =>
+      switch p.60 of
+      | 1 =>
+          ret "both"
+      | 2 =>
+          jump arm ()
+      | _ =>
+          jump arm.2 ()
+  | _ =>
+      switch p.60 of
+      | 2 =>
+          jump arm ()
+      | _ =>
+          jump arm.2 ()
+ret pick
+-- val sum : int * int -> int
+fix sum : int * int -> int = fn a1.21 : int * int =>
+  let p.61 : int = #1 a1.21
+  let p.62 : int = #2 a1.21
+  let n.2 : int = p.61
+  let acc.3 : int = p.62
+  let t.61 : bool = =(n.2, 0)
+  switch t.61 of
+  | true =>
+      ret acc.3
+  | false =>
+      let t.62 : int = -(n.2, 1)
+      let t.63 : int = +(acc.3, n.2)
+      let t.64 : int * int = (t.62, t.63)
+      tailcall sum t.64
+ret sum
+-- val depth : 'a list -> int
+fix depth : '_34 list -> int = fn a1.22 : '_34 list =>
+  let xs.13 : '_34 list = a1.22
+  join k (v : int) =
+    let t.66 : int = +(1, v)
+    ret t.66
+  switch xs.13 of
+  | nil =>
+      jump k (0)
+  | :: =>
+      let arg.15 : '_34 * '_34 list = payload xs.13
+      let p.63 : '_34 = #1 arg.15
+      let p.64 : '_34 list = #2 arg.15
+      let rest.2 : '_34 list = p.64
+      let t.65 : int = depth rest.2
+      jump k (t.65)
+ret depth
+-- val answers : (int * int) * string * int * int
+let t.67 : int * int = (1, 2)
+let t.68 : int * int = swap t.67
+let t.69 : bool = true
+let t.70 : bool * int = (t.69, 1)
+let t.71 : string = pick t.70
+let t.72 : int * int = (3, 0)
+let t.73 : int = sum t.72
+let t.74 : int list = nil
+let t.75 : int * int list = (2, t.74)
+let t.76 : int list = :: t.75
+let t.77 : int * int list = (1, t.76)
+let t.78 : int list = :: t.77
+let t.79 : int = depth t.78
+let t.80 : (int * int) * string * int * int = (t.68, t.71, t.73, t.79)
+let answers : (int * int) * string * int * int = t.80
+ret answers
+val swap : 'a * 'b -> 'b * 'a = fn
+val pick : bool * int -> string = fn
+val sum : int * int -> int = fn
+val depth : 'a list -> int = fn
+val answers : (int * int) * string * int * int = ((2, 1), "both", 6, 3)

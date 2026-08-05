@@ -1,0 +1,2 @@
+datatype colour = Red | Green
+fun name (Red x) = x

@@ -1,0 +1,95 @@
+(* Signatures, sealing and functors.
+
+   Every type a signature declares is a hole.  Matching a structure fills the
+   holes in; `:` keeps what it learned and `:>` throws it away, which is the
+   only difference between an abbreviation and an abstract type. *)
+
+signature ORD = sig
+  type t
+  val compare : t * t -> int
+end
+
+structure IntOrd : ORD = struct
+  type t = int
+  val compare = Int.compare
+end
+
+structure StringOrd : ORD = struct
+  type t = string
+  val compare = String.compare
+end
+
+(* Transparent ascription: `IntOrd.t` is still `int`, so this typechecks. *)
+val stillInt = IntOrd.compare (1, 2)
+
+signature SET = sig
+  type set
+  type elem
+  val empty : set
+  val add : elem * set -> set
+  val member : elem * set -> bool
+  val size : set -> int
+  val toList : set -> elem list
+end
+
+(* The result signature is sealed, so nothing outside knows that a set is a
+   sorted list -- but `elem` is given a definition in terms of the argument, so
+   callers can still put things in. *)
+functor MakeSet (O : ORD) :> SET where type elem = O.t = struct
+  type elem = O.t
+  type set = elem list
+
+  val empty = []
+
+  fun member (_, []) = false
+    | member (x, y :: ys) =
+        case O.compare (x, y) of
+          0 => true
+        | n => if n < 0 then false else member (x, ys)
+
+  fun add (x, []) = [x]
+    | add (x, y :: ys) =
+        let val n = O.compare (x, y)
+        in if n < 0 then x :: y :: ys
+           else if n = 0 then y :: ys
+           else y :: add (x, ys)
+        end
+
+  fun size s = List.length s
+  fun toList s = s
+end
+
+structure IntSet = MakeSet (IntOrd)
+structure StringSet = MakeSet (StringOrd)
+
+val ints = List.foldl IntSet.add IntSet.empty [3, 1, 4, 1, 5, 9, 2, 6]
+val intList = IntSet.toList ints
+val intCount = IntSet.size ints
+val hasFour = IntSet.member (4, ints)
+
+val words = List.foldl StringSet.add StringSet.empty ["pear", "apple", "pear"]
+val wordList = StringSet.toList words
+
+(* Two applications of one functor make two different `set` types.  Uncomment
+   the next line and the checker says so:
+
+     val no = IntSet.size words
+*)
+
+(* A structure can hold a structure, and `open` brings a structure's names into
+   scope without qualification. *)
+structure Geometry = struct
+  structure Point = struct
+    type point = { x : int, y : int }
+    val origin = { x = 0, y = 0 }
+    fun shift ({ x = x, y = y }, dx, dy) = { x = x + dx, y = y + dy }
+  end
+
+  fun manhattan ({ x = x, y = y } : Point.point) = Int.abs x + Int.abs y
+end
+
+val moved = Geometry.Point.shift (Geometry.Point.origin, 3, ~4)
+val far = Geometry.manhattan moved
+
+open Geometry
+val same = manhattan (Point.shift (Point.origin, 1, 1))

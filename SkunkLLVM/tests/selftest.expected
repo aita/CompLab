@@ -1,0 +1,24 @@
+datatype tree = Leaf of int
+val i : int = 42
+val j : int = ~7
+val s : string = "hi\tthere \"you\"\n"
+val u : unit = ()
+val t : int * string = (42, "zebra\n")
+val r : { age : int, name : string } = { age = 30, name = "zebra\n" }
+val xs : int list = [1, 2]
+val e : int list = []
+val c : tree = Leaf 7
+val f : 'a -> 'a = fn
+val cat : string = "hi\tthere \"you\"\nhi\tthere \"you\"\n"
+val sub : string = "\tth"
+val len : int = 15
+val str : string = "~1234"
+val eq : bool = true
+val ne : bool = true
+val lt : bool = true
+val gt : bool = false
+val q : int = 3
+val m : int = ~2
+val arr : int array = [|9, 9, 9|]
+val rr : int ref = ref 5
+zebra

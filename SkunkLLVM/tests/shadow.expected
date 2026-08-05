@@ -1,0 +1,6 @@
+val before : int = 41
+structure Array
+val ! : int ref -> int = fn
+val after : int = 999
+val subbed : int = 105
+val lengthed : int = 7

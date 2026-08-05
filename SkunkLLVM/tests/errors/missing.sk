@@ -1,0 +1,2 @@
+signature P = sig val a : int val b : int end
+structure S : P = struct val a = 1 end

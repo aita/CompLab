@@ -1,0 +1,2 @@
+fun same (f, g) = f = g
+val bad = same (fn x => x, fn y => y)

@@ -1,0 +1,624 @@
+; Golden tests: run a program, diff its output against the .expected file.
+; `dune test` checks them and `dune promote` accepts new output after a change.
+;
+; Every program that both halves can run is run twice -- once by the
+; interpreter, once compiled -- and diffed against the same golden file.  That
+; is the whole point of the back end: LLVM may pick different instructions every
+; time it is updated, but the program may not print anything different.
+
+; ---- the interpreter, and the two intermediate languages a change can break --
+
+(rule
+ (with-stdout-to
+  tour.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:../examples/tour.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.out)))
+
+(rule
+ (with-stdout-to
+  matching.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:../examples/matching.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff matching.expected matching.out)))
+
+(rule
+ (with-stdout-to
+  modules.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:../examples/modules.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff modules.expected modules.out)))
+
+(rule
+ (with-stdout-to
+  store.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:../examples/store.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff store.expected store.out)))
+
+; Reals, and the interpreter alone: the back end has no representation for a
+; real yet, so there is no compiled half to diff this against.  When there is,
+; this file becomes a differential test like the ones above and that is the
+; whole of what has to change here.
+
+(rule
+ (with-stdout-to
+  reals.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:reals.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff reals.expected reals.out)))
+
+(rule
+ (with-stdout-to
+  core.out
+  (run %{exe:../src/interpreter/skunk.exe} --dump-core %{dep:core.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff core.expected core.out)))
+
+(rule
+ (with-stdout-to
+  join.out
+  (run %{exe:../src/interpreter/skunk.exe} --dump-core %{dep:join.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff join.expected join.out)))
+
+(rule
+ (with-stdout-to
+  flat.out
+  (run %{exe:../src/interpreter/skunk.exe} --dump-flat %{dep:flat.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff flat.expected flat.out)))
+
+; Warnings go to standard error, and the program still runs.
+
+(rule
+ (with-outputs-to
+  warn.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:warn.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff warn.expected warn.out)))
+
+; Every program under errors/ is expected to fail; their messages, stdout and
+; stderr together, are collected into one golden file.
+
+(rule
+ (with-outputs-to
+  errors.out
+  (progn
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/mismatch.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/unbound.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/occurs.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/nested.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/conarity.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/flexrecord.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/valrestriction.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/rigid.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/eqtype.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/ordered.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/realeq.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/abstracteq.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/toospecific.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/missing.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/generative.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/nomatch.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/divzero.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/bounds.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/bounds0.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/subrange.sk}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/interpreter/skunk.exe} %{dep:errors/syntax.sk})))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff errors.expected errors.out)))
+
+; selftest.sk touches a value of every shape once, so it is where a mistake in
+; `show` or in a runtime routine turns up first.
+
+(rule
+ (with-stdout-to
+  selftest.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:selftest.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff selftest.expected selftest.interp.out)))
+
+(rule
+ (with-stdout-to
+  gc.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:gc.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gc.expected gc.interp.out)))
+
+(rule
+ (with-stdout-to
+  spelling.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:spelling.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff spelling.expected spelling.interp.out)))
+
+(rule
+ (with-stdout-to
+  nullary.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:nullary.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff nullary.expected nullary.interp.out)))
+
+(rule
+ (with-stdout-to
+  arrays.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:arrays.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff arrays.expected arrays.interp.out)))
+
+(rule
+ (with-stdout-to
+  shadow.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:shadow.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff shadow.expected shadow.interp.out)))
+
+(rule
+ (with-stdout-to
+  wide.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:wide.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff wide.expected wide.interp.out)))
+
+(rule
+ (with-stdout-to
+  arith.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:arith.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff arith.expected arith.interp.out)))
+
+(rule
+ (with-stdout-to
+  opt.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:opt.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff opt.run.expected opt.interp.out)))
+
+(rule
+ (with-stdout-to
+  inline.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:inline.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff inline.run.expected inline.interp.out)))
+
+(rule
+ (with-stdout-to
+  icp.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:icp.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff icp.run.expected icp.interp.out)))
+
+(rule
+ (with-stdout-to
+  loop.interp.out
+  (run %{exe:../src/interpreter/skunk.exe} %{dep:loop.sk})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff loop.run.expected loop.interp.out)))
+
+; ---- and the same programs, compiled -----------------------------------------
+
+(rule
+ (targets tour.bin matching.bin modules.bin store.bin selftest.bin)
+ (deps
+  ../examples/tour.sk
+  ../examples/matching.sk
+  ../examples/modules.sk
+  ../examples/store.sk
+  selftest.sk)
+ (action
+  (progn
+   (run %{exe:../src/llvm/skunkllvm.exe} -o tour.bin ../examples/tour.sk)
+   (run %{exe:../src/llvm/skunkllvm.exe} -o matching.bin ../examples/matching.sk)
+   (run %{exe:../src/llvm/skunkllvm.exe} -o modules.bin ../examples/modules.sk)
+   (run %{exe:../src/llvm/skunkllvm.exe} -o store.bin ../examples/store.sk)
+   (run %{exe:../src/llvm/skunkllvm.exe} -o selftest.bin selftest.sk))))
+
+(rule
+ (with-stdout-to
+  tour.bin.out
+  (run %{dep:tour.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.bin.out)))
+
+(rule
+ (with-stdout-to
+  matching.bin.out
+  (run %{dep:matching.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff matching.expected matching.bin.out)))
+
+(rule
+ (with-stdout-to
+  modules.bin.out
+  (run %{dep:modules.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff modules.expected modules.bin.out)))
+
+(rule
+ (with-stdout-to
+  store.bin.out
+  (run %{dep:store.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff store.expected store.bin.out)))
+
+(rule
+ (with-stdout-to
+  selftest.bin.out
+  (run %{dep:selftest.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff selftest.expected selftest.bin.out)))
+
+; The collector.  This one allocates about three heaps' worth of garbage, so it
+; only finishes if collection happens; and the value it prints only comes out
+; right if tracing followed the right words -- including the ones LLVM left
+; pointing into the middle of a block.
+
+(rule
+ (targets gc.bin)
+ (deps gc.sk)
+ (action
+  (run %{exe:../src/llvm/skunkllvm.exe} -o gc.bin gc.sk)))
+
+(rule
+ (with-stdout-to
+  gc.bin.out
+  (run %{dep:gc.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gc.expected gc.bin.out)))
+
+; How a value is spelled at the edges.
+
+(rule
+ (targets spelling.bin)
+ (deps spelling.sk)
+ (action
+  (run %{exe:../src/llvm/skunkllvm.exe} -o spelling.bin spelling.sk)))
+
+(rule
+ (with-stdout-to
+  spelling.bin.out
+  (run %{dep:spelling.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff spelling.expected spelling.bin.out)))
+
+; Nullary constructors: two datatypes number theirs the same way, so their
+; descriptors hold the same six words and must still be two addresses.  This is
+; the program that would start printing the wrong name if anything here were
+; marked constant, because `constmerge` would fold them into one.
+
+(rule
+ (targets nullary.bin)
+ (deps nullary.sk)
+ (action
+  (run %{exe:../src/llvm/skunkllvm.exe} -o nullary.bin nullary.sk)))
+
+(rule
+ (with-stdout-to
+  nullary.bin.out
+  (run %{dep:nullary.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff nullary.expected nullary.bin.out)))
+
+; The store, compiled to loads and stores.  arrays.sk has every shape that moves
+; one; shadow.sk is the program that binds `!` and `Array` itself.
+
+(rule
+ (targets arrays.bin)
+ (deps arrays.sk)
+ (action
+  (run %{exe:../src/llvm/skunkllvm.exe} -o arrays.bin arrays.sk)))
+
+(rule
+ (with-stdout-to
+  arrays.bin.out
+  (run %{dep:arrays.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff arrays.expected arrays.bin.out)))
+
+(rule
+ (targets shadow.bin)
+ (deps shadow.sk)
+ (action
+  (run %{exe:../src/llvm/skunkllvm.exe} -o shadow.bin shadow.sk)))
+
+(rule
+ (with-stdout-to
+  shadow.bin.out
+  (run %{dep:shadow.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff shadow.expected shadow.bin.out)))
+
+; Constants that do not fit where a smaller one would.  An integer is twice what
+; was written, so the numbers in wide.sk sit either side of the edge where a
+; constant stops fitting in an instruction; the interpreter never had the
+; question, so its output is the answer both halves are diffed against.
+
+(rule
+ (targets wide.bin)
+ (deps wide.sk)
+ (action
+  (run %{exe:../src/llvm/skunkllvm.exe} -o wide.bin wide.sk)))
+
+(rule
+ (with-stdout-to
+  wide.bin.out
+  (run %{dep:wide.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff wide.expected wide.bin.out)))
+
+; Arithmetic, of a negative operand as well as a positive one.  `div` truncates
+; towards zero and a shift does not, so the negative half is the half that
+; matters once LLVM has turned a division by a constant into something else.
+
+(rule
+ (targets arith.bin)
+ (deps arith.sk)
+ (action
+  (run %{exe:../src/llvm/skunkllvm.exe} -o arith.bin arith.sk)))
+
+(rule
+ (with-stdout-to
+  arith.bin.out
+  (run %{dep:arith.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff arith.expected arith.bin.out)))
+
+; The programs the hand-written back end kept for its optimiser.  There is no
+; optimiser here to test, so what they are is four more programs that have to
+; compute the same thing -- one of them, icp.sk, with two functions too big for
+; anything to inline.
+
+(rule
+ (targets opt.bin inline.bin icp.bin)
+ (deps opt.sk inline.sk icp.sk)
+ (action
+  (progn
+   (run %{exe:../src/llvm/skunkllvm.exe} -o opt.bin opt.sk)
+   (run %{exe:../src/llvm/skunkllvm.exe} -o inline.bin inline.sk)
+   (run %{exe:../src/llvm/skunkllvm.exe} -o icp.bin icp.sk))))
+
+(rule
+ (with-stdout-to
+  opt.bin.out
+  (run %{dep:opt.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff opt.run.expected opt.bin.out)))
+
+(rule
+ (with-stdout-to
+  inline.bin.out
+  (run %{dep:inline.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff inline.run.expected inline.bin.out)))
+
+(rule
+ (with-stdout-to
+  icp.bin.out
+  (run %{dep:icp.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff icp.run.expected icp.bin.out)))
+
+; ---- and again with the optimiser off ----------------------------------------
+
+; `-O0` is where a tail call has nothing but `musttail` keeping it from growing
+; the stack: LLVM's own sibling-call optimisation does not run.  loop.sk is
+; tail-recursive and gc.sk allocates through three heaps, so between them they
+; are the two programs that would not finish if either promise were broken.
+
+(rule
+ (targets loop.bin loop.noopt.bin gc.noopt.bin)
+ (deps loop.sk gc.sk)
+ (action
+  (progn
+   (run %{exe:../src/llvm/skunkllvm.exe} -o loop.bin loop.sk)
+   (run %{exe:../src/llvm/skunkllvm.exe} -O0 -o loop.noopt.bin loop.sk)
+   (run %{exe:../src/llvm/skunkllvm.exe} -O0 -o gc.noopt.bin gc.sk))))
+
+(rule
+ (with-stdout-to
+  loop.bin.out
+  (run %{dep:loop.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff loop.run.expected loop.bin.out)))
+
+(rule
+ (with-stdout-to
+  loop.noopt.bin.out
+  (run %{dep:loop.noopt.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff loop.run.expected loop.noopt.bin.out)))
+
+(rule
+ (with-stdout-to
+  gc.noopt.bin.out
+  (run %{dep:gc.noopt.bin})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff gc.expected gc.noopt.bin.out)))
+
+; ---- and every program has to build a module LLVM accepts --------------------
+
+; Nothing is compared here: the test is that `skunkllvm` exits zero, and it only
+; does that if LLVM's verifier had nothing to say -- every use dominated by its
+; definition, every phi with one incoming pair per predecessor, every `musttail`
+; followed by the `ret` it needs.
+
+(rule
+ (with-stdout-to
+  verify.out
+  (progn
+   (run %{exe:../src/llvm/skunkllvm.exe} -c -o tour.o %{dep:../examples/tour.sk})
+   (run %{exe:../src/llvm/skunkllvm.exe} -c -o matching.o %{dep:../examples/matching.sk})
+   (run %{exe:../src/llvm/skunkllvm.exe} -c -o modules.o %{dep:../examples/modules.sk})
+   (run %{exe:../src/llvm/skunkllvm.exe} -c -o store.o %{dep:../examples/store.sk})
+   (run %{exe:../src/llvm/skunkllvm.exe} -c -o core.o %{dep:core.sk})
+   (run %{exe:../src/llvm/skunkllvm.exe} -c -o flat.o %{dep:flat.sk})
+   (run %{exe:../src/llvm/skunkllvm.exe} -c -o join.o %{dep:join.sk}))))
+
+(rule
+ (alias runtest)
+ (deps verify.out)
+ (action
+  (progn)))

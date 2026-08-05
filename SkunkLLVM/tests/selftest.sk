@@ -1,0 +1,24 @@
+datatype tree = Leaf of int
+val i = 42
+val j = ~7
+val s = "hi\tthere \"you\"\n"
+val u = ()
+val t = (42, "zebra\n")
+val r = { name = "zebra\n", age = 30 }
+val xs = [1, 2]
+val e : int list = []
+val c = Leaf 7
+val f = fn x => x
+val cat = s ^ s
+val sub = String.substring (s, 2, 3)
+val len = String.size s
+val str = Int.toString (~1234)
+val eq = xs = [1, 2]
+val ne = xs <> e
+val lt = 3 < 10
+val gt = s > "zebra\n"
+val q = 17 div 5
+val m = ~17 mod 5
+val arr = Array.array (3, 9)
+val rr = ref 5
+val () = print "zebra\n"

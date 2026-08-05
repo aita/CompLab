@@ -1,0 +1,6 @@
+val band : int -> string = fn
+val edge : int -> string = fn
+val plain : string = "*##*#*#"
+val first : string = "*##*#*#{many}{}"
+val second : string = "*##*#*#{many}{}!"
+val third : string = "?*##*#*#{many}{}"

@@ -1,0 +1,65 @@
+(* Reals: the arithmetic, the ordering, and above all the printer.
+
+   How a real is spelled is specified in `types.ml` -- at most 12 significant
+   digits, always a digit after the point, `~` for the sign, and scientific
+   notation outside 0.0001 up to 10^12 -- and the compiler's runtime will one
+   day have to produce the same bytes from freestanding C with no `printf`.
+   So the values here are chosen to make both ends of that specification
+   visible, and this is the file to run when it is reimplemented.
+
+   The interpreter runs it and the compiler does not: the back end has no
+   representation for a real yet, and says so when it is asked. *)
+
+val one = 1.0
+val negative = ~1.5
+val tenth = 0.1
+val exponent = 1.5e10
+val small = 1.5E~3
+
+(* `+` `-` `*` and `~` overload over int and real; `/` is real-only and `div`
+   and `mod` are int-only, which is why nothing here has to say which one it
+   means. *)
+val sum = one + tenth
+val difference = one - 2.5
+val product = negative * 4.0
+val quotient = 1.0 / 3.0
+val negated = ~sum
+val ints = 6 * 7 - 1
+
+(* Nothing decides what this adds, so it is int -- the overload defaults, as in
+   SML, and `twiceOf 21` is what the default is for. *)
+fun twiceOf x = x + x
+val twiceOfInt = twiceOf 21
+
+(* Reals are ordered.  They do not admit equality: `=` on them is a type
+   error, and tests/errors/realeq.sk is that error. *)
+val less = tenth < one
+val notGreater = one <= 1.0
+val same = 2.5 >= 2.5
+
+val root = Math.sqrt 2.0
+val rootOfNine = Math.sqrt 9.0
+val text = Real.toString quotient
+val fromSeven = Real.fromInt 7
+val floored = Real.floor 2.75
+val flooredNegative = Real.floor (~2.75)
+val ordering = Real.compare (one, tenth)
+
+(* A list of reals, printed one at a time by the same routine. *)
+val xs = [1.0, ~1.5, 0.1, 100.0, 0.0]
+val doubled = List.map (fn x => x * 2.0) xs
+val total = List.foldl (fn (x, acc) => x + acc) 0.0 xs
+
+(* The corners of the specification: the last value that prints in fixed
+   notation on each side, the first that does not, and three that use all 12
+   digits. *)
+val fixed = [0.0001, 123456789012.0]
+val scientific = [0.00001, 1.0e12, 1.0e~300, 1.0e300]
+val digits = [1.0 / 3.0, 2.0 / 3.0, 3.14159265358979]
+
+(* IEEE-754 leaks out here, and the printer has a spelling for each: `/` by
+   zero is an infinity rather than the error `div` gives, and the square root of
+   a negative number is a NaN. *)
+val notNumbers = [1.0 / 0.0, ~1.0 / 0.0, Math.sqrt (~1.0)]
+
+val () = print (Real.toString root ^ "\n")

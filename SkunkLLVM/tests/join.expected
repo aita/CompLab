@@ -1,0 +1,62 @@
+-- val answer : bool -> string
+let answer : bool -> string = fn a1.19 : bool =>
+  let b : bool = a1.19
+  switch b of
+  | true =>
+      ret "yes"
+  | false =>
+      ret "no"
+ret answer
+-- val describe : bool -> string
+let describe : bool -> string = fn a1.20 : bool =>
+  let b.2 : bool = a1.20
+  let t.60 : string = answer b.2
+  let t.61 : string = ^("it is ", t.60)
+  ret t.61
+ret describe
+-- val inline : bool -> string
+let inline : bool -> string = fn a1.21 : bool =>
+  let b.3 : bool = a1.21
+  join k (v : string) =
+    let t.62 : string = ^("it is ", v)
+    ret t.62
+  switch b.3 of
+  | true =>
+      jump k ("yes")
+  | false =>
+      jump k ("no")
+ret inline
+-- val both : bool * int -> string
+let both : bool * int -> string = fn a1.22 : bool * int =>
+  join arm () =
+    ret "no"
+  let p.57 : bool = #1 a1.22
+  let p.58 : int = #2 a1.22
+  switch p.57 of
+  | true =>
+      switch p.58 of
+      | 1 =>
+          ret "yes"
+      | _ =>
+          jump arm ()
+  | _ =>
+      jump arm ()
+ret both
+-- val shown : string * string * string * string
+let t.63 : bool = true
+let t.64 : string = answer t.63
+let t.65 : bool = false
+let t.66 : string = describe t.65
+let t.67 : bool = true
+let t.68 : string = inline t.67
+let t.69 : bool = true
+let t.70 : bool * int = (t.69, 1)
+let t.71 : string = both t.70
+let t.72 : string * string * string * string = (t.64, t.66, t.68, t.71)
+let shown : string * string * string * string = t.72
+ret shown
+val answer : bool -> string = fn
+val describe : bool -> string = fn
+val inline : bool -> string = fn
+val both : bool * int -> string = fn
+val shown : string * string * string * string = ("yes", "it is no", "it is yes", "yes")

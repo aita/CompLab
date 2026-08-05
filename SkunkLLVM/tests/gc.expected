@@ -1,0 +1,8 @@
+datatype 'a tree = Leaf | Node of 'a tree * 'a * 'a tree
+val insert : int * int tree -> int tree = fn
+val total : int tree -> int = fn
+val build : int * int tree -> int tree = fn
+val churn : int -> int = fn
+val keepNothing : int * int list -> int = fn
+val check : int -> int * string * int list * int * string = fn
+val survived : int * string * int list * int * string = (45150, "hello, world", [1, 2, 3], 42, "hello, world!")

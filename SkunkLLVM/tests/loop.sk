@@ -1,0 +1,23 @@
+(* Tail recursion, which is the only kind of loop this language has: a join point
+   can only jump outwards, so nothing in a function's control-flow graph points
+   backwards until this pass makes it. *)
+
+fun sum (xs, acc) =
+  case xs of
+      [] => acc
+    | x :: rest => sum (rest, acc + x)
+
+(* Not a tail call -- the multiplication happens after -- so this one stays a
+   call and keeps its closure. *)
+fun fact n = if n <= 1 then 1 else n * fact (n - 1)
+
+(* Two tail calls to the same function: both become jumps to the same header, and
+   the phi gets three arguments. *)
+fun classify (n, acc) =
+  if n = 0 then acc
+  else if n mod 2 = 0 then classify (n - 1, acc + 1)
+  else classify (n - 1, acc)
+
+val a = sum ([1, 2, 3, 4], 0)
+val b = fact 6
+val c = classify (10, 0)

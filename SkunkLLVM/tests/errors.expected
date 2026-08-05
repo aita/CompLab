@@ -1,0 +1,27 @@
+errors/mismatch.sk:1:5: type error: cannot unify bool with int
+errors/unbound.sk:1:9: type error: unbound variable z
+errors/occurs.sk:1:17: type error: this type would contain itself
+errors/nested.sk:3:5: type error: cannot unify int list list with int
+errors/conarity.sk:2:11: type error: the constructor Red takes no argument
+errors/flexrecord.sk:2:5: type error: this record's type is not determined here: { x : '_3, ... }. Write the type out, as SML makes you
+errors/valrestriction.sk:3:10: type error: cannot unify int with bool
+errors/rigid.sk:2:5: type error: 'a was written in an annotation, so it has to work for every type, and this needs it to be int
+errors/eqtype.sk:2:11: type error: a function cannot be compared: '_12 -> '_12 does not admit equality
+errors/ordered.sk:1:11: type error: bool cannot be ordered: only int, string and real can
+errors/realeq.sk:1:11: type error: real does not admit equality, as in the Definition of Standard ML: compare reals with Real.compare, or with <= and <
+errors/abstracteq.sk:2:21: signature error: the signature declares t as an eqtype, but a function cannot be compared: int -> int does not admit equality
+errors/toospecific.sk:1:42: signature error: f is int -> int here, but the signature asks for 'a -> 'a
+errors/missing.sk:2:19: signature error: this structure does not define b
+errors/generative.sk:5:12: type error: cannot unify A.box with B.box
+errors/nomatch.sk:1:5: warning: this match does not cover every case
+val only : int * 'a -> 'a = fn
+errors/nomatch.sk:1:5: match failure: no pattern matched
+?: runtime error: division by zero
+val a : int array = [|0, 0|]
+?: runtime error: Array.sub: index 5 out of 0..1
+val a : int array = [||]
+?: runtime error: Array.sub: index 0 out of 0..~1
+val dbl : int * int -> int = fn
+val half : int = 2305843009213693952
+?: runtime error: String.substring: out of range
+errors/syntax.sk:2:1: syntax error: unexpected end of file

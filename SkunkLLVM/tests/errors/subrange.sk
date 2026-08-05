@@ -1,0 +1,8 @@
+(* Two halves of the integer range, added: the sum wraps round, so a range check
+   written as `start + length > size` sees a negative number and lets this
+   through.  The doubling is here because the literal cannot be written. *)
+fun dbl (x, 0) = x
+  | dbl (x, n) = dbl (x + x, n - 1)
+
+val half = dbl (1, 61)
+val oops = String.substring ("abcdef", half, half)

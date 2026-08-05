@@ -1,0 +1,39 @@
+(* The collector, exercised.
+
+   Two things at once.  It allocates far more than the heap holds, so it only
+   finishes if collection happens at all.  And it keeps a value of every shape
+   alive across those collections -- in the caller's registers and frame slots
+   rather than in a global, which is the root the conservative scan has to find --
+   so it only prints the right thing if tracing follows the right words.  A
+   closure's first word is a code address and a string's and an array's first word
+   is a length; none of those are values, and following one would show up here. *)
+
+datatype 'a tree = Leaf | Node of 'a tree * 'a * 'a tree
+
+fun insert (x, Leaf) = Node (Leaf, x, Leaf)
+  | insert (x, Node (l, y, r)) =
+      if x < y then Node (insert (x, l), y, r) else Node (l, y, insert (x, r))
+
+fun total Leaf = 0
+  | total (Node (l, x, r)) = total l + x + total r
+
+fun build (n, t) = if n = 0 then t else build (n - 1, insert (n mod 977, t))
+
+(* Garbage, and nothing else: the list each round builds is dead by the next. *)
+fun churn n = if n = 0 then 0 else keepNothing (n, [n, n + 1, n + 2, n + 3])
+and keepNothing (n, junk) = churn (n - 1)
+
+fun check n =
+  let
+    val tree = build (300, Leaf)
+    val arr = Array.array (8, "x")
+    val cell = ref [1, 2, 3]
+    val greet = "hello" ^ ", " ^ "world"
+    val add = let val k = 7 in fn m => m + k end
+    val () = Array.update (arr, 3, greet)
+    val burned = churn n
+  in
+    (total tree, Array.sub (arr, 3), !cell, add 35, greet ^ "!")
+  end
+
+val survived = check 900000

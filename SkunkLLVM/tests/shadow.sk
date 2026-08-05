@@ -1,0 +1,20 @@
+(* The basis names, taken back.
+
+   `!` and `Array` are ordinary globals: a word the linker fills in and a
+   top-level binding overwrites.  So a program may rebind them, and then a `!`
+   in it is not a load and `Array.sub` is not a bounds-checked one -- it is
+   whatever the program said.  The compiler only inlines a basis name no item of
+   the program binds, and this file is the program that binds them. *)
+
+val before = !(ref 41)
+
+structure Array = struct
+  fun sub (a, i) = i + 100
+  fun length _ = 7
+end
+
+val ! = fn (x : int ref) => 999
+
+val after = !(ref 41)
+val subbed = Array.sub (ref 0, 5)
+val lengthed = Array.length (ref 0)

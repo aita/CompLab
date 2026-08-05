@@ -1,0 +1,4 @@
+(* An array with no elements: the upper bound in the message is ~1, and a
+   negative number is spelled with `~` here as it is everywhere else. *)
+val a = Array.array (0, 0)
+val oops = Array.sub (a, 0)

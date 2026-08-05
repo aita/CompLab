@@ -1,0 +1,68 @@
+(* Mutation, which is to say: the store.
+
+   Every other value in this language is built once and never changes, and a
+   machine for it would need no store at all -- an environment mapping names
+   straight to values would do.  A `ref` is one address and an array is a run of
+   them, so the environment maps a name to an address and the store says what is
+   in it.  That is the S in CESK. *)
+
+val counter = ref 0
+val () = counter := !counter + 1
+val () = counter := !counter + 1
+val now = !counter
+
+(* `ref` is a datatype with one constructor, so it is a pattern too. *)
+fun bump (r as ref n) = (r := n + 1; !r)
+val next = bump counter
+
+(* Two names for one cell are two names for one place, and equality on a
+   mutable thing is identity: a cell is equal to itself and to nothing else. *)
+val alias = counter
+val () = alias := 100
+val throughTheOther = !counter
+val same = (counter = alias)
+val other = (counter = ref 100)
+
+(* A closure captures the cell, not the number in it. *)
+fun makeCounter () =
+  let val cell = ref 0
+      fun tick () = (cell := !cell + 1; !cell)
+  in tick
+  end
+
+val tick = makeCounter ()
+val one = tick ()
+val two = tick ()
+
+(* A second counter has a second cell, because `makeCounter` runs again. *)
+val restart = makeCounter () ()
+
+(* Arrays are the same idea, several addresses at a time. *)
+val zeroes = Array.array (5, 0)
+val () = Array.update (zeroes, 0, 10)
+val () = Array.update (zeroes, 4, 40)
+val contents = Array.toList zeroes
+
+(* In-place reverse, which needs the store to be worth writing. *)
+fun reverse a =
+  let val n = Array.length a
+      fun go i =
+        if i >= n - 1 - i then ()
+        else
+          let val x = Array.sub (a, i)
+              val y = Array.sub (a, n - 1 - i)
+          in Array.update (a, i, y);
+             Array.update (a, n - 1 - i, x);
+             go (i + 1)
+          end
+  in go 0; a
+  end
+
+val backwards = Array.toList (reverse (Array.fromList [1, 2, 3, 4, 5]))
+
+(* The value restriction is here because of this file.  `ref []` is an
+   application, so it is expansive and its type is not generalised: this cell
+   holds ints and nothing else, from the first assignment onwards. *)
+val holder = ref []
+val () = holder := [1, 2]
+val held = !holder

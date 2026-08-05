@@ -1,0 +1,6 @@
+val sum : int list * int -> int = fn
+val fact : int -> int = fn
+val classify : int * int -> int = fn
+val a : int = 10
+val b : int = 720
+val c : int = 5

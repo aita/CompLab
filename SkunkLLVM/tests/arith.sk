@@ -1,0 +1,140 @@
+(* Strength reduction, and the tagged arithmetic underneath it.
+
+   Every line here is a tile selection chose because of the constant next to it:
+   a multiply that became one `lea`, a division that became a shift with a sign
+   fixup in front of it, an addition that became a three-operand `lea`.  An
+   integer is 2n + 1, so not one of these rewrites is the textbook rewrite, and
+   the place they go wrong is a negative operand: `div` truncates towards zero
+   and an arithmetic shift rounds towards negative infinity, which is a
+   different answer for every dividend that is not a multiple of the divisor.
+
+   So everything is asked of a negative number as well as a positive one, and of
+   the boundaries around a divisor: zero, the divisor itself, and one either
+   side.  The interpreter has no tiles at all, which is what makes its output the
+   answer this file is diffed against. *)
+
+(* Nine points around zero, which is enough to catch a shift that rounds the
+   wrong way for exactly one sign and a remainder that comes out with the
+   divisor's sign instead of the dividend's. *)
+fun span f = (f (~9), f (~8), f (~7), f (~1), f 0, f 1, f 7, f 8, f 9)
+fun three f = (f (~5), f 0, f 7)
+
+(* ---- addition and subtraction -------------------------------------------- *)
+
+(* Two registers is `lea -1(%ra,%rb)`; a constant on either side is the same lea
+   with the index replaced by a displacement.  Nothing upstream moves a constant
+   to a side, so both are asked. *)
+fun add (x, y) = x + y
+fun sub (x, y) = x - y
+
+val sums = (add (3, 4), add (~3, 4), add (3, ~4), add (~3, ~4), add (0, 0))
+val diffs = (sub (3, 4), sub (~3, 4), sub (3, ~4), sub (~3, ~4), sub (0, 0))
+val selfSum = add (7, 7)
+
+fun addRight x = x + 7
+fun addLeft x = 7 + x
+fun subRight x = x - 7
+fun subLeft x = 7 - x
+
+val ar = three addRight
+val al = three addLeft
+val sr = three subRight
+val sl = three subLeft
+val negate = three (fn x => ~x)
+
+(* ---- multiplication by a constant ---------------------------------------- *)
+
+(* 2, 4 and 8 are a scale; 3, 5 and 9 are a base plus a scaled index; 16 and
+   1024 are a shift; the rest is an immediate multiply.  Every one of them puts
+   the tag back with the same displacement or the same add. *)
+val by0 = three (fn x => x * 0)
+val by1 = three (fn x => x * 1)
+val by2 = three (fn x => x * 2)
+val by3 = three (fn x => x * 3)
+val by4 = three (fn x => x * 4)
+val by5 = three (fn x => x * 5)
+val by8 = three (fn x => x * 8)
+val by9 = three (fn x => x * 9)
+val by16 = three (fn x => x * 16)
+val by1024 = three (fn x => x * 1024)
+val by7 = three (fn x => x * 7)
+val by255 = three (fn x => x * 255)
+val byNeg1 = three (fn x => x * ~1)
+val byNeg2 = three (fn x => x * ~2)
+val byNeg6 = three (fn x => x * ~6)
+
+(* The multiplier is read out of `imul`'s four-byte field, and that field holds
+   the number as written rather than the tagged one -- so it reaches to 2^31,
+   twice as far as an immediate that has to survive the tag.  2^30 is a shift
+   and 2^31 is one past the edge, where the multiplier goes into a register and
+   the untagging multiply takes over. *)
+val by30 = three (fn x => x * 1073741824)
+val byRandom = three (fn x => x * 1103515245)
+val byMax = three (fn x => x * 2147483647)
+val by31 = three (fn x => x * 2147483648)
+val byNeg31 = three (fn x => x * ~2147483648)
+
+(* A constant with two uses is in a register for the other one, so reading the
+   number out of the instruction here costs nothing and leaves nothing behind. *)
+fun twice x = x * 12345 + (x + 12345)
+val shared = three twice
+
+(* The constant on the left, which is where `3 * r * r` leaves it. *)
+val leftBy3 = three (fn x => 3 * x)
+val leftBy0 = three (fn x => 0 * x)
+fun areaish r = 3 * r * r
+val areas = three areaish
+
+(* Neither side constant: the untagging multiply. *)
+fun times (x, y) = x * y
+val products = (times (6, 7), times (~6, 7), times (6, ~7), times (~6, ~7), times (0, ~7))
+
+(* ---- division and remainder by a constant power of two -------------------- *)
+
+val div2 = span (fn x => x div 2)
+val mod2 = span (fn x => x mod 2)
+val div4 = span (fn x => x div 4)
+val mod4 = span (fn x => x mod 4)
+val div8 = span (fn x => x div 8)
+val mod8 = span (fn x => x mod 8)
+val div1024 = span (fn x => x div 1024)
+val mod1024 = span (fn x => x mod 1024)
+
+(* 2^30 is the last divisor whose masks fit in four bytes; 2^31 is the first one
+   that has to stay a call. *)
+fun bigSpan f = (f (~1073741825), f (~1073741824), f (~1073741823), f 0, f 1073741823, f 1073741824)
+val div30 = bigSpan (fn x => x div 1073741824)
+val mod30 = bigSpan (fn x => x mod 1073741824)
+val div31 = bigSpan (fn x => x div 2147483648)
+val mod31 = bigSpan (fn x => x mod 2147483648)
+
+(* One is 2^0: the bias is zero, so the quotient is the number and the
+   remainder is zero, and neither costs more than the move. *)
+val div1 = span (fn x => x div 1)
+val mod1 = span (fn x => x mod 1)
+
+(* And the divisors that are not powers of two, or not positive, which is where
+   the runtime routine still is. *)
+val div3 = span (fn x => x div 3)
+val mod3 = span (fn x => x mod 3)
+val divNeg2 = span (fn x => x div ~2)
+val modNeg2 = span (fn x => x mod ~2)
+fun quot (x, y) = x div y
+fun rem (x, y) = x mod y
+val quots = (quot (~9, 2), quot (9, ~2), rem (~9, 2), rem (9, ~2))
+
+(* A shifted divide has to agree with the multiply that undoes it. *)
+fun roundtrip x = x div 8 * 8 + x mod 8
+val trips = span roundtrip
+
+(* ---- and in a loop, where the tiles actually earn anything ---------------- *)
+
+fun collatz (n, steps) =
+  if n <= 1 then steps
+  else if n mod 2 = 0 then collatz (n div 2, steps + 1)
+  else collatz (3 * n + 1, steps + 1)
+
+val walk = (collatz (27, 0), collatz (97, 0), collatz (871, 0))
+
+fun sumOdd (i, n, acc) = if i >= n then acc else sumOdd (i + 1, n, acc + (i * 2 - 1))
+val odds = (sumOdd (0, 10, 0), sumOdd (~10, 0, 0))

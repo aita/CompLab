@@ -1,0 +1,16 @@
+(* What closure conversion does, in as few lines as it can be shown in.
+
+   `adder` returns a function that captures `n`, so the inner lambda becomes a
+   code block with one capture.  `twice` captures nothing and takes its
+   function as an argument.  The join point in `size` is *not* converted: it
+   keeps its free variables, because a jump can only come from inside. *)
+
+fun adder n = fn m => n + m
+val add3 = adder 3
+val ten = add3 7
+
+fun twice f x = f (f x)
+val four = twice (fn n => n + 1) 2
+
+fun size xs = 1 + (case xs of [] => 0 | _ :: rest => size rest)
+val three = size [1, 2]

@@ -1,0 +1,14 @@
+val double : int -> int = fn
+val four : int = 4
+val forty : int = 40
+val spread : int * int -> { diff : int, prod : int, sum : int } = fn
+val product : int = 40
+val dist : int * int -> int = fn
+val apart : int = 6
+val fact : int -> int = fn
+val six : int = 6
+val count : int * int -> int = fn
+val counted : int = 55
+val inc : int -> int = fn
+val applyTo : ('a -> 'b) * 'a -> 'b = fn
+val applied : int = 42

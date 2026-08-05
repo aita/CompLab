@@ -1,0 +1,20 @@
+val merge : int list * int list -> int list = fn
+val merged : int list = [1, 2, 3, 4, 7, 9]
+val overlap : bool * bool * int -> string = fn
+val o1 : string = "first"
+val o2 : string = "second"
+val o3 : string = "neither"
+val depth : 'a list -> int = fn
+val deep : int = 4
+datatype shape = Circle of int | Rect of int * int | Group of shape list
+val area : shape -> int = fn
+val total : int = 10
+val describe : 'a list -> string = fn
+val d0 : string = "nothing"
+val d2 : string = "two: 2"
+val d5 : string = "several"
+type person
+val greet : { age : int, name : string } -> string = fn
+val hi : string = "hello, kit"
+val sign : int -> string = fn
+val s : string list = ["negative", "zero", "positive"]

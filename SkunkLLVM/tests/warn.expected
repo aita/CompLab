@@ -1,0 +1,10 @@
+warn.sk:5:5: warning: this match does not cover every case
+warn.sk:8:5: warning: this pattern can never match: 0
+warn.sk:16:5: warning: this match does not cover every case
+val partial : 'a option -> 'a = fn
+val fine : int = 1
+val shadowed : int -> string = fn
+val s : string = "first"
+datatype colour = Red | Green | Blue
+val warm : colour -> bool = fn
+val w : bool = true

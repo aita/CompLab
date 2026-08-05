@@ -1,0 +1,18 @@
+signature ORD
+structure IntOrd
+structure StringOrd
+val stillInt : int = ~1
+signature SET
+functor MakeSet
+structure IntSet
+structure StringSet
+val ints : IntSet.set = [1, 2, 3, 4, 5, 6, 9]
+val intList : int list = [1, 2, 3, 4, 5, 6, 9]
+val intCount : int = 7
+val hasFour : bool = true
+val words : StringSet.set = ["apple", "pear"]
+val wordList : string list = ["apple", "pear"]
+structure Geometry
+val moved : { x : int, y : int } = { x = 3, y = ~4 }
+val far : int = 7
+val same : int = 2
