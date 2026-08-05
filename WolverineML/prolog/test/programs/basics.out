@@ -1,0 +1,18 @@
+sum = 3
+neg = -7
+div = 3
+negdiv = -3
+mod = -1
+big = 1000000000000
+cat abc
+lt
+eq
+ne
+size = 5
+ord = 65
+B
+world
+toInt = 1235
+and
+or
+3!

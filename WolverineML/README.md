@@ -45,22 +45,29 @@ every dump in it taken from an actual run. Two to start with:
 written about: both allocators are here, and so is everything the chapters dump.
 
 [`kotlin/`](kotlin), [`go/`](go), [`ocaml/`](ocaml), [`typescript/`](typescript),
-[`haxe/`](haxe), [`racket/`](racket), [`ruby/`](ruby) and
-[`haskell/`](haskell) hold the same compiler written again, each described in a
-README of its own. They carry one allocator — the graph — because the comparison
-the other one exists for is made in the Python tree. Every other stage is the
-same pass over the same shapes, and for every example and test program in every
-configuration, every stage dumps the same bytes out of any of the nine, the
-assembly included.
+[`haxe/`](haxe), [`racket/`](racket), [`ruby/`](ruby), [`haskell/`](haskell),
+[`lisp/`](lisp) and [`prolog/`](prolog) hold the same compiler written again,
+each described in a README of its own. They carry one allocator — the graph —
+because the comparison the other one exists for is made in the Python tree.
+Every other stage is the same pass over the same shapes, and for every example
+and test program in every configuration, every stage dumps the same bytes out of
+any of the eleven, the assembly included.
 
-None of the eight is a transliteration. Each says the same thing the way its own
+None of the ten is a transliteration. Each says the same thing the way its own
 language says things — a sealed hierarchy and one exhaustive `when` per question
 in Kotlin, variants with mutable inline records in OCaml, a flat package and a
 type switch in Go, a discriminated union in TypeScript, an immutable `enum` and
 pure rewriting in Haxe, immutable structs and prefixed modules in Racket, `Data`
-for an instruction and `Struct` for the tree in Ruby, and in Haskell a checker
-that answers with a second tree because it cannot write on the first — and the
-READMEs are largely about where those choices led.
+for an instruction and `Struct` for the tree in Ruby, in Haskell a checker that
+answers with a second tree because it cannot write on the first, in Common Lisp
+one macro that writes the instruction protocol and a generic function for every
+question the compiler asks, and in Prolog three grammars, a syntax tree whose
+type fields are logic variables the checker binds, and case analysis that lives
+in the clause heads — and the READMEs are largely about where those choices led.
+
+`compare.sh` is what checks that claim: `./compare.sh lisp/bin/wolv` runs the
+ten stages over ten programs in four configurations and diffs every one of the
+400 dumps against `python --regalloc graph`.
 
 | | allocators | how it is built |
 | --- | --- | --- |
@@ -73,6 +80,8 @@ READMEs are largely about where those choices led.
 | [`racket/`](racket) | graph | `raco test test/` |
 | [`ruby/`](ruby) | graph | `rake` |
 | [`haskell/`](haskell) | graph | `cabal test` |
+| [`lisp/`](lisp) | graph | `./run-tests.sh` |
+| [`prolog/`](prolog) | graph | `./run-tests.sh` |
 
 ## Build and run
 

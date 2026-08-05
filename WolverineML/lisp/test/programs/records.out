@@ -1,0 +1,12 @@
+p.x = 3
+p.y = 8
+q is nil
+p is not nil
+sum = 10
+len = 4
+grid = 9
+length = 4
+ps1 = 30
+ps0 = 3
+box = 23
+matrix = 4

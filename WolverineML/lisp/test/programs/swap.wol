@@ -1,0 +1,20 @@
+fun spin (n : int) : int =
+  let var x = 1
+      var y = 2
+      var i = 0
+  in
+    while i < n do (
+      let val t = x in x := y; y := t end;
+      i := i + 1
+    );
+    x + y * 10
+  end
+
+val () = printInt (spin (0))
+val () = print (" ")
+val () = printInt (spin (1))
+val () = print (" ")
+val () = printInt (spin (2))
+val () = print (" ")
+val () = printInt (spin (7))
+val () = print ("\n")

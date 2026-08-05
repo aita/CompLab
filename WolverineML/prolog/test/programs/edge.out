@@ -1,0 +1,9 @@
+eight = 36
+nine = 901
+wide = 781
+big = 1234567890124
+negative = -1234567890123
+wrap = -9223372036854775808
+deep = 6
+escapes: ABC "quoted" tab	here
+unicode: 日本語
