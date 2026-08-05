@@ -93,26 +93,37 @@ same order, because SSA renaming allocates and the order is the numbering.
 `mach.lisp` uses the same macro for its one instruction, so the machine IR gets
 the protocol for free and `ir:dst` means the same thing at both levels.
 
-**Every question is a generic function; there is no dispatching `case` in the
-compiler.** The checker's rule for `while` is a method on `while-exp`, the
-lowering's is a method on `while-exp`, the dump's is a method on `while-exp`,
-and none of the three is in a conditional with the other twenty forms:
+**A pass over the tree is a table of clauses, and one macro writes the
+methods.** Common Lisp has no pattern matching of its own, so the three passes
+that walk the syntax tree — the checker, the lowering and the dump — say what
+they do a node at a time, and `ast:defwalk` turns each clause into a method
+with the node's slots already bound:
 
 ```lisp
-(defmethod check-exp ((e ast:while-exp) ck)
-  (unify ty:+bool+ (exp-type ck (ast:test e)) ... "as a `while` condition")
-  (incf (loops ck))
-  (unify ty:+unit+ (exp-type ck (ast:body e)) ... "in a `while` body")
-  (decf (loops ck))
-  ty:+unit+)
+(ast:defwalk check-exp (e ck)
+  (int-lit  () ty:+int+)
+  (while-exp (test body)
+    (unify ty:+bool+ (exp-type ck test) (ast:span test) "as a `while` condition")
+    (incf (loops ck))
+    (unify ty:+unit+ (exp-type ck body) (ast:span body) "in a `while` body")
+    (decf (loops ck))
+    ty:+unit+)
+  ...)
 ```
+
+Underneath these are still generic functions — the dispatch is CLOS's, and the
+checker's rule for `while` still sits next to nothing but the rule for `while`
+— but no pass has to spell that out twice a line, and `body` is `body` rather
+than `(ast:body e)`. It is fourteen lines of macro and the same trade
+`define-instr` makes in `ir.lisp`: the shape that repeats sixty times is
+written once. The clauses read the way the other ports' `match` does, which is
+the point; that they expand to `defmethod` is an implementation detail of this
+one.
 
 What that costs is exhaustiveness. Kotlin's `when` over a sealed hierarchy and
 Haskell's pattern match both refuse to compile when a case is missing; here a
-node nobody wrote a method for is a run-time error, and the base method on
-`ast:expression` exists to make it a legible one. The trade is real and it went
-the way it did because the alternative — one enormous `typecase` per pass — is
-the thing CLOS was built to replace.
+node nobody wrote a clause for is a run-time error, and the clause on
+`ast:expression` exists to make it a legible one.
 
 **Type equality is the one place with two arguments, so it is written with
 two.** `same-p` and `compatible-p` specialise on both, and the rule that `nil`
@@ -185,4 +196,5 @@ FAIL middle/a small constant is an immediate: (FORMS (FUNCTION-SOURCE "a + 5"))
   4 configurations), by `../compare.sh lisp/bin/wolv`
 - **94 tests, none skipped** — including the end-to-end runs under qemu and the
   random-program oracle
-- 5,085 lines in 27 modules, and 1,277 in the tests
+- 3,741 lines of code in 27 modules, with the comments taken out; 5,074 with
+  them, and 1,277 in the tests

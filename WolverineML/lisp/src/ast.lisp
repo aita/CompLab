@@ -13,7 +13,8 @@
 
 (defpackage #:wolv.ast
   (:use #:cl)
-  (:export #:ty-exp #:ty-name #:ty-array #:ty-record #:ty-field
+  (:export #:defwalk
+           #:ty-exp #:ty-name #:ty-array #:ty-record #:ty-field
            #:make-ty-field #:ty-field-name #:ty-field-ty #:ty-field-span
            #:expression #:span #:ty
            #:int-lit #:str-lit #:bool-lit #:nil-lit #:unit-lit
@@ -35,6 +36,30 @@
            #:init #:mutable #:binds #:result #:params))
 
 (in-package #:wolv.ast)
+
+(defmacro defwalk (name (node &rest extra) &body clauses)
+  "A pass over the tree: one clause per node, `(CLASS (SLOT...) BODY...)`.
+
+Each clause becomes a method, and the slots it names become variables bound to
+what the accessors answer -- so a body says `lhs` where it would otherwise say
+`(ast:lhs e)`.  The class and the slots are read in this package however the
+caller spelled them, which is what lets a pass write `bin-exp` and not
+`ast:bin-exp` twice a line.
+
+Common Lisp has no pattern matching of its own; this is fourteen lines of macro
+rather than a dependency, and the clauses read the way the other ports' `match`
+does."
+  (flet ((here (symbol) (intern (string symbol) '#:wolv.ast)))
+    `(progn
+       (defgeneric ,name (,node ,@extra))
+       ,@(loop for (class slots . body) in clauses
+               collect `(defmethod ,name ((,node ,(here class)) ,@extra)
+                          (declare (ignorable ,node ,@extra))
+                          (let ,(loop for slot in slots
+                                      collect `(,slot (,(here slot) ,node)))
+                            (declare (ignorable ,@slots))
+                            ,@body)))
+       ',name)))
 
 (defmacro defnode (name (&rest supers) &rest slots)
   "One node of the tree: a class whose slots are all initargs and accessors.

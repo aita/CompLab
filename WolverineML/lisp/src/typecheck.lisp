@@ -130,151 +130,114 @@
 (defun check-decls (ck decls)
   (dolist (d decls) (check-decl d ck)))
 
-(defgeneric check-decl (decl ck))
+(ast:defwalk check-decl (d ck)
+  (decl (span)
+    (error 'diag:type-check-error :span span :message "unknown declaration"))
 
-(defmethod check-decl ((d ast:decl) ck)
-  (declare (ignore ck))
-  (error 'diag:type-check-error :span (ast:span d) :message "unknown declaration"))
-
-(defmethod check-decl ((d ast:type-decl) ck)
   ;; The names come first so that a record may mention itself, or another in
   ;; the same group; the fields are resolved once every name is bound.
-  (let ((records '()))
-    (dolist (bind (ast:binds d))
-      (let ((written (ast:type-bind-ty bind)))
-        (when (typep written 'ast:ty-record)
-          (let ((rec (make-instance 'ty:record-type :name (ast:type-bind-name bind))))
-            (bind-type ck (ast:type-bind-name bind) rec)
-            (push (cons rec written) records)))))
-    (dolist (bind (ast:binds d))
-      (unless (typep (ast:type-bind-ty bind) 'ast:ty-record)
-        (bind-type ck (ast:type-bind-name bind) (resolve ck (ast:type-bind-ty bind)))))
-    (dolist (pair (nreverse records))
-      (destructuring-bind (rec . written) pair
-        (let ((seen '()))
-          (dolist (f (ast:fields written))
-            (when (member (ast:ty-field-name f) seen :test #'string=)
-              (error 'diag:type-check-error
-                     :span (ast:ty-field-span f)
-                     :message (format nil "duplicate field `~A`" (ast:ty-field-name f))))
-            (push (ast:ty-field-name f) seen)
-            (setf (ty:fields rec)
-                  (append (ty:fields rec)
-                          (list (cons (ast:ty-field-name f)
-                                      (resolve ck (ast:ty-field-ty f))))))))))))
+  (type-decl (binds)
+    (let ((records '()))
+      (dolist (bind binds)
+        (let ((written (ast:type-bind-ty bind)))
+          (when (typep written 'ast:ty-record)
+            (let ((rec (make-instance 'ty:record-type :name (ast:type-bind-name bind))))
+              (bind-type ck (ast:type-bind-name bind) rec)
+              (push (cons rec written) records)))))
+      (dolist (bind binds)
+        (unless (typep (ast:type-bind-ty bind) 'ast:ty-record)
+          (bind-type ck (ast:type-bind-name bind) (resolve ck (ast:type-bind-ty bind)))))
+      (dolist (pair (nreverse records))
+        (destructuring-bind (rec . written) pair
+          (let ((seen '()))
+            (dolist (f (ast:fields written))
+              (when (member (ast:ty-field-name f) seen :test #'string=)
+                (error 'diag:type-check-error
+                       :span (ast:ty-field-span f)
+                       :message (format nil "duplicate field `~A`" (ast:ty-field-name f))))
+              (push (ast:ty-field-name f) seen)
+              (setf (ty:fields rec)
+                    (append (ty:fields rec)
+                            (list (cons (ast:ty-field-name f)
+                                        (resolve ck (ast:ty-field-ty f)))))))))))) 
 
-(defgeneric resolve-ty (written ck)
-  (:documentation "A type as it was written, as the type it means."))
+  (val-decl (name ty init mutable span)
+    (let* ((got (exp-type ck init))
+           (want (when ty (resolve ck ty))))
+      (when want
+        (unify want got (ast:span init) "in this binding")
+        (setf got want))
+      (cond
+        ((null name) (unify ty:+unit+ got (ast:span init) "in `val () =`"))
+        ((typep got 'ty:nil-type)
+         (error 'diag:type-check-error
+                :span span
+                :message (format nil "`~A` needs a type annotation to hold `nil`" name)))
+        (t
+         (let ((sym (ty:make-var-sym :name name :ty got
+                                     :mutable mutable :depth (depth ck))))
+           (setf (ast:sym d) sym)
+           (bind-val ck name sym))))))
+
+  ;; Every signature is read before any body, which is what lets a group recurse.
+  (fun-decl (binds)
+    (dolist (bind binds)
+      (let ((params '()) (seen '()))
+        (dolist (p (ast:fun-bind-params bind))
+          (when (member (ast:param-name p) seen :test #'string=)
+            (error 'diag:type-check-error
+                   :span (ast:param-span p)
+                   :message (format nil "duplicate parameter `~A`" (ast:param-name p))))
+          (push (ast:param-name p) seen)
+          (let ((sym (ty:make-var-sym :name (ast:param-name p)
+                                      :ty (resolve ck (ast:param-ty p))
+                                      :depth (1+ (depth ck)))))
+            (setf (ast:param-sym p) sym)
+            (push sym params)))
+        (let* ((result (if (ast:fun-bind-result bind)
+                           (resolve ck (ast:fun-bind-result bind))
+                           ty:+unit+))
+               (fsym (ty:make-fun-sym :name (ast:fun-bind-name bind)
+                                      :label (unique-label ck (ast:fun-bind-name bind))
+                                      :params (nreverse params)
+                                      :result result
+                                      :depth (1+ (depth ck)))))
+          (setf (ast:fun-bind-sym bind) fsym)
+          (bind-val ck (ast:fun-bind-name bind) fsym))))
+    (dolist (bind binds)
+      (let ((signature (ast:fun-bind-sym bind))
+            (outer-loops (loops ck)))
+        (incf (depth ck))
+        (setf (loops ck) 0)
+        (push-scope ck)
+        (dolist (p (ast:fun-bind-params bind))
+          (bind-val ck (ast:param-name p) (ast:param-sym p)))
+        (let ((got (exp-type ck (ast:fun-bind-body bind))))
+          (unify (ty:fun-sym-result signature) got
+                 (ast:span (ast:fun-bind-body bind))
+                 (format nil "in the body of `~A`" (ast:fun-bind-name bind))))
+        (pop-scope ck)
+        (setf (loops ck) outer-loops)
+        (decf (depth ck))))))
+
+;; -- types as they are written ------------------------------------------------
 
 (defun resolve (ck written) (resolve-ty written ck))
 
-(defmethod resolve-ty ((w ast:ty-exp) ck)
-  (declare (ignore ck))
-  (error 'diag:type-check-error :span (ast:span w) :message "unknown type"))
-
-(defmethod resolve-ty ((w ast:ty-name) ck)
-  (lookup-type ck (ast:name w) (ast:span w)))
-
-(defmethod resolve-ty ((w ast:ty-array) ck)
-  (make-instance 'ty:array-type :elem (resolve ck (ast:elem w))))
-
-(defmethod resolve-ty ((w ast:ty-record) ck)
-  (declare (ignore ck))
-  (error 'diag:type-check-error :span (ast:span w)
-                                :message "a record type has to be given a name by `type`"))
-
-(defmethod check-decl ((d ast:val-decl) ck)
-  (let* ((got (exp-type ck (ast:init d)))
-         (want (when (ast:ty d) (resolve ck (ast:ty d)))))
-    (when want
-      (unify want got (ast:span (ast:init d)) "in this binding")
-      (setf got want))
-    (cond
-      ((null (ast:name d))
-       (unify ty:+unit+ got (ast:span (ast:init d)) "in `val () =`"))
-      ((typep got 'ty:nil-type)
-       (error 'diag:type-check-error
-              :span (ast:span d)
-              :message (format nil "`~A` needs a type annotation to hold `nil`"
-                               (ast:name d))))
-      (t
-       (let ((sym (ty:make-var-sym :name (ast:name d) :ty got
-                                   :mutable (ast:mutable d) :depth (depth ck))))
-         (setf (ast:sym d) sym)
-         (bind-val ck (ast:name d) sym))))))
-
-(defmethod check-decl ((d ast:fun-decl) ck)
-  ;; Every signature is read before any body, which is what lets a group recurse.
-  (dolist (bind (ast:binds d))
-    (let ((params '()) (seen '()))
-      (dolist (p (ast:fun-bind-params bind))
-        (when (member (ast:param-name p) seen :test #'string=)
-          (error 'diag:type-check-error
-                 :span (ast:param-span p)
-                 :message (format nil "duplicate parameter `~A`" (ast:param-name p))))
-        (push (ast:param-name p) seen)
-        (let ((sym (ty:make-var-sym :name (ast:param-name p)
-                                    :ty (resolve ck (ast:param-ty p))
-                                    :depth (1+ (depth ck)))))
-          (setf (ast:param-sym p) sym)
-          (push sym params)))
-      (let* ((result (if (ast:fun-bind-result bind)
-                         (resolve ck (ast:fun-bind-result bind))
-                         ty:+unit+))
-             (fsym (ty:make-fun-sym :name (ast:fun-bind-name bind)
-                                    :label (unique-label ck (ast:fun-bind-name bind))
-                                    :params (nreverse params)
-                                    :result result
-                                    :depth (1+ (depth ck)))))
-        (setf (ast:fun-bind-sym bind) fsym)
-        (bind-val ck (ast:fun-bind-name bind) fsym))))
-  (dolist (bind (ast:binds d))
-    (let ((signature (ast:fun-bind-sym bind))
-          (outer-loops (loops ck)))
-      (incf (depth ck))
-      (setf (loops ck) 0)
-      (push-scope ck)
-      (dolist (p (ast:fun-bind-params bind))
-        (bind-val ck (ast:param-name p) (ast:param-sym p)))
-      (let ((got (exp-type ck (ast:fun-bind-body bind))))
-        (unify (ty:fun-sym-result signature) got
-               (ast:span (ast:fun-bind-body bind))
-               (format nil "in the body of `~A`" (ast:fun-bind-name bind))))
-      (pop-scope ck)
-      (setf (loops ck) outer-loops)
-      (decf (depth ck)))))
+(ast:defwalk resolve-ty (w ck)
+  (ty-exp (span)
+    (error 'diag:type-check-error :span span :message "unknown type"))
+  (ty-name (name span) (lookup-type ck name span))
+  (ty-array (elem) (make-instance 'ty:array-type :elem (resolve ck elem)))
+  (ty-record (span)
+    (error 'diag:type-check-error :span span
+                                  :message "a record type has to be given a name by `type`")))
 
 ;; -- expressions --------------------------------------------------------------
 
 (defun exp-type (ck e)
   "Check E, remember its type on the node, and answer with it."
   (setf (ast:ty e) (check-exp e ck)))
-
-(defgeneric check-exp (e ck)
-  (:documentation "The type of E, and the escapes and offsets found on the way."))
-
-(defmethod check-exp ((e ast:expression) ck)
-  (declare (ignore ck))
-  (error 'diag:type-check-error :span (ast:span e) :message "unknown expression"))
-
-(defmethod check-exp ((e ast:int-lit) ck) (declare (ignore ck)) ty:+int+)
-(defmethod check-exp ((e ast:str-lit) ck) (declare (ignore ck)) ty:+string+)
-(defmethod check-exp ((e ast:bool-lit) ck) (declare (ignore ck)) ty:+bool+)
-(defmethod check-exp ((e ast:nil-lit) ck) (declare (ignore ck)) ty:+nil+)
-(defmethod check-exp ((e ast:unit-lit) ck) (declare (ignore ck)) ty:+unit+)
-
-(defmethod check-exp ((e ast:var-ref) ck)
-  (let ((sym (lookup-val ck (ast:name e) (ast:span e))))
-    (when (ty:fun-sym-p sym)
-      (error 'diag:type-check-error
-             :span (ast:span e)
-             :message (format nil "`~A` is a function, and functions are not values"
-                              (ast:name e))))
-    ;; Read from deeper than it was bound: it cannot live in a register.
-    (when (< (ty:var-sym-depth sym) (depth ck))
-      (setf (ty:var-sym-escapes sym) t))
-    (setf (ast:sym e) sym)
-    (ty:var-sym-ty sym)))
 
 (defun arity (e want)
   (let ((given (length (ast:args e))))
@@ -283,30 +246,6 @@
              :span (ast:span e)
              :message (format nil "`~A` takes ~D argument~:[s~;~], given ~D"
                               (ast:name e) want (= want 1) given)))))
-
-(defmethod check-exp ((e ast:call-exp) ck)
-  (let ((sym (lookup-val ck (ast:name e) (ast:span e))))
-    (when (ty:var-sym-p sym)
-      (error 'diag:type-check-error
-             :span (ast:span e)
-             :message (format nil "`~A` is a variable, not a function" (ast:name e))))
-    (setf (ast:sym e) sym)
-    (let ((builtin (ty:fun-sym-builtin sym)))
-      (cond
-        ((equal builtin "array") (check-array-call e ck))
-        ((equal builtin "length") (check-length-call e ck))
-        ((equal builtin "not")
-         (arity e 1)
-         (unify ty:+bool+ (exp-type ck (first (ast:args e))) (ast:span e)
-                "in a call to `not`")
-         ty:+bool+)
-        (t
-         (arity e (length (ty:fun-sym-params sym)))
-         (loop for arg in (ast:args e)
-               for param in (ty:fun-sym-params sym)
-               do (unify (ty:var-sym-ty param) (exp-type ck arg) (ast:span arg)
-                         (format nil "in a call to `~A`" (ast:name e))))
-         (ty:fun-sym-result sym))))))
 
 (defun check-array-call (e ck)
   (arity e 2)
@@ -329,178 +268,216 @@
                               (ty:type-text arg))))
     ty:+int+))
 
-(defmethod check-exp ((e ast:record-lit) ck)
-  (let ((rec (lookup-type ck (ast:tyname e) (ast:span e))))
-    (unless (typep rec 'ty:record-type)
-      (error 'diag:type-check-error
-             :span (ast:span e)
-             :message (format nil "`~A` is not a record type" (ast:tyname e))))
-    (let ((given (make-hash-table :test #'equal)))
-      (dolist (f (ast:fields e))
-        (when (gethash (ast:field-init-name f) given)
-          (error 'diag:type-check-error
-                 :span (ast:field-init-span f)
-                 :message (format nil "field `~A` is given twice" (ast:field-init-name f))))
-        (when (minusp (ty:field-index rec (ast:field-init-name f)))
-          (error 'diag:type-check-error
-                 :span (ast:field-init-span f)
-                 :message (format nil "`~A` has no field `~A`"
-                                  (ty:type-name rec) (ast:field-init-name f))))
-        (setf (gethash (ast:field-init-name f) given) f))
-      ;; The fields are put into declaration order, which is the order the
-      ;; lowering stores them in.
-      (setf (ast:fields e)
-            (loop for (name . field-ty) in (ty:fields rec)
-                  for init = (gethash name given)
-                  do (unless init
-                       (error 'diag:type-check-error
-                              :span (ast:span e)
-                              :message (format nil "field `~A` is missing" name)))
-                     (unify field-ty (exp-type ck (ast:field-init-value init))
-                            (ast:field-init-span init)
-                            (format nil "in field `~A`" name))
-                  collect init))
-      rec)))
+(ast:defwalk check-exp (e ck)
+  (expression (span)
+    (error 'diag:type-check-error :span span :message "unknown expression"))
 
-(defmethod check-exp ((e ast:index-exp) ck)
-  (let ((arr (exp-type ck (ast:arr e))))
-    (unless (typep arr 'ty:array-type)
-      (error 'diag:type-check-error
-             :span (ast:span e)
-             :message (format nil "`~A` is not an array" (ty:type-text arr))))
-    (unify ty:+int+ (exp-type ck (ast:index e)) (ast:span (ast:index e))
-           "as an array index")
-    (ty:elem arr)))
+  (int-lit () ty:+int+)
+  (str-lit () ty:+string+)
+  (bool-lit () ty:+bool+)
+  (nil-lit () ty:+nil+)
+  (unit-lit () ty:+unit+)
 
-(defmethod check-exp ((e ast:field-exp) ck)
-  (let ((rec (exp-type ck (ast:record e))))
-    (unless (typep rec 'ty:record-type)
-      (error 'diag:type-check-error
-             :span (ast:span e)
-             :message (format nil "`~A` is not a record" (ty:type-text rec))))
-    (let ((field-ty (ty:field-type rec (ast:name e))))
-      (unless field-ty
+  (var-ref (name span)
+    (let ((sym (lookup-val ck name span)))
+      (when (ty:fun-sym-p sym)
         (error 'diag:type-check-error
-               :span (ast:span e)
-               :message (format nil "`~A` has no field `~A`"
-                                (ty:type-name rec) (ast:name e))))
-      (setf (ast:offset e) (ty:field-index rec (ast:name e)))
-      field-ty)))
+               :span span
+               :message (format nil "`~A` is a function, and functions are not values"
+                                name)))
+      ;; Read from deeper than it was bound: it cannot live in a register.
+      (when (< (ty:var-sym-depth sym) (depth ck))
+        (setf (ty:var-sym-escapes sym) t))
+      (setf (ast:sym e) sym)
+      (ty:var-sym-ty sym)))
 
-(defmethod check-exp ((e ast:neg-exp) ck)
-  (unify ty:+int+ (exp-type ck (ast:operand e)) (ast:span e) "in a negation")
-  ty:+int+)
-
-(defmethod check-exp ((e ast:bin-exp) ck)
-  (let ((lhs (exp-type ck (ast:lhs e)))
-        (rhs (exp-type ck (ast:rhs e)))
-        (op (ast:op e)))
-    (cond
-      ((member op *arithmetic* :test #'string=)
-       (unify ty:+int+ lhs (ast:span (ast:lhs e)) (format nil "on the left of `~A`" op))
-       (unify ty:+int+ rhs (ast:span (ast:rhs e)) (format nil "on the right of `~A`" op))
-       ty:+int+)
-      ((string= op "^")
-       (unify ty:+string+ lhs (ast:span (ast:lhs e)) "on the left of `^`")
-       (unify ty:+string+ rhs (ast:span (ast:rhs e)) "on the right of `^`")
-       ty:+string+)
-      ((member op *orderings* :test #'string=)
-       (unless (typep lhs '(or ty:int-type ty:string-type))
-         (error 'diag:type-check-error
-                :span (ast:span e)
-                :message (format nil "`~A` compares int or string, not `~A`"
-                                 op (ty:type-text lhs))))
-       (unify lhs rhs (ast:span (ast:rhs e)) (format nil "on the right of `~A`" op))
-       ty:+bool+)
-      ((member op *equalities* :test #'string=)
-       (when (or (typep lhs 'ty:unit-type) (typep rhs 'ty:unit-type))
-         (error 'diag:type-check-error
-                :span (ast:span e)
-                :message (format nil "`~A` cannot compare `unit`" op)))
-       (unless (ty:compatible-p lhs rhs)
-         (error 'diag:type-check-error
-                :span (ast:span e)
-                :message (format nil "`~A` compares `~A` with `~A`"
-                                 op (ty:type-text lhs) (ty:type-text rhs))))
-       ty:+bool+)
-      (t (error 'diag:type-check-error
-                :span (ast:span e)
-                :message (format nil "unknown operator `~A`" op))))))
-
-(defmethod check-exp ((e ast:logic-exp) ck)
-  (unify ty:+bool+ (exp-type ck (ast:lhs e)) (ast:span (ast:lhs e))
-         (format nil "on the left of `~A`" (ast:op e)))
-  (unify ty:+bool+ (exp-type ck (ast:rhs e)) (ast:span (ast:rhs e))
-         (format nil "on the right of `~A`" (ast:op e)))
-  ty:+bool+)
-
-(defmethod check-exp ((e ast:assign-exp) ck)
-  (let ((target (exp-type ck (ast:target e))))
-    (let ((place (ast:target e)))
-      (when (and (typep place 'ast:var-ref)
-                 (ast:sym place)
-                 (not (ty:var-sym-mutable (ast:sym place))))
+  (call-exp (name args span)
+    (let ((sym (lookup-val ck name span)))
+      (when (ty:var-sym-p sym)
         (error 'diag:type-check-error
-               :span (ast:span e)
-               :message (format nil "`~A` is a `val`, so it cannot be assigned"
-                                (ty:var-sym-name (ast:sym place))))))
-    (unify target (exp-type ck (ast:value e)) (ast:span (ast:value e))
-           "in an assignment")
-    ty:+unit+))
+               :span span
+               :message (format nil "`~A` is a variable, not a function" name)))
+      (setf (ast:sym e) sym)
+      (let ((builtin (ty:fun-sym-builtin sym)))
+        (cond
+          ((equal builtin "array") (check-array-call e ck))
+          ((equal builtin "length") (check-length-call e ck))
+          ((equal builtin "not")
+           (arity e 1)
+           (unify ty:+bool+ (exp-type ck (first args)) span "in a call to `not`")
+           ty:+bool+)
+          (t
+           (arity e (length (ty:fun-sym-params sym)))
+           (loop for arg in args
+                 for param in (ty:fun-sym-params sym)
+                 do (unify (ty:var-sym-ty param) (exp-type ck arg) (ast:span arg)
+                           (format nil "in a call to `~A`" name)))
+           (ty:fun-sym-result sym))))))
 
-(defmethod check-exp ((e ast:if-exp) ck)
-  (unify ty:+bool+ (exp-type ck (ast:test e)) (ast:span (ast:test e))
-         "as an `if` condition")
-  (let ((then (exp-type ck (ast:then e))))
-    (if (null (ast:els e))
-        (progn
-          (unify ty:+unit+ then (ast:span (ast:then e)) "in an `if` with no `else`")
-          ty:+unit+)
-        (let ((els (exp-type ck (ast:els e))))
-          (unless (ty:compatible-p then els)
+  (record-lit (tyname fields span)
+    (let ((rec (lookup-type ck tyname span)))
+      (unless (typep rec 'ty:record-type)
+        (error 'diag:type-check-error
+               :span span
+               :message (format nil "`~A` is not a record type" tyname)))
+      (let ((given (make-hash-table :test #'equal)))
+        (dolist (f fields)
+          (when (gethash (ast:field-init-name f) given)
             (error 'diag:type-check-error
-                   :span (ast:span e)
-                   :message (format nil "the branches differ: `~A` and `~A`"
-                                    (ty:type-text then) (ty:type-text els))))
-          (if (typep then 'ty:nil-type) els then)))))
+                   :span (ast:field-init-span f)
+                   :message (format nil "field `~A` is given twice"
+                                    (ast:field-init-name f))))
+          (when (minusp (ty:field-index rec (ast:field-init-name f)))
+            (error 'diag:type-check-error
+                   :span (ast:field-init-span f)
+                   :message (format nil "`~A` has no field `~A`"
+                                    (ty:type-name rec) (ast:field-init-name f))))
+          (setf (gethash (ast:field-init-name f) given) f))
+        ;; The fields are put into declaration order, which is the order the
+        ;; lowering stores them in.
+        (setf (ast:fields e)
+              (loop for (name . field-ty) in (ty:fields rec)
+                    for init = (gethash name given)
+                    do (unless init
+                         (error 'diag:type-check-error
+                                :span span
+                                :message (format nil "field `~A` is missing" name)))
+                       (unify field-ty (exp-type ck (ast:field-init-value init))
+                              (ast:field-init-span init)
+                              (format nil "in field `~A`" name))
+                    collect init))
+        rec)))
 
-(defmethod check-exp ((e ast:while-exp) ck)
-  (unify ty:+bool+ (exp-type ck (ast:test e)) (ast:span (ast:test e))
-         "as a `while` condition")
-  (incf (loops ck))
-  (unify ty:+unit+ (exp-type ck (ast:body e)) (ast:span (ast:body e))
-         "in a `while` body")
-  (decf (loops ck))
-  ty:+unit+)
+  (index-exp (arr index span)
+    (let ((array-type (exp-type ck arr)))
+      (unless (typep array-type 'ty:array-type)
+        (error 'diag:type-check-error
+               :span span
+               :message (format nil "`~A` is not an array" (ty:type-text array-type))))
+      (unify ty:+int+ (exp-type ck index) (ast:span index) "as an array index")
+      (ty:elem array-type)))
 
-(defmethod check-exp ((e ast:for-exp) ck)
-  (unify ty:+int+ (exp-type ck (ast:lo e)) (ast:span (ast:lo e)) "as a `for` bound")
-  (unify ty:+int+ (exp-type ck (ast:hi e)) (ast:span (ast:hi e)) "as a `for` bound")
-  (let ((sym (ty:make-var-sym :name (ast:name e) :ty ty:+int+ :depth (depth ck))))
-    (setf (ast:sym e) sym)
-    (push-scope ck)
-    (bind-val ck (ast:name e) sym)
+  (field-exp (record name span)
+    (let ((rec (exp-type ck record)))
+      (unless (typep rec 'ty:record-type)
+        (error 'diag:type-check-error
+               :span span
+               :message (format nil "`~A` is not a record" (ty:type-text rec))))
+      (let ((field-ty (ty:field-type rec name)))
+        (unless field-ty
+          (error 'diag:type-check-error
+                 :span span
+                 :message (format nil "`~A` has no field `~A`"
+                                  (ty:type-name rec) name)))
+        (setf (ast:offset e) (ty:field-index rec name))
+        field-ty)))
+
+  (neg-exp (operand span)
+    (unify ty:+int+ (exp-type ck operand) span "in a negation")
+    ty:+int+)
+
+  (bin-exp (op lhs rhs span)
+    (let ((left (exp-type ck lhs))
+          (right (exp-type ck rhs)))
+      (cond
+        ((member op *arithmetic* :test #'string=)
+         (unify ty:+int+ left (ast:span lhs) (format nil "on the left of `~A`" op))
+         (unify ty:+int+ right (ast:span rhs) (format nil "on the right of `~A`" op))
+         ty:+int+)
+        ((string= op "^")
+         (unify ty:+string+ left (ast:span lhs) "on the left of `^`")
+         (unify ty:+string+ right (ast:span rhs) "on the right of `^`")
+         ty:+string+)
+        ((member op *orderings* :test #'string=)
+         (unless (typep left '(or ty:int-type ty:string-type))
+           (error 'diag:type-check-error
+                  :span span
+                  :message (format nil "`~A` compares int or string, not `~A`"
+                                   op (ty:type-text left))))
+         (unify left right (ast:span rhs) (format nil "on the right of `~A`" op))
+         ty:+bool+)
+        ((member op *equalities* :test #'string=)
+         (when (or (typep left 'ty:unit-type) (typep right 'ty:unit-type))
+           (error 'diag:type-check-error
+                  :span span
+                  :message (format nil "`~A` cannot compare `unit`" op)))
+         (unless (ty:compatible-p left right)
+           (error 'diag:type-check-error
+                  :span span
+                  :message (format nil "`~A` compares `~A` with `~A`"
+                                   op (ty:type-text left) (ty:type-text right))))
+         ty:+bool+)
+        (t (error 'diag:type-check-error
+                  :span span
+                  :message (format nil "unknown operator `~A`" op))))))
+
+  (logic-exp (op lhs rhs)
+    (unify ty:+bool+ (exp-type ck lhs) (ast:span lhs)
+           (format nil "on the left of `~A`" op))
+    (unify ty:+bool+ (exp-type ck rhs) (ast:span rhs)
+           (format nil "on the right of `~A`" op))
+    ty:+bool+)
+
+  (assign-exp (target value span)
+    (let ((want (exp-type ck target)))
+      (when (and (typep target 'ast:var-ref)
+                 (ast:sym target)
+                 (not (ty:var-sym-mutable (ast:sym target))))
+        (error 'diag:type-check-error
+               :span span
+               :message (format nil "`~A` is a `val`, so it cannot be assigned"
+                                (ty:var-sym-name (ast:sym target)))))
+      (unify want (exp-type ck value) (ast:span value) "in an assignment")
+      ty:+unit+))
+
+  (if-exp (test then els span)
+    (unify ty:+bool+ (exp-type ck test) (ast:span test) "as an `if` condition")
+    (let ((then-type (exp-type ck then)))
+      (if (null els)
+          (progn
+            (unify ty:+unit+ then-type (ast:span then) "in an `if` with no `else`")
+            ty:+unit+)
+          (let ((else-type (exp-type ck els)))
+            (unless (ty:compatible-p then-type else-type)
+              (error 'diag:type-check-error
+                     :span span
+                     :message (format nil "the branches differ: `~A` and `~A`"
+                                      (ty:type-text then-type) (ty:type-text else-type))))
+            (if (typep then-type 'ty:nil-type) else-type then-type)))))
+
+  (while-exp (test body)
+    (unify ty:+bool+ (exp-type ck test) (ast:span test) "as a `while` condition")
     (incf (loops ck))
-    (unify ty:+unit+ (exp-type ck (ast:body e)) (ast:span (ast:body e))
-           "in a `for` body")
+    (unify ty:+unit+ (exp-type ck body) (ast:span body) "in a `while` body")
     (decf (loops ck))
-    (pop-scope ck)
-    ty:+unit+))
+    ty:+unit+)
 
-(defmethod check-exp ((e ast:break-exp) ck)
-  (when (zerop (loops ck))
-    (error 'diag:type-check-error :span (ast:span e)
-                                  :message "`break` is outside any loop"))
-  ty:+unit+)
+  (for-exp (name lo hi body)
+    (unify ty:+int+ (exp-type ck lo) (ast:span lo) "as a `for` bound")
+    (unify ty:+int+ (exp-type ck hi) (ast:span hi) "as a `for` bound")
+    (let ((sym (ty:make-var-sym :name name :ty ty:+int+ :depth (depth ck))))
+      (setf (ast:sym e) sym)
+      (push-scope ck)
+      (bind-val ck name sym)
+      (incf (loops ck))
+      (unify ty:+unit+ (exp-type ck body) (ast:span body) "in a `for` body")
+      (decf (loops ck))
+      (pop-scope ck)
+      ty:+unit+))
 
-(defmethod check-exp ((e ast:seq-exp) ck)
-  (let ((result ty:+unit+))
-    (dolist (item (ast:items e) result)
-      (setf result (exp-type ck item)))))
+  (break-exp (span)
+    (when (zerop (loops ck))
+      (error 'diag:type-check-error :span span :message "`break` is outside any loop"))
+    ty:+unit+)
 
-(defmethod check-exp ((e ast:let-exp) ck)
-  (push-scope ck)
-  (check-decls ck (ast:decls e))
-  (let ((result (exp-type ck (ast:body e))))
-    (pop-scope ck)
-    result))
+  (seq-exp (items)
+    (let ((result ty:+unit+))
+      (dolist (item items result)
+        (setf result (exp-type ck item)))))
+
+  (let-exp (decls body)
+    (push-scope ck)
+    (check-decls ck decls)
+    (let ((result (exp-type ck body)))
+      (pop-scope ck)
+      result)))

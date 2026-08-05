@@ -60,8 +60,8 @@ type switch in Go, a discriminated union in TypeScript, an immutable `enum` and
 pure rewriting in Haxe, immutable structs and prefixed modules in Racket, `Data`
 for an instruction and `Struct` for the tree in Ruby, in Haskell a checker that
 answers with a second tree because it cannot write on the first, in Common Lisp
-one macro that writes the instruction protocol and a generic function for every
-question the compiler asks, and in Prolog three grammars, a syntax tree whose
+two macros, one that writes the instruction protocol and one that writes a pass
+over the tree from a table of clauses, and in Prolog three grammars, a syntax tree whose
 type fields are logic variables the checker binds, and case analysis that lives
 in the clause heads — and the READMEs are largely about where those choices led.
 
