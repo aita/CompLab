@@ -32,7 +32,7 @@
                     (#:sel #:wolv.select)
                     (#:ssa #:wolv.ssa)
                     (#:types #:wolv.typecheck))
-  (:export #:+stages+ #:options #:make-options #:default-options
+  (:export #:*stages* #:options #:make-options #:default-options
            #:options-checks #:options-optimise #:options-max-regs
            #:to-ir #:compile-module #:compile-to-asm #:stage
            #:toolchain-error #:toolchain-error-message
@@ -41,7 +41,7 @@
 
 (in-package #:wolv.driver)
 
-(defparameter +stages+
+(defparameter *stages*
   '("tokens" "ast" "ir" "ssa" "opt" "dag" "mach" "flat" "ra" "asm"))
 
 (defstruct (options (:constructor make-options (&optional (checks t) (optimise t) (max-regs nil)))
@@ -155,12 +155,10 @@
 (defun toolchain-ready-p ()
   (and (ignore-errors (cross-cc)) (ignore-errors (progn (emulator) t)) t))
 
-(defparameter *source-dir*
-  (make-pathname :name nil :type nil :version nil
-                 :defaults (or *load-truename* *default-pathname-defaults*))
-  "Where this file was loaded from, which is `src/`.")
-
-(defun runtime-path () (merge-pathnames "../runtime/runtime.c" *source-dir*))
+(defun runtime-path ()
+  "The runtime is a file of this system, so the system is what is asked for it:
+`*load-truename*` is inside ASDF's cache once it is compiling there."
+  (asdf:system-relative-pathname "wolv" "runtime/runtime.c"))
 
 (defun build (source out opts)
   (let ((asm (compile-to-asm source opts)))

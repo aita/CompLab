@@ -4,8 +4,7 @@
 
 (in-package #:wolv.test.parser)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (setf *suite* "parser"))
+(in-suite "parser")
 
 ;; A parenthesised sketch of the tree, so precedence is easy to assert.  It is
 ;; a generic function like every other walk over this tree.

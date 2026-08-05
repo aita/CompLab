@@ -27,10 +27,11 @@ bin/wolv check   prog.wol        # types only
 bin/wolv emit -s ssa prog.wol    # dump a stage
 ```
 
-SBCL, and nothing else: the only dependency is `uiop`, which comes with ASDF,
-and it is used for two things — running `gcc` and finding a temporary file.
-`wolv.asd` is there for anyone who would rather load the system than build an
-image; `build.lisp` compiles the files in order and is what both scripts use.
+SBCL, and nothing else: the only dependency is `uiop`, which comes with ASDF.
+The system is described once, in `wolv.asd`, and both scripts go through ASDF —
+`asdf:load-system` and then `uiop:dump-image` to make the command,
+`asdf:test-system` to run the tests. `(asdf:load-system "wolv")` at a REPL is
+the same build.
 
 Assembling and linking is a cross `gcc` (`aarch64-linux-gnu-gcc`, or
 `$WOLV_CC`), and running is `qemu-aarch64` unless the machine is already an ARM.
@@ -156,11 +157,17 @@ lists — is what liveness uses, where `equal` is set equality for free. Racket,
 Go and Ruby all had to do the same; Python got it from `sorted()` being the
 obvious thing to write.
 
-**A saved image is how it becomes a command.** `make.sh` compiles the tree and
-calls `save-lisp-and-die`, so `bin/wolv` is a 40 MB executable that starts in a
+**A saved image is how it becomes a command.** `make.sh` loads the system and
+calls `uiop:dump-image`, so `bin/wolv` is a 40 MB executable that starts in a
 few milliseconds instead of compiling itself first. There is no other way to
 make a Lisp program start quickly, and it is a good deal better than the
 alternatives in this tree that shell out to a runtime.
+
+Going through ASDF is also what makes a file of the tree findable:
+`asdf:system-relative-pathname` answers where `runtime/runtime.c` is, where
+`*load-truename*` would answer with somewhere inside ASDF's fasl cache. That
+one is worth knowing — the tests went on passing while two of them quietly
+found no programs to run.
 
 **The test harness is eighty lines of macro.** There is no dependency to add, so
 `deftest` registers a closure and `is` keeps the form it was given, which is

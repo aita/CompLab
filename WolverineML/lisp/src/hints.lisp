@@ -18,17 +18,17 @@
   "The register each value is about to be wanted in, where there is one."
   (let ((wanted (make-hash-table :test #'eql)))
     (loop for param in (ir:func-params f)
-          for colour in reg:+argument-regs+
+          for colour in reg:*argument-regs*
           do (setf (gethash param wanted) colour))
     (dolist (b (ir:walk f) wanted)
       (dolist (i (ir:block-instrs b))
         (typecase i
           (ir:i-call
            (loop for arg in (ir:args i)
-                 for colour in reg:+argument-regs+
+                 for colour in reg:*argument-regs*
                  do (setf (gethash arg wanted) colour))
            (when (ir:dst i)
-             (setf (gethash (ir:dst i) wanted) (first reg:+argument-regs+))))
+             (setf (gethash (ir:dst i) wanted) (first reg:*argument-regs*))))
           (ir:i-ret
            (when (ir:value i)
-             (setf (gethash (ir:value i) wanted) (first reg:+argument-regs+)))))))))
+             (setf (gethash (ir:value i) wanted) (first reg:*argument-regs*)))))))))

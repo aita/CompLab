@@ -9,8 +9,7 @@
 
 (in-package #:wolv.test.middle)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (setf *suite* "middle"))
+(in-suite "middle")
 
 (defun lines (&rest parts) (format nil "~{~A~^~%~}~%" parts))
 

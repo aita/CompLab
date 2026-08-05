@@ -11,8 +11,7 @@
 
 (in-package #:wolv.test.allocator)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (setf *suite* "allocator"))
+(in-suite "allocator")
 
 (defun lines (&rest parts) (format nil "~{~A~^~%~}~%" parts))
 
@@ -117,13 +116,13 @@
   (let ((m (allocated)))
     (dolist (f (ir:module-funcs m))
       (dolist (r (live:across-calls f (live:analyse f)))
-        (is (member (gethash r (ir:func-colours f)) reg:+callee-saved+))))))
+        (is (member (gethash r (ir:func-colours f)) reg:*callee-saved*))))))
 
 (deftest "only the callee-saved it used are saved"
   (let ((m (allocated)))
     (dolist (f (ir:module-funcs m))
       (is= (sort (remove-duplicates
-                  (remove-if-not (lambda (c) (member c reg:+callee-saved+))
+                  (remove-if-not (lambda (c) (member c reg:*callee-saved*))
                                  (colour-values f)))
                  #'<)
            (ir:func-saved f)))))

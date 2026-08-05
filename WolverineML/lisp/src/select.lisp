@@ -217,25 +217,35 @@ it left its value in."))
         (at sel (second (dag:node-operands n)) rhs)))
 
 (defun additive (sel n dst op lhs rhs)
-  "`add` and `sub`, in whichever of their four forms fits."
-  ;; A shifted operand comes first: `a + b * 8` is one instruction that way and
-  ;; two as a multiply-add, because the 8 would need a register.
-  (when (shift-into sel n dst op lhs rhs) (return-from additive))
-  (when (multiply-into sel n dst op lhs rhs) (return-from additive))
-  (let* ((left (first (dag:node-operands n)))
-         (right (second (dag:node-operands n)))
-         (value (constant-at sel right)))
+  "`add` and `sub`, in whichever of their four forms fits.
+
+Each of these answers with what it emitted, or `nil` when it does not fit, so
+the order they are preferred in is the order they are written in.  A shifted
+operand comes first: `a + b * 8` is one instruction that way and two as a
+multiply-add, because the 8 would need a register."
+  (or (shift-into sel n dst op lhs rhs)
+      (multiply-into sel n dst op lhs rhs)
+      (immediate-right sel n dst op lhs)
+      (immediate-left sel n dst op rhs)
+      (plain-additive sel n dst op lhs rhs)))
+
+(defun immediate-right (sel n dst op lhs)
+  (let ((value (constant-at sel (second (dag:node-operands n)))))
     (when (and value (<= 0 value +immediate+))
-      (emit-mach sel (if (string= op "+") "addi" "subi") dst (list (at sel left lhs))
-                 :imm value)
-      (return-from additive))
-    (when (string= op "+")
-      ;; Only addition may take its constant from the other side.
-      (let ((other (constant-at sel left)))
-        (when (and other (<= 0 other +immediate+))
-          (emit-mach sel "addi" dst (list (at sel right rhs)) :imm other)
-          (return-from additive))))
-    (emit-mach sel (if (string= op "+") "add" "sub") dst (both sel n lhs rhs))))
+      (emit-mach sel (if (string= op "+") "addi" "subi") dst
+                 (list (at sel (first (dag:node-operands n)) lhs))
+                 :imm value))))
+
+(defun immediate-left (sel n dst op rhs)
+  "Only addition may take its constant from the other side."
+  (let ((value (and (string= op "+")
+                    (constant-at sel (first (dag:node-operands n))))))
+    (when (and value (<= 0 value +immediate+))
+      (emit-mach sel "addi" dst (list (at sel (second (dag:node-operands n)) rhs))
+                 :imm value))))
+
+(defun plain-additive (sel n dst op lhs rhs)
+  (emit-mach sel (if (string= op "+") "add" "sub") dst (both sel n lhs rhs)))
 
 (defun multiply (sel n dst lhs rhs)
   (let ((value (constant-at sel (second (dag:node-operands n)))))

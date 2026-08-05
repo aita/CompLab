@@ -1,10 +1,9 @@
 #!/bin/sh
-# Compile the tree and the tests, then run them.
+# Run the tests, through ASDF, which is where the test system is described.
 set -e
 cd "$(dirname "$0")"
-exec sbcl --noinform --disable-debugger --load build.lisp --eval '
-  (progn (build)
-         (build :files (list "harness" "lexer" "parser" "typecheck" "middle"
-                             "allocator" "oracle" "random" "programs")
-                :root "test/")
-         (sb-ext:exit :code (if (funcall (find-symbol "RUN-SUITE" "WOLV.TEST")) 0 1)))'
+exec sbcl --noinform --disable-debugger \
+     --eval '(require :asdf)' \
+     --eval '(asdf:load-asd (merge-pathnames "wolv.asd" (uiop:getcwd)))' \
+     --eval '(handler-bind ((warning (function muffle-warning))) (asdf:test-system "wolv"))' \
+     --eval '(uiop:quit 0)'

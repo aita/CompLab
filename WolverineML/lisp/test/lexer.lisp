@@ -4,8 +4,7 @@
 
 (in-package #:wolv.test.lexer)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (setf *suite* "lexer"))
+(in-suite "lexer")
 
 (defun kinds (source) (mapcar #'lex:token-kind (lex:lex source)))
 (defun texts (source) (mapcar #'lex:token-text (lex:lex source)))

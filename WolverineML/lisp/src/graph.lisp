@@ -107,7 +107,7 @@
           (setf (ir:func-saved f)
                 (sort (remove-duplicates
                        (loop for colour being the hash-values of (colour c)
-                             when (member colour reg:+callee-saved+) collect colour))
+                             when (member colour reg:*callee-saved*) collect colour))
                       #'<))
           (return))
         (dolist (victim (sorted spilled))

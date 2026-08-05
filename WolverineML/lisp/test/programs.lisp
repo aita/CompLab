@@ -10,8 +10,7 @@
 
 (in-package #:wolv.test.programs)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (setf *suite* "programs"))
+(in-suite "programs")
 
 (defun lines (&rest parts) (format nil "~{~A~^~%~}~%" parts))
 
@@ -23,7 +22,12 @@
         (cons "spilling-no-opt" (driver:make-options t nil 12))))
 
 (defun wol-files (directory)
-  (sort (mapcar #'namestring (directory (tree-file (concatenate 'string directory "*.wol"))))
+  "Every `.wol` in one directory of the tree.  The wildcard is made with
+`make-pathname`, because a `*` written into the string would be a name and not
+a pattern by the time `system-relative-pathname` had parsed it."
+  (sort (mapcar #'namestring
+                (directory (merge-pathnames (make-pathname :name :wild :type "wol")
+                                            (tree-file directory))))
         #'string<))
 
 (defun ran (source opts &optional (stdin ""))

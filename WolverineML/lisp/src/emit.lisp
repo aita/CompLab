@@ -35,7 +35,7 @@
 ;; The one register kept back.  A frame big enough to put a slot out of reach
 ;; of `ldur` is only discovered after allocation has added its spill slots, so
 ;; the address has to be computed somewhere the allocator does not know about.
-(defparameter *spare* (first reg:+scratch+))
+(defparameter *spare* (first reg:*scratch*))
 
 ;; Nothing of ours is live at the top of the prologue except the incoming
 ;; arguments, so a caller-saved register that is not one of them is free there.
@@ -53,12 +53,14 @@
   (- (* ir:+word+ (+ (frame-slots fr) index 1))))
 
 (defun frame-of (f)
-  (let ((stack-args 0))
-    (dolist (b (ir:walk f))
-      (dolist (i (ir:block-instrs b))
-        (when (typep i 'ir:i-call)
-          (setf stack-args
-                (max stack-args (- (length (ir:args i)) (length reg:+argument-regs+)))))))
+  (let ((stack-args
+          (loop for b in (ir:walk f)
+                maximize (loop for i in (ir:block-instrs b)
+                               when (typep i 'ir:i-call)
+                                 maximize (- (length (ir:args i))
+                                             (length reg:*argument-regs*))
+                                 into widest
+                               finally (return (or widest 0))))))
     (make-frame (ir:func-nslots f) (ir:func-saved f) (max stack-args 0))))
 
 (defclass emitter ()
@@ -154,7 +156,7 @@
           for i from 0
           do (access e "str" r 29 (saved-offset fr i)))
     (emit-copies e (loop for p in (ir:func-params (func e))
-                         for colour in reg:+argument-regs+
+                         for colour in reg:*argument-regs*
                          when (gethash p (read-somewhere e))
                            collect (cons (colour-of e p) colour)))))
 
@@ -202,7 +204,7 @@
 (defmethod emit-terminator-instr ((term ir:i-ret) e b next)
   (declare (ignore b))
   (when (ir:value term)
-    (mov e (first reg:+argument-regs+) (colour-of e (ir:value term))))
+    (mov e (first reg:*argument-regs*) (colour-of e (ir:value term))))
   (when next   ; the epilogue follows the last block
     (line e (format nil "b ~A" (epilogue e)))))
 
@@ -236,7 +238,7 @@ the copy's either.  With no such register the copies swap instead, which needs
 no scratch at all."
   (when *borrow-nothing* (return-from borrowed nil))
   (let ((touched (loop for (dst . src) in moves append (list dst src))))
-    (loop for r in reg:+caller-saved+
+    (loop for r in reg:*caller-saved*
           unless (or (gethash r (taken e)) (member r touched))
             return r)))
 
@@ -261,9 +263,9 @@ no scratch at all."
 
 (defmethod instruction (e (i ir:i-call))
   (let ((args (ir:args i))
-        (n (length reg:+argument-regs+)))
+        (n (length reg:*argument-regs*)))
     (let ((in-registers (loop for a in args
-                              for colour in reg:+argument-regs+
+                              for colour in reg:*argument-regs*
                               collect (cons colour (colour-of e a)))))
       (loop for a in (nthcdr n args)
             for index from 0
@@ -271,7 +273,7 @@ no scratch at all."
       (emit-copies e in-registers)
       (line e (format nil "bl ~A" (ir:callee i)))
       (when (ir:dst i)
-        (mov e (colour-of e (ir:dst i)) (first reg:+argument-regs+))))))
+        (mov e (colour-of e (ir:dst i)) (first reg:*argument-regs*))))))
 
 (defmethod instruction (e (i mach:i-mach))
   "Write down one selected instruction, or the sequence it stands for."

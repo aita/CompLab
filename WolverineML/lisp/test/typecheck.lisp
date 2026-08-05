@@ -6,8 +6,7 @@
 
 (in-package #:wolv.test.typecheck)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (setf *suite* "typecheck"))
+(in-suite "typecheck")
 
 (defun accepts (source) (types:check (parser:parse source)))
 

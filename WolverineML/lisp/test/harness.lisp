@@ -8,24 +8,19 @@
 
 (defpackage #:wolv.test
   (:use #:cl)
-  (:export #:deftest #:is #:is= #:signals #:skip
+  (:export #:in-suite #:deftest #:is #:is= #:signals #:skip
            #:run-all #:run-suite #:*suite*
            #:tree-file #:read-file #:split-lines))
 
 (in-package #:wolv.test)
 
-(defparameter *root*
-  (merge-pathnames "../" (make-pathname :name nil :type nil :version nil
-                                        :defaults (or *load-truename*
-                                                      *default-pathname-defaults*)))
-  "The top of this tree, so a test can find the examples.")
+(defun tree-file (relative)
+  "A file of this tree, found through the system rather than through
+`*load-truename*` -- which, once ASDF is compiling into its cache, is not where
+the sources are."
+  (asdf:system-relative-pathname "wolv" relative))
 
-(defun tree-file (relative) (merge-pathnames relative *root*))
-
-(defun read-file (path)
-  (with-open-file (stream path :direction :input :external-format :utf-8)
-    (let ((text (make-string (file-length stream))))
-      (subseq text 0 (read-sequence text stream)))))
+(defun read-file (path) (uiop:read-file-string path))
 
 (defun split-lines (text)
   (loop with start = 0
@@ -43,6 +38,11 @@
 (defun register (suite name thunk)
   (setf *tests* (remove (cons suite name) *tests* :key #'first :test #'equal))
   (setf *tests* (nconc *tests* (list (list (cons suite name) thunk)))))
+
+(defmacro in-suite (name)
+  "The suite the tests below belong to, until the next `in-suite`."
+  `(eval-when (:compile-toplevel :load-toplevel :execute)
+     (setf *suite* ,name)))
 
 (defmacro deftest (name &body body)
   "One test.  NAME is a string; the body is checks."

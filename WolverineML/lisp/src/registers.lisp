@@ -9,22 +9,22 @@
 
 (defpackage #:wolv.registers
   (:use #:cl)
-  (:export #:+caller-saved+ #:+callee-saved+ #:+argument-regs+ #:+scratch+
+  (:export #:*caller-saved* #:*callee-saved* #:*argument-regs* #:*scratch*
            #:machine #:make-machine #:machine-caller #:machine-callee
            #:whole-machine #:limited #:anywhere #:register-count))
 
 (in-package #:wolv.registers)
 
-(defparameter +caller-saved+ '(9 10 11 12 13 14 15 16 0 1 2 3 4 5 6 7 8))
-(defparameter +callee-saved+ '(19 20 21 22 23 24 25 26 27 28))
-(defparameter +argument-regs+ '(0 1 2 3 4 5 6 7))
-(defparameter +scratch+ '(17))
+(defparameter *caller-saved* '(9 10 11 12 13 14 15 16 0 1 2 3 4 5 6 7 8))
+(defparameter *callee-saved* '(19 20 21 22 23 24 25 26 27 28))
+(defparameter *argument-regs* '(0 1 2 3 4 5 6 7))
+(defparameter *scratch* '(17))
 
 (defstruct (machine (:constructor make-machine (caller callee)) (:copier nil))
   "The machine the allocator is colouring for."
   caller callee)
 
-(defun whole-machine () (make-machine +caller-saved+ +callee-saved+))
+(defun whole-machine () (make-machine *caller-saved* *callee-saved*))
 
 (defun anywhere (m) (append (machine-caller m) (machine-callee m)))
 (defun register-count (m) (+ (length (machine-caller m)) (length (machine-callee m))))
@@ -36,6 +36,6 @@ machine asked for more registers than exist is not."
 
 (defun limited (max-regs)
   "A smaller machine, so that the spiller can be tested on small programs."
-  (let* ((callee (take +callee-saved+ (max 2 (floor max-regs 2))))
-         (caller (take +caller-saved+ (max 1 (- max-regs (length callee))))))
+  (let* ((callee (take *callee-saved* (max 2 (floor max-regs 2))))
+         (caller (take *caller-saved* (max 1 (- max-regs (length callee))))))
     (make-machine caller callee)))

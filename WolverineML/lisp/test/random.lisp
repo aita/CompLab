@@ -7,8 +7,7 @@
 
 (in-package #:wolv.test.random)
 
-(eval-when (:compile-toplevel :load-toplevel :execute)
-  (setf *suite* "random"))
+(in-suite "random")
 
 (defparameter *configurations*
   (list (cons "default" (driver:make-options t t nil))

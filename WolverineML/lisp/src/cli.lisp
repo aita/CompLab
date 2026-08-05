@@ -53,10 +53,7 @@
 (defun options-of (a)
   (driver:make-options (args-checks a) (args-optimise a) (args-max-regs a)))
 
-(defun read-source (path)
-  (with-open-file (stream path :direction :input :external-format :utf-8)
-    (let ((text (make-string (file-length stream))))
-      (subseq text 0 (read-sequence text stream)))))
+(defun read-source (path) (uiop:read-file-string path))
 
 (defun stdin-text ()
   (if (interactive-stream-p *standard-input*)
@@ -65,14 +62,14 @@
         (loop for line = (read-line *standard-input* nil nil)
               while line do (write-line line out)))))
 
-(defun main (&optional (argv (rest sb-ext:*posix-argv*)))
+(defun main (&optional (argv (uiop:command-line-arguments)))
   (let ((a (handler-case (parse-arguments argv)
              (error (c) (format *error-output* "wolv: ~A~%" c) (return-from main 1)))))
     (unless (and (args-command a) (args-file a)
                  (member (args-command a) '("build" "run" "check" "emit") :test #'string=))
       (write-string *usage* *error-output*)
       (return-from main 1))
-    (unless (member (args-stage a) driver:+stages+ :test #'string=)
+    (unless (member (args-stage a) driver:*stages* :test #'string=)
       (format *error-output* "wolv: no such stage as `~A`~%" (args-stage a))
       (return-from main 1))
     (let ((source (handler-case (read-source (args-file a))
@@ -107,4 +104,4 @@
     (namestring (make-pathname :type nil :defaults path))))
 
 (defun toplevel ()
-  (sb-ext:exit :code (main) :abort nil))
+  (uiop:quit (main)))
