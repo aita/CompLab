@@ -24,12 +24,12 @@
             [wolv.liveness :as live]
             [wolv.mach :as mach]))
 
-(def IMMEDIATE
+(def ^:private IMMEDIATE
   "What `add`, `sub` and `cmp` take as an immediate operand."
   4095)
 
-(def LOGICAL {"and" "and" "or" "orr" "xor" "eor"})
-(def SHIFTS {"shl" "lsl" "shr" "asr"})
+(def ^:private LOGICAL {"and" "and" "or" "orr" "xor" "eor"})
+(def ^:private SHIFTS {"shl" "lsl" "shr" "asr"})
 
 ;; -- what the plan asks ------------------------------------------------------
 
@@ -102,7 +102,7 @@
   ([s form dst srcs imm symbol effect]
    (update s :out conj (ir/i-machine form dst srcs imm symbol effect))))
 
-(declare tile)
+(declare ^:private tile)
 
 (defn- at
   "The register holding an operand, computing it here if it was deferred.
@@ -232,32 +232,32 @@
 
 ;; -- one node ----------------------------------------------------------------
 
-(defmulti tile
+(defmulti ^:private tile
   "Emit the instruction this node becomes, and answer with the register it left
   its value in."
   (fn [_s i _n] (:op i)))
 
-(defmethod tile :const [s i _]
-  [(machine s "const" (:dst i) [] (:value i)) (:dst i)])
+(defmethod tile :const [s {:keys [dst value]} _]
+  [(machine s "const" dst [] value) dst])
 
-(defmethod tile :str-const [s i _]
-  [(machine s "adr" (:dst i) [] 0 (:symbol i) false) (:dst i)])
+(defmethod tile :str-const [s {:keys [dst symbol]} _]
+  [(machine s "adr" dst [] 0 symbol false) dst])
 
-(defmethod tile :bin [s i n]
-  [(arithmetic s n (:dst i) (:oper i) (:lhs i) (:rhs i)) (:dst i)])
+(defmethod tile :bin [s {:keys [dst oper lhs rhs]} n]
+  [(arithmetic s n dst oper lhs rhs) dst])
 
-(defmethod tile :cmp [s i n]
-  (let [s (compare-op s n (:oper i) (:lhs i) (:rhs i))]
-    [(machine s "cset" (:dst i) [] 0 (mach/condition-of (:oper i)) false) (:dst i)]))
+(defmethod tile :cmp [s {:keys [dst oper lhs rhs]} n]
+  (let [s (compare-op s n oper lhs rhs)]
+    [(machine s "cset" dst [] 0 (mach/condition-of oper) false) dst]))
 
-(defmethod tile :load [s i n]
-  (let [[s pointer displaced] (address s (first (:operands n)) (:base i) (:offset i))]
-    [(machine s "ldr" (:dst i) [pointer] displaced) (:dst i)]))
+(defmethod tile :load [s {:keys [dst base offset]} n]
+  (let [[s pointer displaced] (address s (first (:operands n)) base offset)]
+    [(machine s "ldr" dst [pointer] displaced) dst]))
 
-(defmethod tile :store [s i n]
-  (let [[s value] (at s (second (:operands n)) (:src i))
-        [s pointer displaced] (address s (first (:operands n)) (:base i) (:offset i))]
-    [(machine s "str" nil [pointer value] displaced "" true) (:src i)]))
+(defmethod tile :store [s {:keys [base offset src]} n]
+  (let [[s value] (at s (second (:operands n)) src)
+        [s pointer displaced] (address s (first (:operands n)) base offset)]
+    [(machine s "str" nil [pointer value] displaced "" true) src]))
 
 ;; Moves, calls, slot accesses and the terminator are machine instructions
 ;; already, and a phi is not in this list at all.  None of them folds anything,

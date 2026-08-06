@@ -20,7 +20,7 @@
             [wolv.diag :as diag]
             [wolv.types :as ty]))
 
-(def builtins
+(def ^:private builtins
   "name, argument types, result, the symbol the runtime calls it"
   [["print" [:string] :unit "wol_print"]
    ["println" [:string] :unit "wol_println"]
@@ -36,15 +36,15 @@
    ["stringToInt" [:string] :int "wol_string_to_int"]
    ["exit" [:int] :unit "wol_exit"]])
 
-(def specials
+(def ^:private specials
   "The three whose types depend on their arguments, so the checker types them."
   ["array" "length" "not"])
 
-(def arithmetic #{"+" "-" "*" "/" "mod"})
-(def ordering #{"<" "<=" ">" ">="})
-(def equality #{"=" "<>"})
+(def ^:private arithmetic #{"+" "-" "*" "/" "mod"})
+(def ^:private ordering #{"<" "<=" ">" ">="})
+(def ^:private equality #{"=" "<>"})
 
-(defn prelude []
+(defn- prelude []
   {:tys (into {} (map (fn [t] [(name t) t]) [:int :string :bool :unit]))
    :vals (into {}
                (concat
@@ -59,7 +59,7 @@
                  builtins)
                 (map (fn [nm] [nm (ty/fun-sym nm nm [] :unit 0 nm)]) specials)))})
 
-(defn new-checker []
+(defn- new-checker []
   {:scopes (list (prelude))
    :depth 0
    :loops 0
@@ -71,44 +71,44 @@
 
 ;; -- scopes ------------------------------------------------------------------
 
-(defn push-scope [ck] (update ck :scopes conj {:tys {} :vals {}}))
-(defn pop-scope [ck] (update ck :scopes rest))
+(defn- push-scope [ck] (update ck :scopes conj {:tys {} :vals {}}))
+(defn- pop-scope [ck] (update ck :scopes rest))
 
-(defn bind-val [ck nm sym] (update ck :scopes (fn [[s & r]] (cons (assoc-in s [:vals nm] sym) r))))
-(defn bind-type [ck nm t] (update ck :scopes (fn [[s & r]] (cons (assoc-in s [:tys nm] t) r))))
+(defn- bind-val [ck nm sym] (update ck :scopes (fn [[s & r]] (cons (assoc-in s [:vals nm] sym) r))))
+(defn- bind-type [ck nm t] (update ck :scopes (fn [[s & r]] (cons (assoc-in s [:tys nm] t) r))))
 
-(defn lookup [ck pick nm at what]
+(defn- lookup [ck pick nm at what]
   (or (first (keep #(get (pick %) nm) (:scopes ck)))
       (diag/type-error at (str "`" nm "` is not " what))))
 
-(defn lookup-val [ck nm at] (lookup ck :vals nm at "bound"))
-(defn lookup-type [ck nm at] (lookup ck :tys nm at "a type"))
+(defn- lookup-val [ck nm at] (lookup ck :vals nm at "bound"))
+(defn- lookup-type [ck nm at] (lookup ck :tys nm at "a type"))
 
-(defn unique-label
+(defn- unique-label
   "Two functions of the same name in one program need two labels."
   [ck nm]
   (let [n (get (:labels ck) nm 0)]
     [(assoc-in ck [:labels nm] (inc n))
      (if (zero? n) (str "wol_" nm) (str "wol_" nm "." n))]))
 
-(defn fresh-var [ck nm t mutable? depth]
+(defn- fresh-var [ck nm t mutable? depth]
   [(update ck :next-var inc) (ty/var-sym (:next-var ck) nm t mutable? depth)])
 
-(defn unify [want got at where]
+(defn- unify [want got at where]
   (when-not (ty/compatible? want got)
     (diag/type-error at (str "expected `" (ty/show-ty want) "`, found `"
                              (ty/show-ty got) "` " where))))
 
-(defn fields-of [ck t] (get (:records ck) (:id t)))
+(defn- fields-of [ck t] (get (:records ck) (:id t)))
 
-(defn thread
+(defn- thread
   "`f` over `xs`, threading the checker through and collecting what came back."
   [f ck xs]
   (reduce (fn [[ck done] x] (let [[ck y] (f ck x)] [ck (conj done y)])) [ck []] xs))
 
 ;; -- types as they are written -----------------------------------------------
 
-(defn resolve-ty [ck t]
+(defn- resolve-ty [ck t]
   (case (:ty-node t)
     :name (lookup-type ck (:name t) (:at t))
     :array (ty/array-type (resolve-ty ck (:elem t)))
@@ -116,18 +116,18 @@
 
 ;; -- expressions -------------------------------------------------------------
 
-(declare infer check-decl)
+(declare ^:private infer check-decl)
 
-(defmulti infer-node
+(defmulti ^:private infer-node
   "What type this node has, the node with its children checked, and the checker
-  state that came out.  One method per form; the dispatch is on `:node`."
-  (fn [_ck e] (:node e)))
+  state that came out.  One method per form; the dispatch is on `:op`."
+  (fn [_ck e] (:op e)))
 
-(defn infer [ck e]
+(defn- infer [ck e]
   (let [[ck e t] (infer-node ck e)]
     [ck (assoc e :ty t) t]))
 
-(defn infer-in
+(defn- infer-in
   "Check the expression under `k` and put it back where it came from."
   [ck e k]
   (let [[ck sub t] (infer ck (get e k))]
@@ -149,13 +149,13 @@
      (assoc e :sym sym)
      (:ty sym)]))
 
-(defn arity [e callee args want]
+(defn- arity [e callee args want]
   (when-not (= (count args) want)
     (diag/type-error (:at e)
                      (str "`" callee "` takes " want " argument" (if (= want 1) "" "s")
                           ", given " (count args)))))
 
-(defn infer-all
+(defn- infer-all
   "Check a sequence of expressions in order, and answer with them and their types."
   [ck es]
   (reduce (fn [[ck done] e]
@@ -297,7 +297,7 @@
 (defmethod infer-node :assign [ck e]
   (let [[ck e t] (infer-in ck e :target)
         target (:target e)]
-    (when (= (:node target) :var)
+    (when (= (:op target) :var)
       (let [sym (:sym target)]
         (when-not (:mutable? sym)
           (diag/type-error (:at e)
@@ -354,7 +354,7 @@
 
 ;; -- declarations ------------------------------------------------------------
 
-(defmulti check-decl (fn [_ck d] (:decl d)))
+(defmulti ^:private check-decl (fn [_ck d] (:decl d)))
 
 (defmethod check-decl :type [ck d]
   ;; Records are bound before any field is resolved, so a group of `type`s may

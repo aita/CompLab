@@ -75,7 +75,9 @@ with an `:op`:
 (defmethod uses :store [i] [(:base i) (:src i)])
 ```
 
-and a syntax node is a map with a `:node`. What that buys is the opposite of
+and a syntax node is a map with an `:op` as well — which is what `tools.analyzer`
+and the ClojureScript compiler key their trees on, so one convention covers both.
+What that buys is the opposite of
 what [`../haskell`](../haskell) buys: the instruction set is *open*. A method can
 be added from any namespace, `:default` is what answers for everything nobody
 wrote one for, and adding `:select` to the IR would touch no table anywhere else.
@@ -178,5 +180,6 @@ error, which a dump has to be free of.
   4 configurations), by `../compare.sh clojure/bin/wolv`
 - **91 tests, 1,557 assertions, none skipped** — including the end-to-end runs
   under qemu and the random-program oracle
-- 3,219 lines of code in 26 namespaces, with the comments and docstrings taken
-  out; 4,556 with them, and 812 in the tests
+- 3,217 lines of code in 26 namespaces, with the comments and docstrings taken
+  out; 4,557 with them, and 812 in the tests. Each namespace exports what the
+  others use and no more: 124 helpers and tables are `defn-`/`^:private`

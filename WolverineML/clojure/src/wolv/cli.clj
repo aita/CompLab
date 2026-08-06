@@ -11,9 +11,9 @@
             [wolv.driver :as driver])
   (:gen-class))
 
-(def COMMANDS #{"build" "run" "emit" "check"})
+(def ^:private COMMANDS #{"build" "run" "emit" "check"})
 
-(def USAGE
+(def ^:private USAGE
   (str/join
    "\n"
    ["usage: wolv <command> <file> [options]"
@@ -86,12 +86,12 @@
       (binding [*out* *err*] (print (:stderr done)) (flush))
       (:code done))))
 
-(defn wolv-main [argv]
+(defn- wolv-main [argv]
   (let [args (parse-arguments argv)
-        rest* (:rest args)]
-    (when-not (= 2 (count rest*)) (bad "wants a command and a file"))
-    (let [command (first rest*)
-          file (second rest*)]
+        positional (:rest args)]
+    (when-not (= 2 (count positional)) (bad "wants a command and a file"))
+    (let [command (first positional)
+          file (second positional)]
       (when-not (contains? COMMANDS command)
         (bad (str "no such command as `" command "`: " (str/join ", " (sort COMMANDS)))))
       (when-not (.exists (io/file file)) (bad (str "no such file as `" file "`")))

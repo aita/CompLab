@@ -46,7 +46,7 @@
   (let [{:keys [program escapes]} (typecheck/check (parser/parse source))]
     (lower/lower program escapes (lower/options (:checks? opts)))))
 
-(def PIPELINE
+(def ^:private PIPELINE
   "Each pass, under the name of the stage it produces.  Running one and then
   asking whether the caller wanted to stop there is the whole of `stage`."
   [["ir" (fn [m _] m)]
@@ -100,7 +100,7 @@
 
 ;; -- the toolchain -----------------------------------------------------------
 
-(defn toolchain-error [message]
+(defn- toolchain-error [message]
   (throw (ex-info message {:wolv :toolchain})))
 
 (defn- runtime-path

@@ -15,7 +15,7 @@
             [wolv.i64 :as i64]
             [wolv.lexer :as lexer]))
 
-(def binding-powers
+(def ^:private binding-powers
   "The left binding power and the power the right side is read at.  Left < right
   is left-associative; left > right is right-associative, which only `:=` is."
   {:ASSIGN [2 1]
@@ -26,28 +26,28 @@
    :PLUS [12 13] :MINUS [12 13]
    :STAR [14 15] :SLASH [14 15] :MOD [14 15]})
 
-(def unary-bp 16)
+(def ^:private unary-bp 16)
 
-(def binops
+(def ^:private binops
   {:PLUS "+" :MINUS "-" :STAR "*" :SLASH "/" :MOD "mod" :CARET "^"
    :EQ "=" :NE "<>" :LT "<" :LE "<=" :GT ">" :GE ">="})
 
-(defn declares? [kind] (contains? #{:VAL :VAR :FUN :TYPE} kind))
+(defn- declares? [kind] (contains? #{:VAL :VAR :FUN :TYPE} kind))
 
 ;; -- token plumbing ----------------------------------------------------------
 
-(defn parser [toks] {:toks (vec toks) :pos 0})
+(defn- parser [toks] {:toks (vec toks) :pos 0})
 
-(defn cur [p] (nth (:toks p) (:pos p)))
-(defn kind [p] (:kind (cur p)))
-(defn at? [p k] (= (kind p) k))
-(defn bump [p] (update p :pos inc))
-(defn took
+(defn- cur [p] (nth (:toks p) (:pos p)))
+(defn- kind [p] (:kind (cur p)))
+(defn- at? [p k] (= (kind p) k))
+(defn- bump [p] (update p :pos inc))
+(defn- took
   "The cursor past `k`, or nil if that is not what is there."
   [p k]
   (when (at? p k) (bump p)))
 
-(defn found
+(defn- found
   "What an error message calls the token that was found."
   [p]
   (let [t (cur p)]
@@ -56,26 +56,26 @@
       :STRING (str "\"" (:text t) "\"")
       (str "`" (:text t) "`"))))
 
-(defn expect [p k]
+(defn- expect [p k]
   (if-let [p' (took p k)]
     [p' (cur p)]
     (diag/parse-error (:at (cur p))
                       (str "expected `" (lexer/kind-text k) "`, found " (found p)))))
 
-(defn expect-ident [p]
+(defn- expect-ident [p]
   (if-let [p' (took p :IDENT)]
     [p' (cur p)]
     (diag/parse-error (:at (cur p)) (str "expected a name, found " (found p)))))
 
 ;; -- expressions -------------------------------------------------------------
 
-(declare parse-exp parse-atom parse-decl parse-ty)
+(declare ^:private parse-exp parse-atom parse-decl parse-ty)
 
-(defn check-lvalue [e]
+(defn- check-lvalue [e]
   (when-not (ast/place? e)
     (diag/parse-error (:at e) "the left of `:=` is not assignable")))
 
-(defn integer-of
+(defn- integer-of
   "Integers are 64 bits and wrap, so the largest literal is the one written
   `~9223372036854775808`."
   [t]
@@ -84,7 +84,7 @@
       (diag/parse-error (:at t) (str "`" (:text t) "` does not fit in 64 bits")))
     (i64/wrap v)))
 
-(defn parse-exp [p min-bp]
+(defn- parse-exp [p min-bp]
   (loop [[p left] (parse-atom p)]
     (let [powers (binding-powers (kind p))]
       (if (and powers (>= (first powers) min-bp))
@@ -102,7 +102,7 @@
         [p left]))))
 
 ;; A trailing `;` is allowed, which is what the `stop` test is for.
-(defn parse-sequence [p stop]
+(defn- parse-sequence [p stop]
   (loop [[p first-item] (parse-exp p 0) items []]
     (let [items (conj items first-item)]
       (if-let [p' (took p :SEMI)]
@@ -111,7 +111,7 @@
           (recur (parse-exp p' 0) items))
         [p items]))))
 
-(defn comma-list
+(defn- comma-list
   "A comma-separated list already inside its brackets, up to `close`."
   [p close one]
   (if-let [p' (took p close)]
@@ -122,7 +122,7 @@
           (recur (one p') items)
           (let [[p _] (expect p close)] [p items]))))))
 
-(defn parse-parens [p]
+(defn- parse-parens [p]
   (let [[p lp] (expect p :LPAREN)
         start (:at lp)]
     (if-let [p' (took p :RPAREN)]
@@ -131,7 +131,7 @@
             [p _] (expect p :RPAREN)]
         [p (if (= 1 (count items)) (first items) (ast/e-seq start items))]))))
 
-(defn parse-named [p]
+(defn- parse-named [p]
   (let [[p t] (expect-ident p)]
     (case (kind p)
       :LPAREN
@@ -149,7 +149,7 @@
 
       [p (ast/e-var (:at t) (:text t))])))
 
-(defn parse-postfix
+(defn- parse-postfix
   "`[i]` and `.f` follow an atom, and only an atom: `nil.f` is not an expression."
   [p base]
   (loop [p p out base]
@@ -162,7 +162,7 @@
                (recur p (ast/e-field start out (:text f))))
         [p out]))))
 
-(defn parse-if [p]
+(defn- parse-if [p]
   (let [[p t] (expect p :IF)
         start (:at t)
         [p test] (parse-exp p 0)
@@ -172,14 +172,14 @@
       (let [[p els] (parse-exp p' 0)] [p (ast/e-if start test then els)])
       [p (ast/e-if start test then nil)])))
 
-(defn parse-while [p]
+(defn- parse-while [p]
   (let [[p t] (expect p :WHILE)
         [p test] (parse-exp p 0)
         [p _] (expect p :DO)
         [p body] (parse-exp p 0)]
     [p (ast/e-while (:at t) test body)]))
 
-(defn parse-for [p]
+(defn- parse-for [p]
   (let [[p t] (expect p :FOR)
         [p binder] (expect-ident p)
         [p _] (expect p :EQ)
@@ -190,7 +190,7 @@
         [p body] (parse-exp p 0)]
     [p (ast/e-for (:at t) (:text binder) lo hi body)]))
 
-(defn parse-let [p]
+(defn- parse-let [p]
   (let [[p t] (expect p :LET)
         start (:at t)
         [p decls] (loop [p p decls []]
@@ -205,7 +205,7 @@
         [p _] (expect p :END)]
     [p (ast/e-let start decls body)]))
 
-(defn parse-atom [p]
+(defn- parse-atom [p]
   (let [t (cur p)
         start (:at t)]
     (case (:kind t)
@@ -227,7 +227,7 @@
 
 ;; -- types -------------------------------------------------------------------
 
-(defn parse-ty-atom [p start]
+(defn- parse-ty-atom [p start]
   (if-let [after-brace (took p :LBRACE)]
     (let [one (fn [p]
                 (let [[p fname] (expect-ident p)
@@ -242,7 +242,7 @@
         [p inner])
       (let [[p t] (expect-ident p)] [p (ast/t-name start (:text t))]))))
 
-(defn parse-ty [p]
+(defn- parse-ty [p]
   (let [start (:at (cur p))]
     (loop [[p base] (parse-ty-atom p start)]
       (if (and (at? p :IDENT) (= (:text (cur p)) "array"))
@@ -251,7 +251,7 @@
 
 ;; -- declarations ------------------------------------------------------------
 
-(defn parse-group
+(defn- parse-group
   "`and` joins a group, and the group is one declaration: the names of a group
   are all in scope in all of its bodies."
   [p one]
@@ -261,13 +261,13 @@
         (recur (one p') binds)
         [p binds]))))
 
-(defn one-type-bind [p]
+(defn- one-type-bind [p]
   (let [[p name] (expect-ident p)
         [p _] (expect p :EQ)
         [p bound] (parse-ty p)]
     [p (ast/type-bind (:text name) bound (:at name))]))
 
-(defn one-fun-bind [p]
+(defn- one-fun-bind [p]
   (let [[p name] (expect-ident p)
         [p _] (expect p :LPAREN)
         one (fn [p]
@@ -281,7 +281,7 @@
         [p body] (parse-exp p 0)]
     [p (ast/fun-bind (:text name) params result body (:at name))]))
 
-(defn parse-decl [p]
+(defn- parse-decl [p]
   (case (kind p)
     :TYPE (let [[p t] (expect p :TYPE)
                 [p binds] (parse-group p one-type-bind)]

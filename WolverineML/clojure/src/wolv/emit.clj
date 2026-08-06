@@ -103,19 +103,19 @@
 
 (defn- access
   "`ldr`/`str`, in whichever addressing mode reaches this far."
-  [e op regi base offset]
+  [e op r base offset]
   (let [where (if (= base 31) "sp" (str "x" base))]
     (cond
       (and (<= 0 offset 32760) (zero? (mod offset ir/WORD)))
-      (line e (str op " x" regi ", [" where ", #" offset "]"))
+      (line e (str op " x" r ", [" where ", #" offset "]"))
 
       (<= -256 offset 255)
-      (line e (str (UNSCALED op) " x" regi ", [" where ", #" offset "]"))
+      (line e (str (UNSCALED op) " x" r ", [" where ", #" offset "]"))
 
       :else
       (-> e
           (immediate SPARE offset)
-          (line (str op " x" regi ", [" where ", x" SPARE "]"))))))
+          (line (str op " x" r ", [" where ", x" SPARE "]"))))))
 
 ;; -- parallel copies ---------------------------------------------------------
 
@@ -178,19 +178,20 @@
         e (line e (str "bl " callee))]
     (if dst (mov e (colour-of e dst) (first reg/ARGUMENT-REGS)) e)))
 
-(defmulti instruction (fn [_e i] (:op i)))
+(defmulti ^:private instruction (fn [_e i] (:op i)))
 
 (defmethod instruction :default [_ _]
   (throw (ex-info "cannot emit this instruction" {})))
 
 (defmethod instruction :machine [e i] (machine e i))
-(defmethod instruction :move [e i] (mov e (colour-of e (:dst i)) (colour-of e (:src i))))
-(defmethod instruction :load-slot [e i]
-  (access e "ldr" (colour-of e (:dst i)) 29 (ir/slot-offset (:slot i))))
-(defmethod instruction :store-slot [e i]
-  (access e "str" (colour-of e (:src i)) 29 (ir/slot-offset (:slot i))))
-(defmethod instruction :frame-addr [e i] (mov e (colour-of e (:dst i)) 29))
-(defmethod instruction :call [e i] (call e (:dst i) (:callee i) (:args i)))
+(defmethod instruction :move [e {:keys [dst src]}]
+  (mov e (colour-of e dst) (colour-of e src)))
+(defmethod instruction :load-slot [e {:keys [dst slot]}]
+  (access e "ldr" (colour-of e dst) 29 (ir/slot-offset slot)))
+(defmethod instruction :store-slot [e {:keys [slot src]}]
+  (access e "str" (colour-of e src) 29 (ir/slot-offset slot)))
+(defmethod instruction :frame-addr [e {:keys [dst]}] (mov e (colour-of e dst) 29))
+(defmethod instruction :call [e {:keys [dst callee args]}] (call e dst callee args))
 
 ;; -- whole functions ---------------------------------------------------------
 

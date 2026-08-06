@@ -12,7 +12,7 @@
 
 (defn show-span [at] (str (:line at) ":" (:col at)))
 
-(defn wolv-error
+(defn- wolv-error
   "Raise `kind` — :lex, :parse or :type — at `at`."
   [kind at message]
   (throw (ex-info (str (show-span at) ": " message) {:wolv kind :at at})))

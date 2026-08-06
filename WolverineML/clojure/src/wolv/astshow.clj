@@ -6,7 +6,7 @@
   (:require [clojure.string :as str]
             [wolv.types :as ty]))
 
-(defn two-digit-hex [n]
+(defn- two-digit-hex [n]
   (let [s (Integer/toHexString n)]
     (if (< (count s) 2) (str "0" s) s)))
 
@@ -42,14 +42,14 @@
 
 (defn- shown-type [e] (if (:ty e) (str " : " (ty/show-ty (:ty e))) ""))
 
-(declare show-exp show-decl)
+(declare ^:private show-exp show-decl)
 
 (defn- kids [depth escapes es]
   (mapcat #(show-exp % (inc depth) escapes) es))
 
-(defmulti show-node (fn [e _depth _escapes] (:node e)))
+(defmulti ^:private show-node (fn [e _depth _escapes] (:op e)))
 
-(defn show-exp [e depth escapes] (show-node e depth escapes))
+(defn- show-exp [e depth escapes] (show-node e depth escapes))
 
 (defmethod show-node :int [e d _] [(indent d (str "int " (:value e)))])
 (defmethod show-node :str [e d _] [(indent d (str "string " (quoted (:value e))))])
@@ -113,7 +113,7 @@
           [(indent d "in")]
           (show-exp (:body e) (inc d) esc)))
 
-(defmulti show-decl (fn [d _depth _escapes] (:decl d)))
+(defmulti ^:private show-decl (fn [d _depth _escapes] (:decl d)))
 
 (defmethod show-decl :type [d depth _]
   (map (fn [b] (indent depth (str "type " (:name b)))) (:binds d)))

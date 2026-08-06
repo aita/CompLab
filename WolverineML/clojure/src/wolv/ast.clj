@@ -1,8 +1,12 @@
 (ns wolv.ast
   "The syntax tree, as plain maps.
 
-  Every node is a map with a `:node`, a `:decl` or a `:ty-node` saying which
+  Every node is a map with an `:op`, a `:decl` or a `:ty-node` saying which
   form it is, and that key is what the three passes over the tree dispatch on.
+  `:op` is what `tools.analyzer` and the ClojureScript compiler call it, and
+  `ir.clj` keys its instructions the same way, so one convention covers both
+  trees.
+
   Nothing is declared: a node is whatever keys it has, and the checker adds
   `:ty`, `:sym` and `:offset` to the ones that want them with `assoc` — so a
   node needs no room made for them in advance and there is no wrapper record
@@ -23,29 +27,27 @@
 
       :type :binds     :val :name :written :init :var?     :fun :binds")
 
-(defn exp [at node m] (into {:node node :at at} m))
-
-(defn e-int [at value] {:node :int :at at :value value})
-(defn e-str [at value] {:node :str :at at :value value})
-(defn e-bool [at value] {:node :bool :at at :value value})
-(defn e-nil [at] {:node :nil :at at})
-(defn e-unit [at] {:node :unit :at at})
-(defn e-var [at name] {:node :var :at at :name name})
-(defn e-call [at callee args] {:node :call :at at :callee callee :args args})
-(defn e-record [at tyname inits] {:node :record :at at :tyname tyname :inits inits})
-(defn e-index [at array index] {:node :index :at at :array array :index index})
-(defn e-field [at record select] {:node :field :at at :record record :select select})
-(defn e-neg [at operand] {:node :neg :at at :operand operand})
-(defn e-bin [at oper lhs rhs] {:node :bin :at at :oper oper :lhs lhs :rhs rhs})
-(defn e-logic [at oper lhs rhs] {:node :logic :at at :oper oper :lhs lhs :rhs rhs})
-(defn e-assign [at target value] {:node :assign :at at :target target :value value})
-(defn e-if [at test then els] {:node :if :at at :test test :then then :else els})
-(defn e-while [at test body] {:node :while :at at :test test :body body})
+(defn e-int [at value] {:op :int :at at :value value})
+(defn e-str [at value] {:op :str :at at :value value})
+(defn e-bool [at value] {:op :bool :at at :value value})
+(defn e-nil [at] {:op :nil :at at})
+(defn e-unit [at] {:op :unit :at at})
+(defn e-var [at name] {:op :var :at at :name name})
+(defn e-call [at callee args] {:op :call :at at :callee callee :args args})
+(defn e-record [at tyname inits] {:op :record :at at :tyname tyname :inits inits})
+(defn e-index [at array index] {:op :index :at at :array array :index index})
+(defn e-field [at record select] {:op :field :at at :record record :select select})
+(defn e-neg [at operand] {:op :neg :at at :operand operand})
+(defn e-bin [at oper lhs rhs] {:op :bin :at at :oper oper :lhs lhs :rhs rhs})
+(defn e-logic [at oper lhs rhs] {:op :logic :at at :oper oper :lhs lhs :rhs rhs})
+(defn e-assign [at target value] {:op :assign :at at :target target :value value})
+(defn e-if [at test then els] {:op :if :at at :test test :then then :else els})
+(defn e-while [at test body] {:op :while :at at :test test :body body})
 (defn e-for [at binder lo hi body]
-  {:node :for :at at :binder binder :lo lo :hi hi :body body})
-(defn e-break [at] {:node :break :at at})
-(defn e-seq [at items] {:node :seq :at at :items items})
-(defn e-let [at decls body] {:node :let :at at :decls decls :body body})
+  {:op :for :at at :binder binder :lo lo :hi hi :body body})
+(defn e-break [at] {:op :break :at at})
+(defn e-seq [at items] {:op :seq :at at :items items})
+(defn e-let [at decls body] {:op :let :at at :decls decls :body body})
 
 (defn field-init [name value at] {:name name :value value :at at})
 
@@ -67,4 +69,4 @@
 (defn place?
   "Whether `e` is one of the three things the left of `:=` may be."
   [e]
-  (contains? #{:var :index :field} (:node e)))
+  (contains? #{:var :index :field} (:op e)))

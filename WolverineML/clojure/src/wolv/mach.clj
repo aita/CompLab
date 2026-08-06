@@ -21,7 +21,7 @@
       str     a store, likewise"
   (:require [wolv.ir :as ir]))
 
-(def FORMS
+(def ^:private FORMS
   "How each form is written down, once the registers have their colours.  `d` is
   the register written and `s0`, `s1`, `s2` the ones read."
   {"add" "add {d}, {s0}, {s1}"
@@ -46,17 +46,17 @@
    "cmpi" "cmp {s0}, #{imm}"
    "cset" "cset {d}, {sym}"})
 
-(def CONDITION
+(def ^:private CONDITION
   "Which condition code each comparison sets."
   {"=" "eq" "<>" "ne" "<" "lt" "<=" "le" ">" "gt" ">=" "ge" "u<" "lo" "u>=" "hs"})
 
-(def OPPOSITE
+(def ^:private OPPOSITE
   "And which one says the opposite — the emitter needs it when the branch it is
   writing falls through to the block the comparison was true for."
   {"eq" "ne" "ne" "eq" "lt" "ge" "ge" "lt"
    "gt" "le" "le" "gt" "lo" "hs" "hs" "lo"})
 
-(def EXPANDED
+(def ^:private EXPANDED
   "The ones the emitter writes itself, because they are not one instruction."
   #{"const" "adr" "ldr" "str"})
 

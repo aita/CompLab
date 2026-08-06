@@ -15,7 +15,7 @@
   (:require [clojure.set :as set]
             [wolv.ir :as ir]))
 
-(defn sorted-labels [s] (sort s))
+(defn- sorted-labels [s] (sort s))
 
 ;; -- dominance ---------------------------------------------------------------
 
@@ -83,7 +83,7 @@
 ;; A register written twice in one block is as much a variable as one written in
 ;; two blocks, so the count is what decides, and the blocks are what the
 ;; frontier walk needs.
-(defn definitions [f]
+(defn- definitions [f]
   (let [note (fn [d r label]
                (-> d
                    (update-in [:blocks r] (fnil conj #{}) label)
@@ -95,7 +95,7 @@
                   {:blocks {} :count {}} (ir/blocks f))]
     (reduce (fn [d p] (note d p (:entry f))) d (:params f))))
 
-(defn variables [d]
+(defn- variables [d]
   (sort (keep (fn [[r n]] (when (> n 1) r)) (:count d))))
 
 ;; -- placing -----------------------------------------------------------------
@@ -124,7 +124,7 @@
         (recur f phi-vars placed
                (into rest-work (remove #(contains? (get sites v) %) added)))))))
 
-(defn place-phis [f dom d]
+(defn- place-phis [f dom d]
   (reduce (fn [[f phi-vars] v] (place-one f phi-vars dom (:blocks d) v))
           [f (zipmap (:order f) (repeat []))]
           (variables d)))

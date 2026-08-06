@@ -21,7 +21,7 @@
 (defn record-type? [t] (= (:type t) :record))
 (defn array-type? [t] (= (:type t) :array))
 
-(defn same?
+(defn- same?
   "Type equality: nominal for records, structural for arrays."
   [a b]
   (= a b))

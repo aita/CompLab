@@ -6,7 +6,7 @@
 
 (defmulti shape
   "A parenthesised sketch of the tree, so precedence is easy to assert."
-  :node)
+  :op)
 
 (defn- all [es] (str/join " " (map shape es)))
 

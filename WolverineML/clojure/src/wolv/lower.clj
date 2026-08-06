@@ -161,11 +161,11 @@
 
 ;; -- expressions -------------------------------------------------------------
 
-(declare lower-decls lower-function function-body)
+(declare ^:private lower-decls lower-function function-body)
 
-(defmulti lower-exp
+(defmulti ^:private lower-exp
   "The register the value ended up in, or nil for a form with no value."
-  (fn [_st e] (:node e)))
+  (fn [_st e] (:op e)))
 
 (defn- value [st e]
   (let [[st r] (lower-exp st e)]
@@ -359,7 +359,7 @@
         st (-> (write-var st sym next) (jump body) (assoc :cur done))]
     [st nil]))
 
-(defmulti assign-to (fn [_st target _v] (:node target)))
+(defmulti ^:private assign-to (fn [_st target _v] (:op target)))
 
 (defmethod assign-to :var [st target v]
   (let [[st r] (value st v)] (write-var st (:sym target) r)))
@@ -380,7 +380,7 @@
 
 ;; -- declarations ------------------------------------------------------------
 
-(defmulti lower-decl (fn [_st d] (:decl d)))
+(defmulti ^:private lower-decl (fn [_st d] (:decl d)))
 
 (defmethod lower-decl :type [st _] st)
 
@@ -487,7 +487,7 @@
 (defn lower
   ([prog escapes] (lower prog escapes (options)))
   ([prog escapes opts]
-   (let [st {:opts opts :mod {:funcs [] :strings [] :symbols {}}
+   (let [st {:opts opts :mod (assoc (ir/new-module) :symbols {})
              :homes {} :escapes escapes}
          st (lower-function st "wol_main" "main" 0
                             (fn [st] (terminate (lower-decls st prog) (ir/i-ret nil))))]

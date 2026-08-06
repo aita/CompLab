@@ -13,8 +13,8 @@
   is three `eor`s and needs nothing to borrow, which is why no register is
   reserved for this anywhere in the compiler.")
 
-(defn mov [dst src] {:step :mov :dst dst :src src})
-(defn swap [a b] {:step :swap :a a :b b})
+(defn- mov [dst src] {:step :mov :dst dst :src src})
+(defn- swap [a b] {:step :swap :a a :b b})
 
 (defn mov? [s] (= (:step s) :mov))
 (defn swap? [s] (= (:step s) :swap))

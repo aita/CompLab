@@ -15,7 +15,7 @@
   [message]
   (throw (ex-info message {:wolv :out-of-registers})))
 
-(defn loop-depth
+(defn- loop-depth
   "How deeply each block is nested in loops, for weighing what a use costs.
 
   A back edge is an edge into a block that dominates its source; everything that

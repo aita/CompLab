@@ -50,7 +50,7 @@
 
 ;; -- folding -----------------------------------------------------------------
 
-(defn arith
+(defn- arith
   "The arithmetic of the machine, done here rather than in the host's width."
   [op a b]
   (case op
@@ -66,7 +66,7 @@
     "shr" (i64/i64-shr a b)
     nil))
 
-(defn order [op a b]
+(defn- order [op a b]
   (case op
     "=" (= a b)
     "<>" (not= a b)
@@ -78,7 +78,7 @@
     "u>=" (>= (i64/unsigned a) (i64/unsigned b))
     (throw (ex-info (str "unknown comparison " op) {}))))
 
-(defmulti fold-one
+(defmulti ^:private fold-one
   "What this instruction becomes when what it reads is known, or nil."
   (fn [i _known] (:op i)))
 
@@ -106,7 +106,7 @@
 
 ;; -- the passes --------------------------------------------------------------
 
-(defn fold-constants [f]
+(defn- fold-constants [f]
   (let [[f _]
         (reduce
          (fn [[f known] label]
@@ -123,7 +123,7 @@
          [f (constants f)] (:order f))]
     f))
 
-(defn propagate-copies [f]
+(defn- propagate-copies [f]
   (let [mapping (into {} (for [b (ir/blocks f)
                                i (ir/instrs b)
                                :when (= (:op i) :move)]
@@ -133,7 +133,7 @@
       (ir/map-blocks (rewrite f mapping)
                      (fn [b] (update b :instrs #(filterv (fn [i] (not= (:op i) :move)) %)))))))
 
-(defn simplify-phis [f]
+(defn- simplify-phis [f]
   (let [mapping (into {} (for [b (ir/blocks f)
                                p (:phis b)
                                :let [others (distinct (remove #(= % (:dst p))
@@ -148,7 +148,7 @@
                                                     %))))
                mapping))))
 
-(defn fold-branches [f]
+(defn- fold-branches [f]
   (let [known (constants f)
         folded (reduce
                 (fn [f label]
@@ -167,7 +167,7 @@
                 f (:order f))]
     (if (= folded f) f (ir/drop-unreachable folded))))
 
-(defn dead-code
+(defn- dead-code
   "Removing one dead value can make another dead, so this one has a fixed point
   of its own rather than waiting for the next round."
   [f]
@@ -186,7 +186,7 @@
                                       %)))))]
     (if (= next f) f (recur next))))
 
-(def passes [fold-constants propagate-copies simplify-phis fold-branches dead-code])
+(def ^:private passes [fold-constants propagate-copies simplify-phis fold-branches dead-code])
 
 (defn optimise-func [f]
   ;; Every pass runs every round: they are cheap, and one enables another.

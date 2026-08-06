@@ -12,11 +12,11 @@
   which the fixed point below tests for."
   (:require [wolv.ir :as ir]))
 
-(def empty-regs (sorted-set))
+(def ^:private empty-regs (sorted-set))
 
 (defn regs [xs] (into empty-regs xs))
 (defn union [a b] (into a b))
-(defn without [a b] (reduce disj a b))
+(defn- without [a b] (reduce disj a b))
 
 (defn live-in [l label] (get (:in l) label))
 (defn live-out [l label] (get (:out l) label))

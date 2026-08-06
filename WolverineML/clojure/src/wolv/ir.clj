@@ -86,16 +86,16 @@
   instruction here at all."
   :op)
 (defmethod uses :default [_] [])
-(defmethod uses :move [i] [(:src i)])
-(defmethod uses :bin [i] [(:lhs i) (:rhs i)])
-(defmethod uses :cmp [i] [(:lhs i) (:rhs i)])
-(defmethod uses :load [i] [(:base i)])
-(defmethod uses :store [i] [(:base i) (:src i)])
-(defmethod uses :store-slot [i] [(:src i)])
-(defmethod uses :call [i] (vec (:args i)))
-(defmethod uses :machine [i] (vec (:srcs i)))
-(defmethod uses :cbr [i] (if (= (:code i) "") [(:test i)] []))
-(defmethod uses :ret [i] (if (:value i) [(:value i)] []))
+(defmethod uses :move [{:keys [src]}] [src])
+(defmethod uses :bin [{:keys [lhs rhs]}] [lhs rhs])
+(defmethod uses :cmp [{:keys [lhs rhs]}] [lhs rhs])
+(defmethod uses :load [{:keys [base]}] [base])
+(defmethod uses :store [{:keys [base src]}] [base src])
+(defmethod uses :store-slot [{:keys [src]}] [src])
+(defmethod uses :call [{:keys [args]}] (vec args))
+(defmethod uses :machine [{:keys [srcs]}] (vec srcs))
+(defmethod uses :cbr [{:keys [code test]}] (if (= code "") [test] []))
+(defmethod uses :ret [{:keys [value]}] (if value [value] []))
 
 (defmulti map-uses
   "The same instruction with the registers it reads renamed."
@@ -234,7 +234,7 @@
               (assoc-in f [:blocks label :preds] (vec (reverse (get preds label)))))
             f (:order f))))
 
-(defn reachable [f]
+(defn- reachable [f]
   (loop [seen #{} stack [(:entry f)]]
     (if-let [label (first stack)]
       (if (seen label)
@@ -270,47 +270,45 @@
 
 ;; -- printing ----------------------------------------------------------------
 
-(defn reg-name [colours r]
+(defn- reg-name [colours r]
   (if-let [c (get colours r)] (str "%" r ":" c) (str "%" r)))
 
-(defn naming [colours] (fn [r] (reg-name colours r)))
+(defn- naming [colours] (fn [r] (reg-name colours r)))
 
 (defmulti show-instr (fn [i _name] (:op i)))
 
-(defmethod show-instr :const [i nm] (str (nm (:dst i)) " = " (:value i)))
-(defmethod show-instr :str-const [i nm] (str (nm (:dst i)) " = &" (:symbol i)))
-(defmethod show-instr :move [i nm] (str (nm (:dst i)) " = " (nm (:src i))))
-(defmethod show-instr :bin [i nm]
-  (str (nm (:dst i)) " = " (nm (:lhs i)) " " (:oper i) " " (nm (:rhs i))))
-(defmethod show-instr :cmp [i nm]
-  (str (nm (:dst i)) " = " (nm (:lhs i)) " " (:oper i) " " (nm (:rhs i))))
-(defmethod show-instr :load [i nm]
-  (str (nm (:dst i)) " = [" (nm (:base i)) " + " (:offset i) "]"))
-(defmethod show-instr :store [i nm]
-  (str "[" (nm (:base i)) " + " (:offset i) "] = " (nm (:src i))))
-(defmethod show-instr :load-slot [i nm] (str (nm (:dst i)) " = slot" (:slot i)))
-(defmethod show-instr :store-slot [i nm] (str "slot" (:slot i) " = " (nm (:src i))))
-(defmethod show-instr :frame-addr [i nm] (str (nm (:dst i)) " = frame"))
-(defmethod show-instr :call [i nm]
-  (let [call (str (:callee i) "(" (str/join ", " (map nm (:args i))) ")")]
-    (if (:dst i) (str (nm (:dst i)) " = " call) call)))
-(defmethod show-instr :jmp [i _] (str "jmp " (:target i)))
-(defmethod show-instr :cbr [i nm]
-  (let [test (if (= (:code i) "") (str (nm (:test i)) " ?") (str (:code i) "?"))]
-    (str "br " test " " (:then i) " : " (:else i))))
-(defmethod show-instr :ret [i nm]
-  (if (:value i) (str "ret " (nm (:value i))) "ret"))
-(defmethod show-instr :machine [i nm]
-  (let [operands (concat (map nm (:srcs i))
+(defmethod show-instr :const [{:keys [dst value]} nm] (str (nm dst) " = " value))
+(defmethod show-instr :str-const [{:keys [dst symbol]} nm] (str (nm dst) " = &" symbol))
+(defmethod show-instr :move [{:keys [dst src]} nm] (str (nm dst) " = " (nm src)))
+(defmethod show-instr :bin [{:keys [dst oper lhs rhs]} nm]
+  (str (nm dst) " = " (nm lhs) " " oper " " (nm rhs)))
+(defmethod show-instr :cmp [{:keys [dst oper lhs rhs]} nm]
+  (str (nm dst) " = " (nm lhs) " " oper " " (nm rhs)))
+(defmethod show-instr :load [{:keys [dst base offset]} nm]
+  (str (nm dst) " = [" (nm base) " + " offset "]"))
+(defmethod show-instr :store [{:keys [base offset src]} nm]
+  (str "[" (nm base) " + " offset "] = " (nm src)))
+(defmethod show-instr :load-slot [{:keys [dst slot]} nm] (str (nm dst) " = slot" slot))
+(defmethod show-instr :store-slot [{:keys [slot src]} nm] (str "slot" slot " = " (nm src)))
+(defmethod show-instr :frame-addr [{:keys [dst]} nm] (str (nm dst) " = frame"))
+(defmethod show-instr :call [{:keys [dst callee args]} nm]
+  (let [call (str callee "(" (str/join ", " (map nm args)) ")")]
+    (if dst (str (nm dst) " = " call) call)))
+(defmethod show-instr :jmp [{:keys [target]} _] (str "jmp " target))
+(defmethod show-instr :cbr [{:keys [test then else code]} nm]
+  (str "br " (if (= code "") (str (nm test) " ?") (str code "?")) " " then " : " else))
+(defmethod show-instr :ret [{:keys [value]} nm]
+  (if value (str "ret " (nm value)) "ret"))
+(defmethod show-instr :machine [{:keys [form dst srcs imm symbol]} nm]
+  (let [operands (concat (map nm srcs)
                          (cond
-                           (not= (:symbol i) "") [(:symbol i)]
-                           (or (not (zero? (:imm i))) (= (:form i) "const"))
-                           [(str "#" (:imm i))]
+                           (not= symbol "") [symbol]
+                           (or (not (zero? imm)) (= form "const")) [(str "#" imm)]
                            :else []))
-        written (str/trimr (str (:form i) " " (str/join ", " operands)))]
-    (if (:dst i) (str (nm (:dst i)) " = " written) written)))
+        written (str/trimr (str form " " (str/join ", " operands)))]
+    (if dst (str (nm dst) " = " written) written)))
 
-(defn show-phi [nm p]
+(defn- show-phi [nm p]
   (str (nm (:dst p)) " = phi ["
        (str/join ", " (map (fn [[pred r]] (str pred ": " (nm r))) (:args p)))
        "]"))

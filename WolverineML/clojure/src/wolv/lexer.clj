@@ -27,38 +27,38 @@
    :LE "<=" :LT "<" :GE ">=" :GT ">" :PLUS "+" :MINUS "-" :STAR "*" :SLASH "/"
    :CARET "^" :TILDE "~"})
 
-(def keywords
+(def ^:private keywords
   [:AND :ANDALSO :BREAK :DO :ELSE :END :FALSE :FOR :FUN :IF :IN :LET :MOD
    :NIL :ORELSE :THEN :TO :TRUE :TYPE :VAL :VAR :WHILE])
 
-(def punctuation
+(def ^:private punctuation
   "Longest first, so that `:=` beats `:` and `<=` beats `<`."
   [:ASSIGN :NE :LE :GE
    :LPAREN :RPAREN :LBRACK :RBRACK :LBRACE :RBRACE :COMMA :COLON :SEMI :DOT
    :EQ :LT :GT :PLUS :MINUS :STAR :SLASH :CARET :TILDE])
 
-(def escapes {\n \newline \t \tab \r \return \" \" \\ \\})
+(def ^:private escapes {\n \newline \t \tab \r \return \" \" \\ \\})
 
 ;; The letter and digit categories Python's `isalpha` and `isdigit` are.
-(defn letter? [c] (Character/isLetter ^char c))
-(defn digit? [c] (Character/isDigit ^char c))
+(defn- letter? [c] (Character/isLetter ^char c))
+(defn- digit? [c] (Character/isDigit ^char c))
 
 ;; -- the scanner -------------------------------------------------------------
 
-(defn scanner [src] {:src src :pos 0 :line 1 :col 1})
+(defn- scanner [src] {:src src :pos 0 :line 1 :col 1})
 
-(defn done? [s] (>= (:pos s) (count (:src s))))
-(defn here [s] (.charAt ^String (:src s) (:pos s)))
-(defn at [s] (diag/span (:line s) (:col s)))
+(defn- done? [s] (>= (:pos s) (count (:src s))))
+(defn- here [s] (.charAt ^String (:src s) (:pos s)))
+(defn- at [s] (diag/span (:line s) (:col s)))
 
-(defn step [s]
+(defn- step [s]
   (if (= (here s) \newline)
     (assoc s :pos (inc (:pos s)) :line (inc (:line s)) :col 1)
     (assoc s :pos (inc (:pos s)) :col (inc (:col s)))))
 
-(defn advance [s n] (nth (iterate step s) n))
+(defn- advance [s n] (nth (iterate step s) n))
 
-(defn starts-with? [s prefix]
+(defn- starts-with? [s prefix]
   (let [from (:pos s) to (+ from (count prefix))]
     (and (<= to (count (:src s)))
          (= (subs (:src s) from to) prefix))))
@@ -66,7 +66,7 @@
 ;; -- what is skipped ---------------------------------------------------------
 
 ;; Comments nest, so the depth is counted rather than the first `*)` taken.
-(defn skip-comment [s]
+(defn- skip-comment [s]
   (let [start (at s)]
     (loop [s s depth 0]
       (cond
@@ -76,7 +76,7 @@
                                 (if (> (dec depth) 0) (recur s (dec depth)) s))
         :else (recur (step s) depth)))))
 
-(defn skip-trivia [s]
+(defn- skip-trivia [s]
   (cond
     (done? s) s
     (contains? #{\space \tab \return \newline} (here s)) (skip-trivia (step s))
@@ -85,9 +85,9 @@
 
 ;; -- the pieces --------------------------------------------------------------
 
-(defn token [kind text at] {:kind kind :text text :at at})
+(defn- token [kind text at] {:kind kind :text text :at at})
 
-(defn scan-number [s start]
+(defn- scan-number [s start]
   (let [from (:pos s)
         s (loop [s s] (if (and (not (done? s)) (digit? (here s))) (recur (step s)) s))
         body (subs (:src s) from (:pos s))]
@@ -95,17 +95,17 @@
       (diag/lex-error start (str "`" body (here s) "` is not a number")))
     [s (token :INT body start)]))
 
-(defn continues-word? [c] (or (letter? c) (digit? c) (= c \_) (= c \')))
+(defn- continues-word? [c] (or (letter? c) (digit? c) (= c \_) (= c \')))
 
-(defn scan-word [s start]
+(defn- scan-word [s start]
   (let [from (:pos s)
         s (loop [s s]
             (if (and (not (done? s)) (continues-word? (here s))) (recur (step s)) s))
         body (subs (:src s) from (:pos s))
-        keyword* (first (filter #(= (kind-text %) body) keywords))]
-    [s (token (or keyword* :IDENT) body start)]))
+        found (first (filter #(= (kind-text %) body) keywords))]
+    [s (token (or found :IDENT) body start)]))
 
-(defn scan-escape
+(defn- scan-escape
   "What follows a backslash, as the one byte it names."
   [s]
   (when (done? s) (diag/lex-error (at s) "unterminated escape"))
@@ -126,7 +126,7 @@
 ;; A literal is a sequence of bytes: source text contributes its UTF-8 encoding,
 ;; and `\ddd` names one byte.  Each byte becomes one character of the result, so
 ;; the count is the length the run time will measure.
-(defn scan-string [s start]
+(defn- scan-string [s start]
   (loop [s (step s) out (StringBuilder.)]
     (if (done? s)
       (diag/lex-error start "unterminated string")
@@ -139,7 +139,7 @@
                       (.append out (char (bit-and b 0xFF))))
                     (recur (step s) out)))))))
 
-(defn next-token [s]
+(defn- next-token [s]
   (let [s (skip-trivia s)
         start (at s)]
     (cond
