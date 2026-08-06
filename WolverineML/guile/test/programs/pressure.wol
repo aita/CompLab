@@ -1,0 +1,66 @@
+(* Enough live values at once to make the allocator spill on a small machine,
+   and enough calls to make it prefer callee-saved registers on a large one. *)
+
+fun show (label : string, n : int) =
+  print (label ^ " = " ^ intToString (n) ^ "\n")
+
+fun mix (a : int, b : int, c : int, d : int, e : int, f : int,
+         g : int, h : int, i : int, j : int) : int =
+  a + b * 2 + c * 3 + d * 4 + e * 5 + f * 6 + g * 7 + h * 8 + i * 9 + j * 10
+
+fun wide (n : int) : int =
+  let
+    val a = n + 1
+    val b = n + 2
+    val c = n + 3
+    val d = n + 4
+    val e = n + 5
+    val f = n + 6
+    val g = n + 7
+    val h = n + 8
+    val i = n + 9
+    val j = n + 10
+    val k = n + 11
+    val l = n + 12
+  in
+    (a * b + c * d + e * f + g * h + i * j + k * l) mod 100003
+  end
+
+fun crossing (n : int) : int =
+  let
+    val one = wide (n)
+    val two = wide (n + 1)
+    val three = wide (n + 2)
+    val four = wide (n + 3)
+  in
+    one + two * 2 + three * 3 + four * 4
+  end
+
+fun loopy (n : int) : int =
+  let
+    var a = 1
+    var b = 2
+    var c = 3
+    var d = 4
+    var e = 5
+    var i = 0
+  in
+    while i < n do (
+      a := a + b;
+      b := b + c;
+      c := c + d;
+      d := d + e;
+      e := e + 1;
+      a := a mod 1000;
+      b := b mod 1000;
+      c := c mod 1000;
+      d := d mod 1000;
+      i := i + 1
+    );
+    a + b + c + d + e
+  end
+
+val () = show ("mix", mix (1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+val () = show ("wide", wide (7))
+val () = show ("crossing", crossing (7))
+val () = show ("loopy", loopy (50))

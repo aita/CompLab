@@ -1,0 +1,14 @@
+#!/bin/sh
+# The compiler as a command.
+#
+# `-C` is where `make.sh` put the compiled modules; with none there Guile
+# interprets the source instead, which is slower and says the same thing.
+# Auto-compilation is off because it writes progress notes to standard error,
+# and a dump has to be the dump and nothing else.
+root=$(dirname "$(readlink -f "$0")")/..
+GUILE_AUTO_COMPILE=0 exec guile -L "$root/src" -C "$root/ccache" -e main -s "$0" "$@"
+!#
+
+(use-modules (wolv cli))
+
+(define (main args) (exit (wolv-main (cdr args))))

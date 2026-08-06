@@ -1,0 +1,13 @@
+#!/bin/sh
+# The compiler as a command.
+#
+# `make.sh` leaves the compiled namespaces in classes/ and the classpath in
+# .classpath; with neither there this falls back to the Clojure CLI, which
+# compiles the tree on the way up every time.
+root=$(dirname "$(readlink -f "$0")")/..
+if [ -f "$root/.classpath" ]; then
+  exec java -cp "$root/classes:$root/src:$(cat "$root/.classpath")" wolv.cli "$@"
+else
+  exec clojure -Sdeps "{:paths [\"$root/src\"] :deps {org.clojure/clojure {:mvn/version \"1.12.5\"}}}" \
+       -M -m wolv.cli "$@"
+fi

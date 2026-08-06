@@ -1,0 +1,82 @@
+(* Two sorts over one array, to give the register allocator a loop to chew on.
+   `quicksort` recurses through a nested function so that the array itself
+   escapes into it and is reached through a static link. *)
+
+type ints = int array
+
+fun swap (a : ints, i : int, j : int) =
+  let val t = a[i] in
+    a[i] := a[j];
+    a[j] := t
+  end
+
+fun insertionSort (a : ints) =
+  for i = 1 to length (a) - 1 do
+    let var j = i in
+      while j > 0 andalso a[j - 1] > a[j] do (
+        swap (a, j - 1, j);
+        j := j - 1
+      )
+    end
+
+fun quicksort (a : ints) =
+  let
+    fun part (lo : int, hi : int) : int =
+      let
+        val pivot = a[hi]
+        var i = lo - 1
+      in
+        for j = lo to hi - 1 do
+          if a[j] <= pivot then (i := i + 1; swap (a, i, j)) else ();
+        swap (a, i + 1, hi);
+        i + 1
+      end
+    fun sort (lo : int, hi : int) =
+      if lo < hi then
+        let val mid = part (lo, hi) in
+          sort (lo, mid - 1);
+          sort (mid + 1, hi)
+        end
+      else ()
+  in
+    sort (0, length (a) - 1)
+  end
+
+fun show (label : string, a : ints) =
+  let var i = 0 in
+    print (label);
+    while i < length (a) do (
+      print (" " ^ intToString (a[i]));
+      i := i + 1
+    );
+    print ("\n")
+  end
+
+(* A repeatable pseudo-random fill, so the output is the same every run. *)
+fun fill (a : ints) =
+  let var seed = 12345 in
+    for i = 0 to length (a) - 1 do (
+      seed := (seed * 75 + 74) mod 65537;
+      a[i] := seed mod 100
+    )
+  end
+
+val small = array (12, 0)
+val () = fill (small)
+val () = show ("before   ", small)
+val () = insertionSort (small)
+val () = show ("insertion", small)
+
+val big = array (12, 0)
+val () = fill (big)
+val () = quicksort (big)
+val () = show ("quicksort", big)
+
+fun sorted (a : ints) : bool =
+  let var ok = true in
+    for i = 1 to length (a) - 1 do
+      if a[i - 1] > a[i] then ok := false else ();
+    ok
+  end
+
+val () = print (if sorted (small) andalso sorted (big) then "both sorted\n" else "no\n")

@@ -35,6 +35,8 @@ PORTS = [
     ("haskell",    "haskell/src/Wolv",         "*.hs",      "hs"),
     ("lisp",       "lisp/src",                 "*.lisp",    "lisp"),
     ("prolog",     "prolog/src",               "*.pl",      "pl"),
+    ("guile",      "guile/src/wolv",           "*.scm",     "rkt"),
+    ("clojure",    "clojure/src/wolv",         "*.clj",     "clj"),
 ]
 
 SYNTAX = {
@@ -45,9 +47,15 @@ SYNTAX = {
     # counted as one -- otherwise the comparison would charge Lisp for its
     # documentation and let Python's docstrings off.
     "lisp": {"line": [";"], "block": ("#|", "|#", True), "doc": ['"']},
-    # Racket has no docstrings, so a line that begins with a quote there is a
-    # string literal and is code.
+    # Racket and Guile have no docstrings of the kind that stands where a
+    # comment would, so a line that begins with a quote there is a string
+    # literal and is code.
     "rkt":  {"line": [";"], "block": ("#|", "|#", True), "doc": []},
+    # Clojure's docstrings are Common Lisp's, and counted the same way.  A
+    # string literal that happens to start a line -- a row of an instruction
+    # table, a line of the usage message -- is counted as a comment by that
+    # rule, which costs this port about thirty lines of the four thousand.
+    "clj":  {"line": [";"], "block": None, "doc": ['"']},
     "rb":   {"line": ["#"], "block": ("=begin", "=end", False), "doc": []},
     "hs":   {"line": ["--"], "block": ("{-", "-}", True), "doc": []},
     "pl":   {"line": ["%"], "block": ("/*", "*/", False), "doc": []},

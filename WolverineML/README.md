@@ -46,24 +46,30 @@ written about: both allocators are here, and so is everything the chapters dump.
 
 [`kotlin/`](kotlin), [`go/`](go), [`ocaml/`](ocaml), [`typescript/`](typescript),
 [`haxe/`](haxe), [`racket/`](racket), [`ruby/`](ruby), [`haskell/`](haskell),
-[`lisp/`](lisp) and [`prolog/`](prolog) hold the same compiler written again,
-each described in a README of its own. They carry one allocator — the graph —
-because the comparison the other one exists for is made in the Python tree.
-Every other stage is the same pass over the same shapes, and for every example
-and test program in every configuration, every stage dumps the same bytes out of
-any of the eleven, the assembly included.
+[`lisp/`](lisp), [`prolog/`](prolog), [`guile/`](guile) and
+[`clojure/`](clojure) hold the same compiler written again, each described in a
+README of its own. They carry one allocator — the graph — because the
+comparison the other one exists for is made in the Python tree. Every other
+stage is the same pass over the same shapes, and for every example and test
+program in every configuration, every stage dumps the same bytes out of any of
+the thirteen, the assembly included.
 
-None of the ten is a transliteration. Each says the same thing the way its own
-language says things — a sealed hierarchy and one exhaustive `when` per question
-in Kotlin, variants with mutable inline records in OCaml, a flat package and a
-type switch in Go, a discriminated union in TypeScript, an immutable `enum` and
-pure rewriting in Haxe, immutable structs and prefixed modules in Racket, `Data`
-for an instruction and `Struct` for the tree in Ruby, in Haskell a checker that
-answers with a second tree because it cannot write on the first, in Common Lisp
-two macros, one that writes the instruction protocol and one that writes a pass
-over the tree from a table of clauses, and in Prolog three grammars, a syntax tree whose
-type fields are logic variables the checker binds, and case analysis that lives
-in the clause heads — and the READMEs are largely about where those choices led.
+None of the twelve is a transliteration. Each says the same thing the way its
+own language says things — a sealed hierarchy and one exhaustive `when` per
+question in Kotlin, variants with mutable inline records in OCaml, a flat
+package and a type switch in Go, a discriminated union in TypeScript, an
+immutable `enum` and pure rewriting in Haxe, immutable structs and prefixed
+modules in Racket, `Data` for an instruction and `Struct` for the tree in Ruby,
+in Haskell a checker that answers with a second tree because it cannot write on
+the first, in Common Lisp two macros, one that writes the instruction protocol
+and one that writes a pass over the tree from a table of clauses, in Prolog
+three grammars, a syntax tree whose type fields are logic variables the checker
+binds, and case analysis that lives in the clause heads, in Guile a GOOPS class
+per node and a generic function per question, so the answer lives next to the
+thing it is about, and in Clojure nothing declared at all — an instruction is a
+map with an `:op`, the passes are multimethods over it, and every pass is
+`func -> func` over a persistent graph — and the READMEs are largely about where
+those choices led.
 
 `compare.sh` is what checks that claim: `./compare.sh lisp/bin/wolv` runs the
 ten stages over ten programs in four configurations and diffs every one of the
@@ -82,6 +88,8 @@ ten stages over ten programs in four configurations and diffs every one of the
 | [`haskell/`](haskell) | graph | `cabal test` |
 | [`lisp/`](lisp) | graph | `./run-tests.sh` |
 | [`prolog/`](prolog) | graph | `./run-tests.sh` |
+| [`guile/`](guile) | graph | `./run-tests.sh` |
+| [`clojure/`](clojure) | graph | `./run-tests.sh` |
 
 ## Build and run
 
