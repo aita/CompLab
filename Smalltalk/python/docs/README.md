@@ -10,3 +10,6 @@ small Smalltalk の内部ドキュメントです。
   インライン化、クロージャと非局所リターン、逆アセンブラ
 
 全体像とセットアップは上位の [README](../README.md) を参照。
+
+2つの実装（Python と C++）を並べて中身を追う本は
+[`Smalltalk/doc/`](../../doc/index.md) にあります。

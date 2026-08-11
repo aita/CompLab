@@ -27,7 +27,8 @@ VMは**スタックマシン**です。式は「値をオペランドスタッ�
 | `params` | 引数名（`local_names` の先頭部分） |
 | `defined_in` | (メソッドのみ) インストール先クラス。`super` の探索起点計算に使う |
 
-`local_names` はVMが活性化時に環境へ `nil` で用意し、`PUSH_VAR` / `STORE_VAR` が**名前で**解決します（[変数解決](#変数解決)参照）。
+`local_names` はVMが活性化時にフラットな `Frame.locals` へ `nil` で用意し、
+`PUSH_LOCAL` / `STORE_LOCAL` が**スロット添字で**参照します（[変数解決](#変数解決レキシカルアドレッシング)参照）。
 
 ## 命令セット
 
@@ -62,7 +63,7 @@ VMは**スタックマシン**です。式は「値をオペランドスタッ�
 実行は `VM._run(root)` が駆動する**単一ループ**です（`_loop` がディスパッチ本体）。
 Smalltalk 同士のメッセージ送信では**ホストの再帰を使いません**。
 
-- `Frame` … レシーバ・コード・環境 (`Environment`)・オペランドスタック・命令ポインタ `ip`・ブロックか否か・ホームフレーム・`sender`
+- `Frame` … レシーバ・コード・ローカル (`locals`)・外側の活性化 (`outer`)・オペランドスタック・命令ポインタ `ip`・ブロックか否か・ホームフレーム・`sender`
 - **コンパイル済みメソッドへの送信**は、新しい `Frame`（`sender` ＝呼び出し元）を積んで
   `active_context` を差し替え、**そのままループを続行**します。戻り（`RETURN` /
   `BLOCK_RETURN`）は `active_context` を `sender` に戻し、戻り値を送り手のスタックへ積みます。
@@ -178,21 +179,21 @@ true and: [false]
 ```
 ```
   0  PUSH_LITERAL 0 (1)
-  1  STORE_VAR    'i'
+  1  STORE_LOCAL  0
   2  POP
-  3  PUSH_VAR     'i'      ← ループ先頭(start)
+  3  PUSH_LOCAL   0        ← ループ先頭(start)
   4  PUSH_LITERAL 1 (3)
   5  SEND         ('<=', 1)
   6  JUMP_FALSE   13       ← 条件が false なら脱出
-  7  PUSH_VAR     'i'
+  7  PUSH_LOCAL   0
   8  PUSH_LITERAL 0 (1)
   9  SEND         ('+', 1)
- 10  STORE_VAR    'i'
+ 10  STORE_LOCAL  0
  11  POP                   ← 本体の値を捨てる
  12  JUMP         3        ← 後方ジャンプ
  13  PUSH_NIL              ← whileTrue: の結果
  14  POP                   ← 文の区切り（次の i を残すため）
- 15  PUSH_VAR     'i'
+ 15  PUSH_LOCAL   0
  16  RETURN
 ```
 
@@ -204,7 +205,7 @@ true and: [false]
 
 インライン対象でないブロックリテラルは、独立した `CompiledBlock` にコンパイルされ、
 定数プールに入り、`PUSH_BLOCK` で**クロージャ**として実体化されます。ブロックは
-定義時の環境（`Environment`）とホームフレームを捕捉するので、外側の変数を参照できます。
+定義時の活性化（`outer`）とホームフレームを捕捉するので、外側の変数を参照できます。
 
 ```smalltalk
 [:x | x + 1]
@@ -215,7 +216,7 @@ true and: [false]
 ```
 ブロック本体（別コード）:
 ```
-  0  PUSH_VAR     'x'
+  0  PUSH_LOCAL   0
   1  PUSH_LITERAL 0 (1)
   2  SEND         ('+', 1)
   3  BLOCK_RETURN     ← ブロックの正常終了（局所的に値を返す）
@@ -233,7 +234,7 @@ firstEven: c
 ```
 メソッド本体:
 ```
-  0  PUSH_VAR     'c'
+  0  PUSH_LOCAL   0
   1  PUSH_BLOCK   0 (...)
   2  SEND         ('do:', 1)
   3  POP
@@ -244,10 +245,10 @@ firstEven: c
 ```
 渡すブロック `[:x | x even ifTrue: [^x]]`:
 ```
-  0  PUSH_VAR     'x'
+  0  PUSH_LOCAL   0
   1  SEND         ('even', 0)
   2  JUMP_FALSE   6
-  3  PUSH_VAR     'x'
+  3  PUSH_LOCAL   0
   4  RETURN           ← ここが非局所リターン。firstEven: から x を返す
   5  JUMP         7
   6  PUSH_NIL

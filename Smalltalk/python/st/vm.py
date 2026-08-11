@@ -1,10 +1,13 @@
 """The bytecode virtual machine.
 
-A recursive stack machine: each activation (:class:`Frame`) runs a dispatch
-loop over its method's bytecode; a message send that resolves to compiled code
-recurses into a fresh activation. Blocks are real closures that capture their
-defining environment and home activation, so a ``^`` inside a block performs a
-non-local return from the home method (implemented with :class:`NonLocalReturn`).
+A non-recursive stack machine: one driver (:meth:`VM._run`) loops over a chain
+of :class:`Frame` activations. A send that resolves to compiled code pushes a
+frame and keeps looping, so Smalltalk-to-Smalltalk sends cost heap rather than
+Python stack; only a primitive that re-enters the VM (``value``, ``do:`` …)
+nests another driver. Blocks are real closures that capture their defining
+activation and home activation, so a ``^`` inside a block performs a non-local
+return from the home method (implemented with :class:`NonLocalReturn`, which is
+what carries it across those nested drivers).
 """
 
 from __future__ import annotations

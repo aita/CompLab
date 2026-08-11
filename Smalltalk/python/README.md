@@ -4,7 +4,8 @@ A small Smalltalk implementation in Python: a **bytecode virtual machine**
 plus a **PySide6 IDE** (System Browser + Workspace + Transcript).
 
 Deep dives live in [`docs/`](docs/README.md): [syntax](docs/syntax.md),
-[object model](docs/objects.md), [bytecode](docs/bytecode.md).
+[object model](docs/objects.md), [bytecode](docs/bytecode.md). The book that
+walks both implementations chapter by chapter is [`../doc/`](../doc/index.md).
 
 ## Pipeline
 
@@ -19,7 +20,7 @@ source ──lexer──▶ tokens ──parser──▶ AST ──compiler─�
 | `st/ast.py`      | AST node dataclasses                                           |
 | `st/bytecode.py` | opcode set + `CompiledMethod` / `CompiledBlock`               |
 | `st/compiler.py` | AST → bytecode; inlines `ifTrue:`/`whileTrue:`/`and:`/`or:`    |
-| `st/vm.py`       | recursive stack machine; closures + non-local return          |
+| `st/vm.py`       | non-recursive stack machine; closures + non-local return      |
 | `st/kernel.py`   | base classes and Python primitives                            |
 | `st/system.py`   | `Smalltalk` facade: eval / define class / define method       |
 | `ide/`           | PySide6 IDE                                                    |
@@ -34,7 +35,7 @@ becomes a real closure invoked through the `value` primitive.
 uv sync
 uv run python main.py          # launch the IDE
 uv run python main.py repl     # terminal REPL
-uv run pytest                  # 42 tests
+uv run pytest                  # 55 tests
 ```
 
 ## IDE
