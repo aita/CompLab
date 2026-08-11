@@ -20,6 +20,8 @@ fun main() -> int {
 }
 ```
 
+- [`doc/index.md`](doc/index.md) — the book: how both interpreters are built, one
+  chapter per concern, in Japanese.
 - [`doc/language.md`](doc/language.md) — the language reference.
 - [`interpreter/grammar/Otter.g4`](interpreter/grammar/Otter.g4) — the grammar,
   which is the last word on the syntax.
