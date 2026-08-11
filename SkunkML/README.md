@@ -173,6 +173,11 @@ Japanese: [プログラムが通る道](doc/00-pipeline.md) と
 [命令選択](doc/12-select.md) から [ループと命令スケジューリング](doc/17-loops.md) まで。
 取り決めだけ見たいなら [ABI リファレンス](doc/18-abi.md)。
 
+The grammar on its own, apart from the book, is
+[`spec/grammar.md`](spec/grammar.md): the tokens and an EBNF, the precedence
+table and the five things it decides, and the 128 productions themselves --
+enough to write the parser again without reading `parser.mly`.
+
 ## What is deliberately missing
 
 No exceptions, no characters, no user-defined infix operators, no polymorphic
