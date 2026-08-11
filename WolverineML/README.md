@@ -39,6 +39,12 @@ every dump in it taken from an actual run. Two to start with:
 [パイプライン](doc/00-pipeline.md) と
 [レジスタ割り当て(1) 支配木彩色](doc/07-chordal.md)。
 
+The grammar on its own, apart from the book, is
+[`spec/grammar.md`](spec/grammar.md): the tokens and an EBNF, and the same
+thing again as LALR(1) productions with a precedence table, so that a parser
+can be written from it with yacc, bison, menhir or ocamlyacc rather than by
+hand.
+
 ## The compilers
 
 [`python/`](python) holds the one this file describes, and the one the book is
