@@ -1,12 +1,8 @@
 // System partition — the facade tying the pipeline together: parse -> compile
 // -> run, plus class/method definition. Owns the Heap and the VM.
-module;
-#include <string>
-#include <string_view>
-#include <vector>
-
 export module st:system;
 
+import std;
 import :objects;
 import :heap;
 import :vm;

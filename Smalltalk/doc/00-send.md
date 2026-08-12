@@ -5,7 +5,7 @@
 
 ```
 $ cd cpp && ./build/smalltalk
-small Smalltalk (C++20 modules) — v0.1.0
+small Smalltalk (C++23 modules) — v0.1.0
 3 + 4 factorial  =>  27
 ```
 

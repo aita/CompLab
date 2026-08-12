@@ -1,10 +1,6 @@
 // A small benchmark suite exercising different parts of the VM. Build in
 // Release and run: ./build/st_bench
-#include <chrono>
-#include <print>
-#include <string>
-#include <vector>
-
+import std;
 import st;
 
 namespace {

@@ -7,17 +7,9 @@
 // unwinds the explicit activation chain, and errors set an error flag that the
 // loop checks. GC only runs at the top of the loop, where every live value is
 // reachable from the active context or the globals.
-module;
-#include <cstdint>
-#include <print>
-#include <span>
-#include <string>
-#include <unordered_map>
-#include <variant>
-#include <vector>
-
 export module st:vm;
 
+import std;
 import :bytecode;
 import :objects;
 import :heap;

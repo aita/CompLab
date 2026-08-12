@@ -1,9 +1,6 @@
 // Dependency-free test runner (no framework, no exceptions). The process exit
 // code is the number of failed checks.
-#include <print>
-#include <string>
-#include <string_view>
-
+import std;
 import st;
 
 namespace {

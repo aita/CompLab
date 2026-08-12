@@ -1,9 +1,7 @@
 // Bytecode partition — the instruction set (pure data, no dependencies).
-module;
-#include <cstdint>
-#include <string>
-
 export module st:bytecode;
+
+import std;
 
 export namespace st {
 

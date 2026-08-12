@@ -4,8 +4,9 @@
 # build/compile_commands.json exists.
 #
 # Note: clangd's support for C++20 *named modules* is still experimental — some
-# `import :partition;` lines may remain underlined even when the CMake/Ninja
-# build is clean. The build is the source of truth.
+# `import :partition;` / `import std;` lines may remain underlined, and `std::`
+# names may look unresolved, even when the CMake/Ninja build is clean. The build
+# is the source of truth.
 CompileFlags:
   CompilationDatabase: build
   Add:

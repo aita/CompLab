@@ -2,15 +2,9 @@
 //
 // Exception-free: numeric literals are parsed with std::from_chars and errors
 // are reported by returning a LexResult with ok == false, never by throwing.
-module;
-#include <cctype>
-#include <charconv>
-#include <cstdint>
-#include <string>
-#include <string_view>
-#include <vector>
-
 export module st:lexer;
+
+import std;
 
 export namespace st {
 

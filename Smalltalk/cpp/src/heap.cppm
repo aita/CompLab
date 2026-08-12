@@ -5,16 +5,9 @@
 // the interned symbols) and frees the rest. Marking is iterative (an explicit
 // worklist) so a deep object graph can't overflow the C++ stack. No shared_ptr
 // / reference counting; no exceptions.
-module;
-#include <cstddef>
-#include <span>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
 export module st:heap;
 
+import std;
 import :objects;
 
 export namespace st {

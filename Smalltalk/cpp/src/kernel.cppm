@@ -3,16 +3,9 @@
 // Primitives are leaf operations (arithmetic, identity, new, I/O); none re-enter
 // the VM to run a block, so the driver loop never nests and no exceptions are
 // needed. Block-taking control flow is inlined by the compiler instead.
-module;
-#include <cctype>
-#include <span>
-#include <cstdint>
-#include <string>
-#include <variant>
-#include <vector>
-
 export module st:kernel;
 
+import std;
 import :objects;
 import :vm;
 import :heap;

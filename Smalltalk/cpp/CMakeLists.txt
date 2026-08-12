@@ -1,4 +1,10 @@
-cmake_minimum_required(VERSION 3.28)
+cmake_minimum_required(VERSION 3.30)
+
+# `import std;` is still behind an experimental gate in CMake, keyed by a UUID
+# that changes with the CMake version. This one is for CMake 4.3; bump it (see
+# Help/dev/experimental.rst in the CMake sources) if the configure step reports
+# the feature as unsupported. Must be set before `project()` enables CXX.
+set(CMAKE_EXPERIMENTAL_CXX_IMPORT_STD "451f2fe2-a8a2-47c3-bc32-94786d8fc91b")
 
 # Prefer clang++ for a fresh build tree: GCC 16's C++20 modules currently fail
 # to read this project's `st:vm` BMI ("Bad file data"). Override with
@@ -21,6 +27,16 @@ endif()
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Every translation unit says `import std;` instead of including headers, so the
+# standard library module has to be built for us. Needs Ninja plus a toolchain
+# that ships a modules manifest (clang with libc++/libstdc++, or GCC 15+).
+set(CMAKE_CXX_MODULE_STD 1)
+if(NOT "23" IN_LIST CMAKE_CXX_COMPILER_IMPORT_STD)
+  message(FATAL_ERROR
+    "This build needs `import std;` support: "
+    "${CMAKE_CXX_COMPILER_IMPORT_STD_ERROR_MESSAGE}")
+endif()
 
 # Emit build/compile_commands.json so clangd (Zed / VS Code) knows the flags.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

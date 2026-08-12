@@ -1,7 +1,9 @@
 # small Smalltalk — C++
 
 A C++23 port of the [Python implementation](../python/README.md), built with
-**C++20 modules**. Same language subset and VM design; different constraints:
+**C++23 modules**: the interpreter is one module `st` with partitions, and every
+translation unit says `import std;` — there is not a single `#include` in the
+tree. Same language subset and VM design as Python; different constraints:
 
 - **No `shared_ptr` / reference counting.** Heap objects are owned by a `Heap`
   and reclaimed by a **mark-and-sweep** garbage collector over raw pointers
@@ -91,7 +93,8 @@ Not yet ported from the Python side: metaclasses and the IDE.
 
 ## Build & run
 
-Needs CMake ≥ 3.28, Ninja, and a modules-capable compiler.
+Needs CMake ≥ 3.30, Ninja, and a modules-capable compiler whose standard library
+ships a `std` module (Clang with libstdc++ 15+ or libc++, or GCC 15+).
 
 ```sh
 cmake -S . -B build -G Ninja   # defaults to a Release (-O3) build
@@ -108,6 +111,14 @@ unoptimized build. Benchmark the Release build — `-O0` is ~10× slower.
 > data"); the `CMakeLists.txt` therefore prefers `clang++` for a fresh build
 > tree. Override with `-DCMAKE_CXX_COMPILER=...`. BMIs are compiler-specific and
 > not portable — pick one compiler per build tree.
+>
+> **`import std;` note.** CMake builds the standard library module for us
+> (`CMAKE_CXX_MODULE_STD`), but the feature is still behind an experimental gate
+> whose UUID is tied to the CMake version. `CMakeLists.txt` sets the UUID for
+> CMake 4.3; on another CMake, configure fails with a message naming the reason,
+> and the fix is to replace that UUID with the one in that CMake's
+> `Help/dev/experimental.rst`. The `std` module is compiled with this project's
+> flags, `-fno-exceptions -fno-rtti` included, so the BMI matches.
 
 ### Editor / clangd (Zed, VS Code)
 

@@ -1,13 +1,9 @@
 // AST partition. Compile-time only: nodes are owned by std::unique_ptr (not
 // shared_ptr) and freed once a method is compiled. Literals are described
 // structurally here and materialized into GC values by the compiler.
-module;
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <vector>
-
 export module st:ast;
+
+import std;
 
 export namespace st {
 

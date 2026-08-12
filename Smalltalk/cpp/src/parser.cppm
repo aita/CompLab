@@ -1,14 +1,8 @@
 // Parser partition — recursive descent, exception-free (errors are reported via
 // ParseResult::ok / error). Precedence: unary > binary > keyword.
-module;
-#include <memory>
-#include <string>
-#include <string_view>
-#include <utility>
-#include <vector>
-
 export module st:parser;
 
+import std;
 import :lexer;
 import :ast;
 

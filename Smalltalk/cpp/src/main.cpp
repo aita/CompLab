@@ -1,13 +1,10 @@
-#include <iostream>
-#include <print>
-#include <string>
-
+import std;
 import st;
 
 int main() {
     using namespace st;
     System sys;
-    std::println("small Smalltalk (C++20 modules) — v{}", version);
+    std::println("small Smalltalk (C++23 modules) — v{}", version);
 
     // A few demo evaluations.
     const char* demos[] = {

@@ -6,16 +6,9 @@
 // literal blocks are compiled inline to jumps — including to:do: / timesRepeat:
 // (their loop variable is bound to a local slot) so no primitive ever has to
 // re-enter the VM to run a block.
-module;
-#include <cstdint>
-#include <memory>
-#include <string>
-#include <unordered_map>
-#include <utility>
-#include <vector>
-
 export module st:compiler;
 
+import std;
 import :bytecode;
 import :objects;
 import :heap;

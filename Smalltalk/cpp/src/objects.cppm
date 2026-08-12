@@ -5,17 +5,9 @@
 // :heap partition). Activations (`Context`) and closures (`Block`) are objects
 // too, so a captured frame stays alive as long as a closure references it —
 // no shared_ptr, no reference counting.
-module;
-#include <cstdint>
-#include <cstring>
-#include <functional>
-#include <span>
-#include <string>
-#include <unordered_map>
-#include <vector>
-
 export module st:objects;
 
+import std;
 import :bytecode;
 
 export namespace st {
