@@ -1,0 +1,15 @@
+sig S
+  type t
+  val make : int -> t
+end
+mod A : S
+  type t = int
+  fun make n = n
+end
+mod F (X : S) : S
+  type t = X.t
+  fun make n = X.make n
+end
+mod P = F(A)
+mod Q = F(A)
+val bad : Q.t = P.make 1

@@ -1,0 +1,1 @@
+val _ = println (intToString (1 / 0))

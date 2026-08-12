@@ -1,0 +1,27 @@
+errors/syntax.gr:2:1: syntax error
+errors/unbound.gr:1:9: nowhere is not bound
+errors/mismatch.gr:2:15: this argument does not fit: int and string do not match
+errors/occurs.gr:1:5: the definition of f: this type would contain itself
+errors/overload.gr:2:15: this argument does not fit: bool is not admitted by arithmetic
+errors/branches.gr:1:33: the two branches of if: int and string do not match
+errors/record.gr:2:36: this argument does not fit: {x : 'a | 'b} and int do not match
+errors/nofield.gr:3:9: the record this .zz is taken from: there is no field zz
+errors/rowfield.gr:2:36: this argument does not fit: there is no field x
+errors/rowdup.gr:1:14: this record type mentions the field x twice
+errors/patann.gr:2:28: this argument does not fit: int and string do not match
+errors/clause.gr:2:5: this clause defines g, but the first one defines f
+errors/arity.gr:2:5: f takes 2 parameters here and 1 in its first clause
+errors/dupbind.gr:1:1: a is bound twice in this pattern
+errors/fixity.gr:1:15: < and < are non-associative at the same precedence
+errors/consop.gr:1:5: :: is a constructor, so it cannot be bound as a value
+errors/seq.gr:1:15: everything but the last expression of begin must be unit: int and unit do not match
+errors/opaque.gr:9:11: this argument does not fit: t is not admitted by arithmetic
+errors/generative.gr:15:17: this expression: these are two different types, both called t
+errors/missing.gr:6:1: the module does not define one
+errors/wrongsig.gr:4:1: f does not match its specification: int and 'a do not match
+  it has int -> int
+  the signature asks for 'a -> 'a
+errors/wheretype.gr:4:9: this signature has no abstract type u
+warning: errors/runtime.gr:2:15: this match does not match every value: Blue is not matched
+runtime error: errors/runtime.gr:3:18: no case matches Blue
+runtime error: / by zero

@@ -1,0 +1,152 @@
+(* A tour of GrisonML: everything in the core language, in the order the
+   grammar introduces it. *)
+
+(* ---- values, functions, currying ---------------------------------- *)
+
+val greeting = "grison"
+val pi = 3.14159
+val yes = true
+
+fun square n = n * n
+fun add a b = a + b
+
+val add10 = add 10
+
+val _ = println ("hello, " ^ greeting)
+val _ = println (intToString (square (add10 32)))
+
+(* Arithmetic and comparison range over a class rather than one type, so a
+   function that only uses them stays polymorphic. *)
+
+fun double x = x + x
+fun larger a b = if a > b then a else b
+
+val _ = println (intToString (double 21))
+val _ = println (realToString (double 1.5))
+val _ = println (larger "apple" "banana")
+
+(* ---- datatypes and matching --------------------------------------- *)
+
+type suit = Clubs | Diamonds | Hearts | Spades
+type card = Card (suit * int)
+
+fun suitName s =
+  case s of
+    Clubs => "clubs"
+  | Diamonds => "diamonds"
+  | Hearts => "hearts"
+  | Spades => "spades"
+
+fun red s = s == Hearts or s == Diamonds
+
+fun rankName n =
+  case n of
+    1 => "ace"
+  | 11 => "jack"
+  | 12 => "queen"
+  | 13 => "king"
+  | k if k > 1 and k < 11 => intToString k
+  | _ => error "no such rank"
+
+fun cardName c = case c of Card (s, n) => rankName n ^ " of " ^ suitName s
+
+val _ = println (cardName (Card (Spades, 12)))
+val _ = println (boolToString (red Hearts))
+
+(* A type declaration and a datatype declaration are the same declaration. *)
+
+type name = string
+type ('k, 'v) entry = { key : 'k, value : 'v }
+type 'a option2 = Absent | Present 'a
+
+(* ---- recursion, and the group a run of "fun"s makes ----------------- *)
+
+fun even n = if n == 0 then true else odd (n - 1)
+fun odd n = if n == 0 then false else even (n - 1)
+
+val _ = println (boolToString (even 10) ^ " " ^ boolToString (odd 10))
+
+type 'a tree = Leaf | Node ('a tree * 'a * 'a tree)
+
+fun insert x t =
+  case t of
+    Leaf => Node (Leaf, x, Leaf)
+  | Node (l, v, r) =>
+      if x < v then Node (insert x l, v, r)
+      else if x > v then Node (l, v, insert x r)
+      else t
+
+fun flatten t =
+  case t of
+    Leaf => []
+  | Node (l, v, r) => List.append (flatten l) (v :: flatten r)
+
+val sorted = flatten (List.foldl (fn t => fn x => insert x t) Leaf [5, 3, 9, 1, 3, 7])
+val _ = println (sepBy " " (List.map intToString sorted))
+
+(* ---- lists, tuples, records ---------------------------------------- *)
+
+val nums = [1, 2, 3, 4, 5, 6]
+val evens = List.filter (fn n => n % 2 == 0) nums
+val pairs = List.zip nums (List.map intToString nums)
+
+val _ = println (sepBy " " (List.map intToString evens))
+val _ = println (intToString (List.foldl add 0 nums))
+
+type point = { x : int, y : int }
+
+(* A record type is a row, so a projection asks only that the record have the
+   field it takes.  distance is inferred, and works on any record with an x
+   and a y in it, whatever else is there. *)
+
+fun distance a b =
+  let val dx = a.x - b.x
+      val dy = a.y - b.y
+  in
+    dx * dx + dy * dy
+  end
+
+val origin = { x = 0, y = 0 }
+val there = { x = 2, y = 2, name = "there" }
+val _ = println (intToString (distance origin there))
+
+(* A record pattern is open in the same way: shift takes anything with an x
+   and a y, and gives back a record of exactly two fields. *)
+
+fun shift {x, y} = { x = x + 1, y = y + 1 }
+val _ = println (intToString (distance origin (shift (shift origin))))
+
+(* An annotation closes it, and a pattern may carry one. *)
+
+val corner : point = { x = 1, y = 1 }
+fun mirror (p : point) = { x = p.y, y = p.x }
+val _ = println (intToString (mirror corner).x)
+
+(* {x : int | 'r} is the open form written down. *)
+
+val depth : {x : int | 'r} -> int = fn r => r.x
+val _ = println (intToString (depth there))
+
+(* ---- fn, let, begin, and the operators you declare ------------------ *)
+
+infixr 1 @@
+infixl 6 <+>
+
+fun (@@) f x = f x
+fun (<+>) a b = a ^ " " ^ b
+
+val _ = println @@ "declared" <+> "operators" <+> "compose"
+
+val counter =
+  let fun from n = fn () => n + 1
+  in from 41
+  end
+
+val _ = println (intToString (counter ()))
+
+val _ =
+  begin
+    print "one ";
+    print "two ";
+    println "three"
+  end

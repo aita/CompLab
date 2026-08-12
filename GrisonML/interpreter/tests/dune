@@ -1,0 +1,152 @@
+; Golden tests: run a program, diff its output against the .expected file.
+; Update them all with `dune promote` after `dune test`.
+
+(rule
+ (with-outputs-to
+  features.out
+  (run %{exe:../src/grison.exe} %{dep:features.gr})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff features.expected features.out)))
+
+; Coverage warnings go to stderr and the program still runs, so both streams
+; are collected.
+
+(rule
+ (with-outputs-to
+  warnings.out
+  (run %{exe:../src/grison.exe} %{dep:warnings.gr})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff warnings.expected warnings.out)))
+
+; What the checker infers, rather than what the program prints.
+
+(rule
+ (with-stdout-to
+  types.out
+  (run %{exe:../src/grison.exe} -t %{dep:types.gr})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff types.expected types.out)))
+
+(rule
+ (with-stdout-to
+  tour.out
+  (run %{exe:../src/grison.exe} %{dep:../examples/tour.gr})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff tour.expected tour.out)))
+
+(rule
+ (with-stdout-to
+  modules.out
+  (run %{exe:../src/grison.exe} %{dep:../examples/modules.gr})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff modules.expected modules.out)))
+
+(rule
+ (with-stdout-to
+  calc.out
+  (run %{exe:../src/grison.exe} %{dep:../examples/calc.gr})))
+
+(rule
+ (alias runtest)
+ (action
+  (diff calc.expected calc.out)))
+
+; Every program under errors/ is expected to fail; their messages (stdout and
+; stderr together) are collected into one golden file.
+
+(rule
+ (with-outputs-to
+  errors.out
+  (progn
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/syntax.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/unbound.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/mismatch.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/occurs.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/overload.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/branches.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/record.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/nofield.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/rowfield.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/rowdup.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/patann.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/clause.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/arity.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/dupbind.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/fixity.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/consop.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/seq.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/opaque.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/generative.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/missing.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/wrongsig.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/wheretype.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/runtime.gr}))
+   (with-accepted-exit-codes
+    1
+    (run %{exe:../src/grison.exe} %{dep:errors/divzero.gr})))))
+
+(rule
+ (alias runtest)
+ (action
+  (diff errors.expected errors.out)))

@@ -1,0 +1,1 @@
+val _ = begin 1; println "two" end

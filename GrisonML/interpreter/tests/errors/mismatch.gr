@@ -1,0 +1,2 @@
+fun f n = n + 1
+val x = f "one"

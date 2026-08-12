@@ -1,0 +1,112 @@
+(* A calculator written in GrisonML: a lexer over a char list, a recursive
+   descent parser into a datatype, a printer, and an evaluator.
+
+   Every "fun" here is adjacent to the next, so the whole file is one
+   recursive group and the parser's four functions can call each other. *)
+
+type token =
+    TNum int
+  | TPlus
+  | TMinus
+  | TStar
+  | TSlash
+  | TOpen
+  | TClose
+
+type exp =
+    Num int
+  | Add (exp * exp)
+  | Sub (exp * exp)
+  | Mul (exp * exp)
+  | Div (exp * exp)
+
+(* ---- lexer --------------------------------------------------------- *)
+
+fun isDigit c = c >= '0' and c <= '9'
+
+fun digits cs acc =
+  case cs of
+    c :: rest if isDigit c => digits rest (acc * 10 + (ord c - ord '0'))
+  | _ => (acc, cs)
+
+fun lex cs =
+  case cs of
+    [] => []
+  | ' ' :: rest => lex rest
+  | '+' :: rest => TPlus :: lex rest
+  | '-' :: rest => TMinus :: lex rest
+  | '*' :: rest => TStar :: lex rest
+  | '/' :: rest => TSlash :: lex rest
+  | '(' :: rest => TOpen :: lex rest
+  | ')' :: rest => TClose :: lex rest
+  | c :: _ =>
+      if isDigit c then
+        case digits cs 0 of (n, rest) => TNum n :: lex rest
+      else error ("this character has no meaning here: " ^ charToString c)
+
+(* ---- parser -------------------------------------------------------- *)
+
+fun expr ts = case term ts of (l, rest) => exprTail l rest
+
+fun exprTail l ts =
+  case ts of
+    TPlus :: rest => (case term rest of (r, more) => exprTail (Add (l, r)) more)
+  | TMinus :: rest => (case term rest of (r, more) => exprTail (Sub (l, r)) more)
+  | _ => (l, ts)
+
+fun term ts = case atom ts of (l, rest) => termTail l rest
+
+fun termTail l ts =
+  case ts of
+    TStar :: rest => (case atom rest of (r, more) => termTail (Mul (l, r)) more)
+  | TSlash :: rest => (case atom rest of (r, more) => termTail (Div (l, r)) more)
+  | _ => (l, ts)
+
+fun atom ts =
+  case ts of
+    TNum n :: rest => (Num n, rest)
+  | TOpen :: rest =>
+      (case expr rest of
+         (e, TClose :: more) => (e, more)
+       | (_, _) => error "a ( was never closed")
+  | _ => error "a number or a ( was expected"
+
+(* ---- printer and evaluator ------------------------------------------ *)
+
+fun show e =
+  case e of
+    Num n => intToString n
+  | Add (a, b) => "(" ^ show a ^ " + " ^ show b ^ ")"
+  | Sub (a, b) => "(" ^ show a ^ " - " ^ show b ^ ")"
+  | Mul (a, b) => "(" ^ show a ^ " * " ^ show b ^ ")"
+  | Div (a, b) => "(" ^ show a ^ " / " ^ show b ^ ")"
+
+fun eval e =
+  case e of
+    Num n => n
+  | Add (a, b) => eval a + eval b
+  | Sub (a, b) => eval a - eval b
+  | Mul (a, b) => eval a * eval b
+  | Div (a, b) => eval a / eval b
+
+fun parse s =
+  case expr (lex (explode s)) of
+    (e, []) => e
+  | (_, _) => error ("there is more after the end of this expression: " ^ s)
+
+fun run inputs =
+  case inputs of
+    [] => ()
+  | s :: rest =>
+      begin
+        println (s ^ "  =>  " ^ show (parse s) ^ "  =>  " ^ intToString (eval (parse s)));
+        run rest
+      end
+
+val _ = run [
+  "1 + 2 * 3",
+  "(1 + 2) * 3",
+  "100 / 7",
+  "2 * (3 + 4) - 5",
+  "42"
+]

@@ -1,0 +1,18 @@
+val between : 'a[ord] -> 'a[ord] -> 'a[ord] -> bool
+val boxed : t
+val compose : ('a -> 'b) -> ('c -> 'a) -> 'c -> 'b
+val const : 'a -> 'b -> 'a
+val double : 'a[num] -> 'a[num]
+val flip : ('a -> 'b -> 'c) -> 'b -> 'a -> 'c
+val fns : (int -> int) list
+val getX : point -> int
+val idAnnotated : 'a -> 'a
+val join : string -> string -> string
+val mirror : 'a tree -> 'a tree
+val mixed : int * string * char * real * bool * unit
+val nested : int list list
+val pairUp : 'a -> 'b -> 'a * 'b
+val peeked : int
+val singleton : 'a -> 'a tree
+val swap : {x : 'a, y : 'b | 'c} -> {x : 'b, y : 'a}
+val twice : ('a -> 'a) -> 'a -> 'a

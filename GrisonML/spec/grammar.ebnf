@@ -1,0 +1,740 @@
+(* Modern ML Dialect — EBNF
+ *
+ * Design summary:
+ * - ML-style type variables: 'a
+ * - ML/Haskell-style whitespace function application
+ * - val / fun / type retained
+ * - datatype merged into type declarations
+ * - anonymous functions use SML-style fn ... => ...
+ * - case ... of replaced by match ... with
+ * - match has no end
+ * - let ... in ... end retained
+ * - begin ... end used for sequencing
+ * - andalso / orelse replaced by and / or
+ * - equality uses == and !=
+ * - structure -> mod
+ * - signature -> sig
+ * - functor -> parameterized mod
+ * - functor application uses module application syntax F(M)
+* - fixity declarations use infixl / infixr / infix with explicit precedence
+* - imports use import ... as ... instead of open
+ * - transparent/opaque module ascription can be expressed with
+ *   signature constraints; opaque is intended as the default policy.
+ *)
+
+program =
+    { declaration }
+    ;
+
+
+(* ============================================================
+ * Lexical syntax
+ * ============================================================ *)
+
+lower-ident =
+    lower ,
+    { letter | digit | "_" | "'" }
+    ;
+
+upper-ident =
+    upper ,
+    { letter | digit | "_" | "'" }
+    ;
+
+identifier =
+      lower-ident
+    | upper-ident
+    ;
+
+type-var =
+    "'" , lower-ident
+    ;
+
+integer-literal =
+    digit , { digit }
+    ;
+
+real-literal =
+    digit , { digit } , "." , digit , { digit }
+    ;
+
+char-literal =
+    "'" , char-content , "'"
+    ;
+
+string-literal =
+    '"' , { string-char } , '"'
+    ;
+
+bool-literal =
+      "true"
+    | "false"
+    ;
+
+unit-literal =
+    "(" , ")"
+    ;
+
+literal =
+      integer-literal
+    | real-literal
+    | char-literal
+    | string-literal
+    | bool-literal
+    | unit-literal
+    ;
+
+lower =
+      "a" | "b" | "c" | "d" | "e" | "f" | "g"
+    | "h" | "i" | "j" | "k" | "l" | "m" | "n"
+    | "o" | "p" | "q" | "r" | "s" | "t" | "u"
+    | "v" | "w" | "x" | "y" | "z"
+    ;
+
+upper =
+      "A" | "B" | "C" | "D" | "E" | "F" | "G"
+    | "H" | "I" | "J" | "K" | "L" | "M" | "N"
+    | "O" | "P" | "Q" | "R" | "S" | "T" | "U"
+    | "V" | "W" | "X" | "Y" | "Z"
+    ;
+
+letter =
+      lower
+    | upper
+    ;
+
+digit =
+      "0" | "1" | "2" | "3" | "4"
+    | "5" | "6" | "7" | "8" | "9"
+    ;
+
+char-content =
+    ? implementation-defined character content ?
+    ;
+
+string-char =
+    ? implementation-defined string character ?
+    ;
+
+
+(* ============================================================
+ * Top-level declarations
+ * ============================================================ *)
+
+declaration =
+      value-declaration
+    | function-declaration
+    | type-declaration
+    | fixity-declaration
+    | signature-definition
+    | module-declaration
+    | import-declaration
+    ;
+
+
+(* ============================================================
+ * Value and function declarations
+ * ============================================================ *)
+
+value-declaration =
+    "val" ,
+    pattern ,
+    [ ":" , type ] ,
+    "=" ,
+    expression
+    ;
+
+function-declaration =
+    "fun" ,
+    function-clause ,
+    { "|" , function-clause }
+    ;
+
+function-clause =
+    function-name ,
+    { function-parameter } ,
+    [ ":" , type ] ,
+    "=" ,
+    expression
+    ;
+
+function-name =
+      lower-ident
+    | "(" , operator , ")"
+    ;
+
+function-parameter =
+    atomic-pattern
+    ;
+
+
+(* ============================================================
+ * Type declarations
+ * ============================================================ *)
+
+type-declaration =
+    "type" ,
+    type-head ,
+    "=" ,
+    type-definition
+    ;
+
+type-head =
+      lower-ident
+    | type-var , lower-ident
+    | "(" ,
+        type-var ,
+        "," ,
+        type-var ,
+        { "," , type-var } ,
+      ")" ,
+      lower-ident
+    ;
+
+type-definition =
+      type
+    | variant-definition
+    ;
+
+variant-definition =
+    [ "|" ] ,
+    constructor-definition ,
+    { "|" , constructor-definition }
+    ;
+
+constructor-definition =
+    upper-ident ,
+    [ constructor-argument ]
+    ;
+
+constructor-argument =
+    atomic-type
+    ;
+
+
+(* ============================================================
+ * Fixity declarations
+ * ============================================================ *)
+
+fixity-declaration =
+      "infixl" , precedence , operator-list
+    | "infixr" , precedence , operator-list
+    | "infix"  , precedence , operator-list
+    ;
+
+precedence =
+    digit
+    ;
+
+operator-list =
+    operator ,
+    { operator }
+    ;
+
+operator =
+    operator-char ,
+    { operator-char }
+    ;
+
+operator-char =
+      "!"
+    | "$"
+    | "%"
+    | "&"
+    | "*"
+    | "+"
+    | "-"
+    | "/"
+    | ":"
+    | "<"
+    | "="
+    | ">"
+    | "?"
+    | "@"
+    | "\\"
+    | "^"
+    | "|"
+    | "~"
+    ;
+
+
+(* ============================================================
+ * Signatures
+ * ============================================================ *)
+
+signature-definition =
+    "sig" ,
+    signature-name ,
+    { signature-item } ,
+    "end"
+    ;
+
+signature-name =
+    upper-ident
+    ;
+
+signature-item =
+      abstract-type-spec
+    | manifest-type-spec
+    | value-spec
+    | module-spec
+    | signature-include
+    ;
+
+abstract-type-spec =
+    "type" ,
+    type-head
+    ;
+
+manifest-type-spec =
+    "type" ,
+    type-head ,
+    "=" ,
+    type
+    ;
+
+value-spec =
+    "val" ,
+    lower-ident ,
+    ":" ,
+    type
+    ;
+
+module-spec =
+    "mod" ,
+    module-name ,
+    ":" ,
+    signature-expression
+    ;
+
+signature-include =
+    "include" ,
+    signature-expression
+    ;
+
+signature-expression =
+    signature-path ,
+    { where-type-clause }
+    ;
+
+signature-path =
+    signature-name ,
+    { "." , signature-name }
+    ;
+
+where-type-clause =
+    "where" ,
+    "type" ,
+    type-path ,
+    "=" ,
+    type
+    ;
+
+
+(* ============================================================
+ * Modules and functors
+ * ============================================================ *)
+
+module-declaration =
+      module-definition
+    | module-binding
+    ;
+
+module-definition =
+    "mod" ,
+    module-name ,
+    { module-parameter } ,
+    [ ":" , signature-expression ] ,
+    { module-item } ,
+    "end"
+    ;
+
+module-binding =
+    "mod" ,
+    module-name ,
+    [ ":" , signature-expression ] ,
+    "=" ,
+    module-expression
+    ;
+
+module-name =
+    upper-ident
+    ;
+
+module-parameter =
+    "(" ,
+    module-name ,
+    ":" ,
+    signature-expression ,
+    ")"
+    ;
+
+module-item =
+      value-declaration
+    | function-declaration
+    | type-declaration
+    | module-declaration
+    | import-declaration
+    | module-include
+    ;
+
+module-include =
+    "include" ,
+    module-path
+    ;
+
+module-expression =
+      module-path
+    | module-application
+    ;
+
+module-application =
+    module-path ,
+    "(" ,
+    module-expression ,
+    ")"
+    ;
+
+module-path =
+    module-name ,
+    { "." , module-name }
+    ;
+
+import-declaration =
+    "import" ,
+    module-path ,
+    [ import-clause ]
+    ;
+
+import-clause =
+      "as" , module-name
+    | "(" , import-name , { "," , import-name } , ")"
+    ;
+
+import-name =
+      lower-ident
+    | upper-ident
+    | "(" , operator , ")"
+    ;
+
+
+(* ============================================================
+ * Expressions
+ * ============================================================ *)
+
+expression =
+      lambda-expression
+    | logic-or-expression
+    ;
+
+lambda-expression =
+    "fn" ,
+    lambda-rule ,
+    { "|" , lambda-rule }
+    ;
+
+lambda-rule =
+    pattern ,
+    "=>" ,
+    expression
+    ;
+
+logic-or-expression =
+    logic-and-expression ,
+    { "or" , logic-and-expression }
+    ;
+
+logic-and-expression =
+    comparison-expression ,
+    { "and" , comparison-expression }
+    ;
+
+comparison-expression =
+    cons-expression ,
+    [ comparison-operator , cons-expression ]
+    ;
+
+comparison-operator =
+      "=="
+    | "!="
+    | "<"
+    | "<="
+    | ">"
+    | ">="
+    ;
+
+cons-expression =
+    additive-expression ,
+    [ "::" , cons-expression ]
+    ;
+
+additive-expression =
+    multiplicative-expression ,
+    { additive-operator , multiplicative-expression }
+    ;
+
+additive-operator =
+      "+"
+    | "-"
+    | "^"
+    ;
+
+multiplicative-expression =
+    prefix-expression ,
+    { multiplicative-operator , prefix-expression }
+    ;
+
+multiplicative-operator =
+      "*"
+    | "/"
+    | "%"
+    ;
+
+prefix-expression =
+      application-expression
+    | prefix-operator , prefix-expression
+    ;
+
+prefix-operator =
+      "-"
+    | "not"
+    ;
+
+application-expression =
+    postfix-expression ,
+    { postfix-expression }
+    ;
+
+postfix-expression =
+    primary-expression ,
+    { "." , lower-ident }
+    ;
+
+primary-expression =
+      literal
+    | lower-ident
+    | upper-ident
+    | qualified-value
+    | tuple-expression
+    | list-expression
+    | record-expression
+    | let-expression
+    | begin-expression
+    | if-expression
+    | case-expression
+    | "(" , expression , ")"
+    ;
+
+
+(* ============================================================
+ * Structured expressions
+ * ============================================================ *)
+
+let-expression =
+    "let" ,
+    { local-declaration } ,
+    "in" ,
+    expression ,
+    "end"
+    ;
+
+local-declaration =
+      value-declaration
+    | function-declaration
+    | type-declaration
+    | import-declaration
+    ;
+
+begin-expression =
+    "begin" ,
+    expression ,
+    { ";" , expression } ,
+    "end"
+    ;
+
+if-expression =
+    "if" ,
+    expression ,
+    "then" ,
+    expression ,
+    "else" ,
+    expression
+    ;
+
+case-expression =
+    "case" ,
+    expression ,
+    "of" ,
+    [ "|" ] ,
+    case-rule ,
+    { "|" , case-rule }
+    ;
+
+case-rule =
+    pattern ,
+    [ "if" , expression ] ,
+    "=>" ,
+    expression
+    ;
+
+
+(* ============================================================
+ * Compound expressions
+ * ============================================================ *)
+
+tuple-expression =
+    "(" ,
+    expression ,
+    "," ,
+    expression ,
+    { "," , expression } ,
+    ")"
+    ;
+
+list-expression =
+    "[" ,
+    [ expression , { "," , expression } ] ,
+    "]"
+    ;
+
+record-expression =
+    "{" ,
+    [ field-expression , { "," , field-expression } ] ,
+    "}"
+    ;
+
+field-expression =
+    lower-ident ,
+    [ "=" , expression ]
+    ;
+
+qualified-value =
+    module-path ,
+    "." ,
+    lower-ident
+    ;
+
+
+(* ============================================================
+ * Patterns
+ * ============================================================ *)
+
+pattern =
+    cons-pattern
+    ;
+
+cons-pattern =
+    constructor-pattern ,
+    [ "::" , cons-pattern ]
+    ;
+
+constructor-pattern =
+      atomic-pattern
+    | upper-ident , atomic-pattern
+    ;
+
+atomic-pattern =
+      "_"
+    | literal
+    | lower-ident
+    | upper-ident
+    | tuple-pattern
+    | list-pattern
+    | record-pattern
+    | "(" , pattern , ")"
+    ;
+
+tuple-pattern =
+    "(" ,
+    pattern ,
+    "," ,
+    pattern ,
+    { "," , pattern } ,
+    ")"
+    ;
+
+list-pattern =
+    "[" ,
+    [ pattern , { "," , pattern } ] ,
+    "]"
+    ;
+
+record-pattern =
+    "{" ,
+    [ field-pattern , { "," , field-pattern } ] ,
+    "}"
+    ;
+
+field-pattern =
+    lower-ident ,
+    [ "=" , pattern ]
+    ;
+
+
+(* ============================================================
+ * Types
+ * ============================================================ *)
+
+type =
+    function-type
+    ;
+
+function-type =
+    tuple-type ,
+    [ "->" , function-type ]
+    ;
+
+tuple-type =
+    type-application ,
+    { "*" , type-application }
+    ;
+
+type-application =
+      atomic-type
+    | atomic-type , type-constructor
+    | type-arguments , type-constructor
+    ;
+
+type-arguments =
+    "(" ,
+    type ,
+    "," ,
+    type ,
+    { "," , type } ,
+    ")"
+    ;
+
+atomic-type =
+      type-var
+    | type-constructor
+    | qualified-type
+    | record-type
+    | "(" , type , ")"
+    ;
+
+type-constructor =
+    lower-ident
+    ;
+
+qualified-type =
+    module-path ,
+    "." ,
+    lower-ident
+    ;
+
+type-path =
+      lower-ident
+    | module-path , "." , lower-ident
+    ;
+
+record-type =
+    "{" ,
+    [ field-type , { "," , field-type } ] ,
+    "}"
+    ;
+
+field-type =
+    lower-ident ,
+    ":" ,
+    type
+    ;

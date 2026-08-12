@@ -1,0 +1,2 @@
+fun getX r = r.x
+val _ = println (intToString (getX { y = 1 }))

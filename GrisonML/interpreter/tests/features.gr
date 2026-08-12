@@ -1,0 +1,214 @@
+(* The corners the examples do not reach. *)
+
+infixl 1 |>
+fun (|>) x f = f x
+
+(* ---- literals, and the escapes the grammar leaves to the lexer ------ *)
+
+val _ = println "tab:\there quote:\"q\" backslash:\\ done"
+val _ = println (boolToString (charToString '\n' == "\n"))
+val _ = println (realToString 2.5 ^ " " ^ realToString 3.0)
+val _ = println (intToString (ord 'A') ^ charToString (chr 66))
+val _ = println (implode (List.rev (explode "grison")))
+val _ = println (substring ("mustelidae", 2, 5))
+val _ = println (intToString (size "mustelidae"))
+
+(* ---- the ladder, and declarations that change it -------------------- *)
+
+val _ = println (boolToString (1 + 2 * 3 == 7))
+val _ = println (boolToString (2 * 3 + 1 == 7))
+val _ = println (intToString (10 - 3 - 2))
+val _ = println (sepBy "" (List.map intToString (1 :: 2 :: 3 :: [])))
+val _ = println (boolToString (true or false and false))
+val _ = println (boolToString (not true or 1 < 2))
+val _ = println (intToString (100 % 7) ^ " " ^ intToString (0 - 7 / 2))
+
+infixr 9 ^^
+fun (^^) a b = a ^ "." ^ b
+val _ = println ("a" ^^ "b" ^^ "c")
+
+val _ = 3 |> (fn n => n * n) |> intToString |> println
+
+(* An operator names a value wherever a name is wanted: in an expression, in a
+   val, and in a val specification.  :: is the exception, because it names the
+   list constructor rather than a value. *)
+val plus = (+)
+val _ = println (intToString (List.foldl plus 0 [1, 2, 3, 4]))
+
+val cons = (::)
+val _ = println (sepBy " " (List.map intToString (cons (1, cons (2, [])))))
+
+type pt = { px : int, py : int }
+val (<++>) : pt -> pt -> pt = fn a => fn b => { px = a.px + b.px, py = a.py + b.py }
+infixl 6 <++>
+val moved = { px = 1, py = 2 } <++> { px = 10, py = 20 }
+val _ = println (intToString moved.px ^ "/" ^ intToString moved.py)
+
+(* ---- prefix operators ------------------------------------------------ *)
+
+val _ = println (intToString (0 - 5) ^ " " ^ intToString (- 5) ^ " " ^ realToString (-2.5))
+val _ = println (boolToString (not false))
+
+(* ---- shadowing ------------------------------------------------------- *)
+
+val n = 1
+val n = n + 1
+val _ = println (intToString n)
+
+fun id x = "shadowed " ^ x
+val _ = println (id "id")
+
+(* ---- deep patterns, guards, and or-less matching --------------------- *)
+
+type 'a rose = Rose ('a * 'a rose list)
+
+fun total t = case t of Rose (v, kids) => v + List.foldl (fn a => fn k => a + total k) 0 kids
+
+val _ = println (intToString (total (Rose (1, [Rose (2, []), Rose (3, [Rose (4, [])])]))))
+
+fun describe p =
+  case p of
+    (0, 0) => "origin"
+  | (x, 0) if x > 0 => "east"
+  | (_, 0) => "west"
+  | (0, _) => "vertical"
+  | (_, _) => "elsewhere"
+
+val _ = println (sepBy " " (List.map describe [(0, 0), (3, 0), (0 - 3, 0), (0, 9), (1, 1)]))
+
+(* ---- option and either from the prelude ------------------------------ *)
+
+val _ = println (Option.getOpt (List.find (fn n => n > 2) [1, 2, 3], 0) |> intToString)
+val _ = println (Option.getOpt (List.find (fn n => n > 9) [1, 2, 3], 0) |> intToString)
+val _ = println (boolToString (Option.isSome (Option.map (fn n => n + 1) (Some 1))))
+
+fun side e = case e of Left n => "L" ^ intToString n | Right s => "R" ^ s
+val _ = println (side (Left 1) ^ side (Right "x"))
+
+(* ---- let, begin, closures ------------------------------------------- *)
+
+val counters =
+  let fun make start = fn step => start + step
+  in [make 10, make 20]
+  end
+
+val _ = println (sepBy " " (List.map (fn f => intToString (f 5)) counters))
+
+val _ =
+  let val a = 1
+  in let val a = a + 1
+     in println (intToString a)
+     end
+  end
+
+val _ = begin println "first"; println "second" end
+
+(* ---- records --------------------------------------------------------- *)
+
+type person = { name : string, age : int }
+
+val alice = { name = "Alice", age = 30 }
+val older : person -> person = fn p => { name = p.name, age = p.age + 1 }
+fun label {name, age} = name ^ " (" ^ intToString age ^ ")"
+
+val _ = println (label (older alice))
+
+(* field punning, in an expression and in a pattern *)
+val name = "Bob"
+val age = 7
+val bob = { name, age }
+val _ = println (label bob)
+
+(* a record type is structural: the field order does not matter *)
+val same : person = { age = 1, name = "z" }
+val _ = println (label same)
+
+(* ---- rows -------------------------------------------------------------- *)
+
+(* A projection asks only for the field it takes, so one function serves
+   every record that has it. *)
+fun getName r = r.name
+val _ = println (getName alice ^ " " ^ getName { name = "Zed", rank = 3 })
+
+fun area r = r.w * r.h
+val _ = println (intToString (area { w = 3, h = 4 } + area { w = 1, h = 1, unit = "cm" }))
+
+(* A record pattern is open too. *)
+fun greet {name} = "hi " ^ name
+val _ = println (greet { name = "Ada", age = 36, city = "London" })
+
+(* The open form, written down, in a val and in a signature. *)
+val widthOf : {w : int | 'r} -> int = fn r => r.w
+val _ = println (intToString (widthOf { w = 9, h = 1, label = "x" }))
+
+sig SIZED
+  val size2 : {w : int, h : int | 'r} -> int
+end
+
+mod Sized : SIZED
+  fun size2 r = r.w * r.h
+end
+
+val _ = println (intToString (Sized.size2 { w = 2, h = 5, color = "red" }))
+
+(* ---- annotations on patterns -------------------------------------------- *)
+
+fun twiceInt (n : int) = n + n
+val _ = println (intToString (twiceInt 21))
+
+val pairShow = fn (n : int, s : string) => s ^ intToString n
+val _ = println (pairShow (1, "n"))
+
+fun firstOf (xs : int list) = case xs of [] => 0 | h :: _ => h
+val _ = println (intToString (firstOf [7, 8]))
+
+val chosen = case (1, "a") of (n : int, t) => t ^ intToString n
+val _ = println chosen
+
+fun originX (p : person) = p.name
+val _ = println (originX alice)
+
+(* ---- modules in a smaller way ---------------------------------------- *)
+
+sig SHOW
+  type t
+  val show : t -> string
+end
+
+mod ShowInt : SHOW where type t = int
+  type t = int
+  val show = intToString
+end
+
+mod Twice (S : SHOW)
+  fun show2 v = S.show v ^ S.show v
+end
+
+mod TwiceInt = Twice(ShowInt)
+val _ = println (TwiceInt.show2 21)
+
+mod Alias = ShowInt
+val _ = println (Alias.show 1)
+
+import ShowInt (show)
+val _ = println (show 2)
+
+(* An operator survives a signature, so a sealed mod can export one. *)
+
+sig VEC
+  type t
+  val make : int -> int -> t
+  val (<+>) : t -> t -> t
+  val render : t -> string
+end
+
+mod V : VEC
+  type t = int * int
+  fun make a b = (a, b)
+  fun (<+>) (a, b) (c, d) = (a + c, b + d)
+  fun render (a, b) = "(" ^ intToString a ^ "," ^ intToString b ^ ")"
+end
+
+import V ((<+>), make, render)
+infixl 6 <+>
+val _ = println (render (make 1 2 <+> make 3 4))

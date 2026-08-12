@@ -1,0 +1,6 @@
+sig S
+  val f : 'a -> 'a
+end
+mod M : S
+  fun f n = n + 1
+end

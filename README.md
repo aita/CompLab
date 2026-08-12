@@ -73,3 +73,22 @@
   walks the operand stack's height over every path before anything runs. There
   is a tree-walking evaluator beside the machine, and every test demands the two
   print the same characters.
+- [`GrisonML/`](GrisonML) — an interpreter for a modern ML dialect, written from
+  a grammar and nothing else: the EBNF is in
+  [`GrisonML/spec/`](GrisonML/spec/grammar.ebnf) and the README says where the
+  implementation had to decide something the file leaves open or states twice.
+  In OCaml, with ocamllex and menhir. Hindley-Milner with levels underneath,
+  and above it the whole module layer the grammar asks for — `sig`, `mod`,
+  parameterized `mod`, `where type` — where a signature is elaborated twice
+  against the module it matches, once with its abstract types realized so that
+  the values can be checked, and once with them fresh so that the rest of the
+  program cannot see through them; a functor keeps its body as syntax and
+  elaborates it again at every application, which is what makes it generative.
+  The two places the grammar contradicts itself are the interesting ones: the
+  operator ladder is written into the productions and also declarable with
+  `infixl`, so the parser has neither and hands over a flat chain; and `+` is
+  written for both `int` and `real` with no way to say so, so a type variable
+  carries a class, which — unlike Standard ML, which must default it to `int` —
+  is quantified, because the primitive dispatches on the value anyway. Records
+  are rows, so `r.x` asks only that `r` have an `x` and the open record type it
+  infers, which the file has no syntax for, gets one.

@@ -1,0 +1,1 @@
+val shiftX : {x : int, x : bool | 'r} -> int = fn r => r.x

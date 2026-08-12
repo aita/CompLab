@@ -1,0 +1,2 @@
+fun addUp a b = a + b
+val x = addUp true false

@@ -1,0 +1,9 @@
+sig COUNTER
+  type t
+  val zero : t
+end
+mod Counter : COUNTER
+  type t = int
+  val zero = 0
+end
+val bad = Counter.zero + 1

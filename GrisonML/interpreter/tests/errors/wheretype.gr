@@ -1,0 +1,6 @@
+sig S
+  type t
+end
+mod M : S where type u = int
+  type t = int
+end

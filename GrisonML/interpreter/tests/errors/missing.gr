@@ -1,0 +1,9 @@
+sig S
+  type t
+  val zero : t
+  val one : t
+end
+mod M : S
+  type t = int
+  val zero = 0
+end

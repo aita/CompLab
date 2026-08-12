@@ -1,0 +1,11 @@
+(executable
+ (name grison)
+ (libraries unix)
+ (flags
+  (:standard -w +a-4-9-40-41-42-44-45-70 -warn-error -a)))
+
+(ocamllex lexer)
+
+(menhir
+ (modules parser)
+ (flags --explain --unused-token LOW))

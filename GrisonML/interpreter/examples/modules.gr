@@ -1,0 +1,137 @@
+(* Signatures, modules, and functors.
+
+   A signature seals: after "mod M : S ... end" the program knows M by S and
+   by nothing else, and a type S leaves abstract is a type nobody outside M
+   can look into.  A parameterized mod is elaborated again at every
+   application, so two applications produce two different abstract types even
+   when the argument is the same. *)
+
+sig ORD
+  type t
+  val compare : t * t -> int
+end
+
+sig SET
+  type elem
+  type t
+  val empty : t
+  val insert : elem -> t -> t
+  val member : elem -> t -> bool
+  val size : t -> int
+  val toList : t -> elem list
+end
+
+(* "where type t = int" makes the abstract t of ORD manifest here, so the
+   outside can still hand IntOrd an ordinary int. *)
+
+mod IntOrd : ORD where type t = int
+  type t = int
+  fun compare (a, b) = if a < b then 0 - 1 else if a == b then 0 else 1
+end
+
+mod StringOrd : ORD where type t = string
+  type t = string
+  fun compare (a, b) = if a < b then 0 - 1 else if a == b then 0 else 1
+end
+
+mod MakeSet (O : ORD) : SET where type elem = O.t
+  type elem = O.t
+  type t = elem list
+
+  val empty = []
+
+  fun member x s =
+    case s of
+      [] => false
+    | h :: rest => if O.compare (x, h) == 0 then true else member x rest
+
+  fun insert x s = if member x s then s else x :: s
+
+  fun size s = List.length s
+
+  fun toList s = s
+end
+
+mod IntSet = MakeSet(IntOrd)
+mod StringSet = MakeSet(StringOrd)
+
+val ints = IntSet.insert 3 (IntSet.insert 1 (IntSet.insert 3 IntSet.empty))
+val _ = println (sepBy " " (List.map intToString (IntSet.toList ints)))
+val _ = println (intToString (IntSet.size ints))
+
+import StringSet as S
+
+val words = List.foldl (fn s => fn w => S.insert w s) S.empty ["pine", "marten", "pine"]
+val _ = println (sepBy " " (S.toList words))
+
+(* The set's own type is abstract: IntSet.t is a list inside MakeSet and
+   nothing at all outside it, so IntSet.toList is the only way out. *)
+
+(* A second application of the same functor to the same argument is a second
+   set type, and the two do not mix. *)
+
+mod AgainSet = MakeSet(IntOrd)
+val _ = println (intToString (AgainSet.size (AgainSet.insert 1 AgainSet.empty)))
+
+(* include splices a signature into a signature, and a module into a module. *)
+
+sig MONOID
+  type t
+  val unit : t
+  val join : t -> t -> t
+end
+
+sig MONOID_WITH_SUM
+  include MONOID
+  val sum : t list -> t
+end
+
+mod Strings : MONOID_WITH_SUM where type t = string
+  type t = string
+  val unit = ""
+  fun join a b = a ^ b
+  fun sum xs = List.foldl join unit xs
+end
+
+val _ = println (Strings.sum ["a", "b", "c"])
+
+mod Arith
+  fun twice n = n * 2
+  fun half n = n / 2
+
+  mod Deep
+    val answer = 42
+  end
+end
+
+mod Widened
+  include Arith
+  fun quadruple n = twice (twice n)
+end
+
+import Widened (quadruple)
+import Arith.Deep as D
+
+val _ = println (intToString (quadruple 3))
+val _ = println (intToString D.answer)
+
+(* A functor of two parameters is applied one at a time, because a module
+   expression applies exactly one: bind the half-applied functor to a name and
+   apply that. *)
+
+sig PAIR
+  type a
+  type b
+  val show : a -> b -> string
+end
+
+mod MakePair (X : ORD) (Y : ORD) : PAIR where type a = X.t where type b = Y.t
+  type a = X.t
+  type b = Y.t
+  fun show x y = "<" ^ intToString (X.compare (x, x)) ^ intToString (Y.compare (y, y)) ^ ">"
+end
+
+mod HalfPair = MakePair(IntOrd)
+mod IntStringPair = HalfPair(StringOrd)
+
+val _ = println (IntStringPair.show 1 "one")

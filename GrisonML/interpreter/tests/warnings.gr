@@ -1,0 +1,27 @@
+(* Coverage is a warning, not an error: the program still runs. *)
+
+type color = Red | Green | Blue
+
+fun partial c = case c of Red => "red" | Green => "green" | Blue => "blue"
+
+val short = fn Red => "red" | Green => "green"
+
+fun heads xs = case xs of [] => 0 | [x] => x
+
+fun repeated n = case n of 1 => "a" | 2 => "b" | 1 => "again" | _ => "z"
+
+fun pairs p = case p of (true, _) => 1 | (false, true) => 2 | (false, false) => 3
+
+val [only] = [1]
+
+fun guarded n =
+  case n of
+    k if k > 0 => "positive"
+  | 0 => "zero"
+  | _ => "negative"
+
+val _ = println (partial Blue)
+val _ = println (repeated 2)
+val _ = println (intToString (pairs (false, false)))
+val _ = println (intToString only)
+val _ = println (guarded 0)

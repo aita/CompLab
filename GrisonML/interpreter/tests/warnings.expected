@@ -1,0 +1,9 @@
+warning: warnings.gr:7:16: this match does not match every value: Blue is not matched
+warning: warnings.gr:9:27: this match does not match every value: _ :: _ :: _ is not matched
+warning: warnings.gr:11:50: this rule cannot be reached
+warning: warnings.gr:15:1: this pattern does not match every value: [] is not matched
+blue
+b
+3
+1
+zero

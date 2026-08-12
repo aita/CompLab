@@ -1,0 +1,42 @@
+(* What the checker infers, printed by "grison -t". *)
+
+fun compose f g = fn x => f (g x)
+fun twice f x = f (f x)
+fun const a = fn _ => a
+fun flip f a b = f b a
+
+fun double n = n + n
+fun between a b c = a < b and b < c
+fun join a b = a ^ b
+
+type 'a tree = Leaf | Node ('a tree * 'a * 'a tree)
+
+fun singleton x = Node (Leaf, x, Leaf)
+fun mirror t = case t of Leaf => Leaf | Node (l, v, r) => Node (mirror r, v, mirror l)
+
+type point = { x : int, y : int }
+
+fun swap {x, y} = { x = y, y = x }
+val getX : point -> int = fn p => p.x
+
+val idAnnotated : 'a -> 'a = fn x => x
+val pairUp : 'a -> 'b -> 'a * 'b = fn a => fn b => (a, b)
+
+val nested = [[1], [2, 3]]
+val mixed = (1, "two", '3', 4.0, true, ())
+val fns = [fn n => n + 1, fn n => n * 2]
+
+sig BOX
+  type t
+  val wrap : int -> t
+  val peek : t -> int
+end
+
+mod Box : BOX
+  type t = int
+  fun wrap n = n
+  fun peek n = n
+end
+
+val boxed = Box.wrap 3
+val peeked = Box.peek boxed

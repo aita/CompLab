@@ -1,0 +1,2 @@
+fun label (n : int) = n
+val _ = println (label "one")
