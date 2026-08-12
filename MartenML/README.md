@@ -27,3 +27,9 @@ it, and [`doc/index.md`](doc/index.md) for a chapter per pass.  Two to start wit
 in Japanese:
 [パイプライン解説](doc/00-pipeline.md) と
 [レジスタ割り付け解説](doc/08-regalloc.md)。
+
+The two grammars on their own, apart from the book, are
+[`spec/grammar.md`](spec/grammar.md): the tokens and an EBNF for each form, the
+precedence ladder, the productions themselves, and where the 36 shift/reduce
+conflicts in the ML form and the 3 in the brace form are -- all of them left to
+the default resolution, and all of them wanting it.
